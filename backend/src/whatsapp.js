@@ -40,6 +40,17 @@ function emit(event, data) {
 }
 
 export function initWhatsApp(db) {
+  // Catch Baileys internal decryption errors (Bad MAC, Signal protocol) to prevent process crash
+  process.on('uncaughtException', (err) => {
+    const msg = err?.message || '';
+    if (msg.includes('Bad MAC') || msg.includes('decryptWhisperMessage') || msg.includes('SignalProtocol')) {
+      console.warn('⚠️ Suppressed Baileys decryption error:', msg);
+      return;
+    }
+    console.error('Uncaught exception:', err);
+    process.exit(1);
+  });
+
   startConnection(db);
   return {
     getState: getWhatsAppState,
