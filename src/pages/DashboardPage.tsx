@@ -9,6 +9,7 @@ const DashboardPage = () => {
 
   const isConnected = status === 'connected';
   const isWaiting = status === 'qr_waiting';
+  const isReconnecting = status === 'reconnecting';
 
   const statCards = [
     { label: 'Messages Sent', value: stats.messagesSent.toLocaleString(), icon: MessageSquare, change: '' },
