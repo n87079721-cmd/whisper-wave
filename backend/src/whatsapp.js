@@ -197,6 +197,8 @@ async function startConnection(db) {
         qrCode = null;
         connectionStatus = 'connected';
         reconnectAttempt = 0;
+        badMacTimestamps = [];
+        repairInProgress = false;
         emit('connected', null);
         console.log('✅ WhatsApp connected');
         syncContacts(db);
