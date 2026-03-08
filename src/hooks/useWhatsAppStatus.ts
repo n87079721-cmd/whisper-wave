@@ -15,7 +15,7 @@ export function useWhatsAppStatus() {
       if (data.stats) setStats(data.stats);
     } catch {
       // Keep previous state on transient backend/network errors to avoid false logout UI
-      setStatus((prev) => (prev === 'connected' ? 'reconnecting' : prev));
+      setStatus((prev) => (prev === 'qr_waiting' ? prev : 'reconnecting'));
     }
   }, []);
 
