@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ChevronDown } from 'lucide-react';
+import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, RefreshCw } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -25,21 +25,58 @@ const ConversationsPage = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    api.getConversations().then(data => {
+  const selectedContactRef = useRef<Contact | null>(null);
+  selectedContactRef.current = selectedContact;
+
+  const refreshMessages = useCallback(async (contactId: string) => {
+    try {
+      const msgs = await api.getMessages(contactId);
+      setMessages(msgs);
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    } catch {}
+  }, []);
+
+  const refreshConversations = useCallback(async () => {
+    try {
+      const data = await api.getConversations();
       setConversations(data);
-      setLoading(false);
-    }).catch(() => setLoading(false));
-    api.getVoices().then(setVoices).catch(() => {});
+    } catch {}
   }, []);
 
   useEffect(() => {
+    refreshConversations().then(() => setLoading(false));
+    api.getVoices().then(setVoices).catch(() => {});
+  }, [refreshConversations]);
+
+  // Real-time: SSE for new messages + poll every 10s as fallback
+  useEffect(() => {
+    let es: EventSource | null = null;
+    try {
+      es = api.createEventSource();
+      es.addEventListener('message', () => {
+        refreshConversations();
+        const current = selectedContactRef.current;
+        if (current) refreshMessages(current.id);
+      });
+      es.onerror = () => {}; // SSE reconnects automatically
+    } catch {}
+
+    const interval = setInterval(() => {
+      refreshConversations();
+      const current = selectedContactRef.current;
+      if (current) refreshMessages(current.id);
+    }, 10000);
+
+    return () => {
+      es?.close();
+      clearInterval(interval);
+    };
+  }, [refreshConversations, refreshMessages]);
+
+  useEffect(() => {
     if (!selectedContact) return;
-    api.getMessages(selectedContact.id).then(msgs => {
-      setMessages(msgs);
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-    }).catch(() => {});
-  }, [selectedContact]);
+    refreshMessages(selectedContact.id);
+  }, [selectedContact, refreshMessages]);
 
   const filtered = conversations.filter(c =>
     (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
