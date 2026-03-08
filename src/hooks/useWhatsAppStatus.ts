@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api';
 
-type ConnectionStatus = 'disconnected' | 'qr_waiting' | 'connected';
+type ConnectionStatus = 'disconnected' | 'qr_waiting' | 'connected' | 'reconnecting';
 
 export function useWhatsAppStatus() {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
