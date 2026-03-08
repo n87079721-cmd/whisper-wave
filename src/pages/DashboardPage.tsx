@@ -90,7 +90,7 @@ const DashboardPage = () => {
           </button>
         </div>
 
-        {!isConnected && (
+        {!isConnected && !isReconnecting && (
           <div className="mt-6 flex justify-center">
             {qr ? (
               <div className="rounded-xl overflow-hidden bg-white p-2">
