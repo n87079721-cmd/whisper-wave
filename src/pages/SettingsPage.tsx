@@ -1,11 +1,69 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Key, RefreshCw, Shield, Power, Eye, EyeOff } from 'lucide-react';
+import { Key, RefreshCw, Shield, Power, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react';
+import { api } from '@/lib/api';
+import { toast } from 'sonner';
 
 const SettingsPage = () => {
   const [elevenLabsKey, setElevenLabsKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [autoEnabled, setAutoEnabled] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [keyExists, setKeyExists] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+
+  useEffect(() => {
+    api.getConfig('elevenlabs_api_key').then(data => {
+      if (data.exists) {
+        setKeyExists(true);
+        setElevenLabsKey(data.value || '');
+      }
+    }).catch(() => {});
+    api.getConfig('automation_enabled').then(data => {
+      setAutoEnabled(data.value === 'true');
+    }).catch(() => {});
+  }, []);
+
+  const handleSaveKey = async () => {
+    if (!elevenLabsKey) return;
+    setSaving(true);
+    try {
+      await api.setConfig('elevenlabs_api_key', elevenLabsKey);
+      setKeyExists(true);
+      toast.success('API key saved');
+    } catch {
+      toast.error('Failed to save key');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReconnect = async () => {
+    setReconnecting(true);
+    try {
+      await api.reconnect();
+      toast.success('Reconnecting...');
+    } catch {
+      toast.error('Failed to reconnect');
+    } finally {
+      setReconnecting(false);
+    }
+  };
+
+  const handleClearSession = async () => {
+    try {
+      await api.clearSession();
+      toast.success('Session cleared');
+    } catch {
+      toast.error('Failed to clear session');
+    }
+  };
+
+  const handleToggleAuto = async () => {
+    const newVal = !autoEnabled;
+    setAutoEnabled(newVal);
+    await api.setConfig('automation_enabled', String(newVal));
+  };
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -26,7 +84,10 @@ const SettingsPage = () => {
           </div>
           <div>
             <h3 className="font-semibold text-foreground text-sm">ElevenLabs API Key</h3>
-            <p className="text-xs text-muted-foreground">Required for voice note generation</p>
+            <p className="text-xs text-muted-foreground">
+              Required for voice note generation.{' '}
+              {keyExists && <span className="text-primary">✓ Key saved</span>}
+            </p>
           </div>
         </div>
         <div className="relative">
@@ -44,8 +105,12 @@ const SettingsPage = () => {
             {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         </div>
-        <button className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">
-          Save Key
+        <button
+          onClick={handleSaveKey}
+          disabled={!elevenLabsKey || saving}
+          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40"
+        >
+          {saving ? 'Saving...' : 'Save Key'}
         </button>
       </motion.div>
 
@@ -66,10 +131,18 @@ const SettingsPage = () => {
           </div>
         </div>
         <div className="flex gap-2">
-          <button className="px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-sm hover:bg-secondary/80 transition-colors">
+          <button
+            onClick={handleReconnect}
+            disabled={reconnecting}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-sm hover:bg-secondary/80 transition-colors disabled:opacity-40"
+          >
+            {reconnecting && <Loader2 className="w-4 h-4 animate-spin" />}
             Reconnect Session
           </button>
-          <button className="px-4 py-2 rounded-lg bg-destructive/15 text-destructive text-sm hover:bg-destructive/25 transition-colors">
+          <button
+            onClick={handleClearSession}
+            className="px-4 py-2 rounded-lg bg-destructive/15 text-destructive text-sm hover:bg-destructive/25 transition-colors"
+          >
             Clear Session
           </button>
         </div>
@@ -93,7 +166,7 @@ const SettingsPage = () => {
             </div>
           </div>
           <button
-            onClick={() => setAutoEnabled(!autoEnabled)}
+            onClick={handleToggleAuto}
             className={`relative w-12 h-6 rounded-full transition-colors ${
               autoEnabled ? 'bg-primary' : 'bg-muted'
             }`}
