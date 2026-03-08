@@ -181,6 +181,32 @@ async function startConnection(db) {
   }
 }
 
+function extractDisconnectStatusCode(error) {
+  try {
+    if (!error) return null;
+    if (error?.output?.statusCode) return error.output.statusCode;
+    return new Boom(error)?.output?.statusCode ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function toIsoTimestamp(value) {
+  if (typeof value === 'bigint') return new Date(Number(value) * 1000).toISOString();
+  if (typeof value === 'number') return new Date(value * 1000).toISOString();
+
+  if (value && typeof value === 'object') {
+    if (typeof value.toNumber === 'function') {
+      return new Date(value.toNumber() * 1000).toISOString();
+    }
+    if (typeof value.low === 'number') {
+      return new Date(value.low * 1000).toISOString();
+    }
+  }
+
+  return new Date().toISOString();
+}
+
 function getOrCreateContact(db, jid, phone, pushName) {
   const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ?').get(jid);
   if (existing) {
