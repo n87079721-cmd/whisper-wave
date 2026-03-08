@@ -381,6 +381,9 @@ async function sendVoiceNote(jid, audioBuffer) {
 async function clearSession(db) {
   connectionStatus = 'disconnected';
   qrCode = null;
+  reconnectAttempt = 0;
+  badMacTimestamps = [];
+  repairInProgress = false;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (sock) {
     try { await sock.logout(); } catch {}
