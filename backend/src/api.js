@@ -55,9 +55,38 @@ export function createApiRouter(db, wa) {
     req.on('close', unsub);
   });
 
-  // ── Voices ────────────────────────────────────────────────
-  router.get('/voices', (req, res) => {
-    res.json(VOICES);
+  // ── Voices (fetch from user's ElevenLabs account) ──────────
+  router.get('/voices', async (req, res) => {
+    try {
+      const apiKey = getConfig(db, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
+      if (!apiKey) {
+        // Fallback to hardcoded list if no API key
+        return res.json(VOICES);
+      }
+
+      const response = await fetch('https://api.elevenlabs.io/v1/voices', {
+        headers: { 'xi-api-key': apiKey },
+      });
+
+      if (!response.ok) {
+        console.error('ElevenLabs voices API error:', response.status);
+        return res.json(VOICES); // fallback
+      }
+
+      const data = await response.json();
+      const voices = (data.voices || []).map(v => ({
+        id: v.voice_id,
+        name: v.name,
+        desc: v.labels?.description || v.labels?.accent || v.category || '',
+        gender: v.labels?.gender || 'neutral',
+        category: v.category || 'unknown',
+      }));
+
+      res.json(voices);
+    } catch (err) {
+      console.error('Failed to fetch voices:', err.message);
+      res.json(VOICES); // fallback
+    }
   });
 
   // ── Contacts ──────────────────────────────────────────────

@@ -103,6 +103,7 @@ export interface Voice {
   name: string;
   desc: string;
   gender: string;
+  category?: string;
 }
 
 export interface Contact {
