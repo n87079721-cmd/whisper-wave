@@ -109,6 +109,7 @@ async function startConnection(db) {
       if (connection === 'open') {
         qrCode = null;
         connectionStatus = 'connected';
+        reconnectAttempt = 0;
         emit('connected', null);
         console.log('✅ WhatsApp connected');
         syncContacts(db);
@@ -120,13 +121,17 @@ async function startConnection(db) {
 
         if (isLoggedOut) {
           connectionStatus = 'disconnected';
+          reconnectAttempt = 0;
           emit('status', { status: 'disconnected' });
           console.log('❌ Logged out. Clear session to reconnect.');
         } else {
           connectionStatus = 'reconnecting';
           emit('status', { status: 'reconnecting' });
-          console.log(`🔄 Connection closed (${statusCode ?? 'unknown'}), auto-reconnecting in 3s...`);
-          reconnectTimer = setTimeout(() => startConnection(db), 3000);
+          const delays = [3000, 5000, 10000];
+          const delay = delays[Math.min(reconnectAttempt, delays.length - 1)];
+          reconnectAttempt++;
+          console.log(`🔄 Connection closed (${statusCode ?? 'unknown'}), reconnecting in ${delay / 1000}s (attempt ${reconnectAttempt})...`);
+          reconnectTimer = setTimeout(() => startConnection(db), delay);
         }
       }
     });
