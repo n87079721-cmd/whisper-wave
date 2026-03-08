@@ -11,6 +11,8 @@ const SettingsPage = () => {
   const [saving, setSaving] = useState(false);
   const [keyExists, setKeyExists] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [testingElevenLabs, setTestingElevenLabs] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
     api.getConfig('elevenlabs_api_key').then(data => {
