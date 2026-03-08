@@ -20,6 +20,7 @@ let qrCode = null;
 let connectionStatus = 'disconnected';
 let eventListeners = [];
 let reconnectTimer = null;
+let isConnecting = false;
 
 export function getWhatsAppState() {
   return { status: connectionStatus, qr: qrCode };
