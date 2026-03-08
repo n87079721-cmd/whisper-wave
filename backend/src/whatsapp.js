@@ -10,6 +10,9 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
+import NodeCache from 'node-cache';
+
+const msgRetryCounterCache = new NodeCache({ stdTTL: 600, checkperiod: 120 });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = path.join(__dirname, '..', 'data', 'auth');
