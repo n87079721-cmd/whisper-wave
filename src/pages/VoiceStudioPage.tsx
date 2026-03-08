@@ -6,22 +6,36 @@ import { toast } from 'sonner';
 
 const MODELS = [
   { id: 'eleven_multilingual_v2', name: 'Multilingual v2', desc: 'Highest quality, 29 languages' },
-  { id: 'eleven_v3', name: 'v3 (Gina-style)', desc: 'Latest model with speech tags & emotions' },
-  { id: 'eleven_turbo_v2_5', name: 'Turbo v2.5', desc: 'Low latency, high quality' },
+  { id: 'eleven_v3', name: 'v3 (Gina-style)', desc: 'Latest model with speech tags & expressions' },
   { id: 'eleven_monolingual_v1', name: 'English v1', desc: 'English only, legacy' },
 ];
 
 const SPEECH_TAGS = [
-  { tag: '[happy]', desc: 'Joyful tone' },
-  { tag: '[sad]', desc: 'Melancholy tone' },
-  { tag: '[angry]', desc: 'Frustrated tone' },
-  { tag: '[excited]', desc: 'High energy' },
-  { tag: '[whisper]', desc: 'Soft whisper' },
-  { tag: '[calm]', desc: 'Relaxed, soothing' },
-  { tag: '[serious]', desc: 'Grave tone' },
-  { tag: '[sarcastic]', desc: 'Ironic delivery' },
-  { tag: '...', desc: 'Long pause' },
-  { tag: '—', desc: 'Short pause' },
+  { tag: '[laughing]', desc: 'Laughing while talking', emoji: '😂' },
+  { tag: '[chuckling]', desc: 'Light chuckle', emoji: '🤭' },
+  { tag: '[sighing]', desc: 'Deep sigh', emoji: '😮‍💨' },
+  { tag: '[gasping]', desc: 'Surprised gasp', emoji: '😱' },
+  { tag: '[crying]', desc: 'Tearful voice', emoji: '😢' },
+  { tag: '[whispering]', desc: 'Quiet whisper', emoji: '🤫' },
+  { tag: '[shouting]', desc: 'Loud and projecting', emoji: '📢' },
+  { tag: '[clearing throat]', desc: 'Ahem moment', emoji: '😤' },
+  { tag: '[sniffling]', desc: 'Sniffling nose', emoji: '🤧' },
+  { tag: '[yawning]', desc: 'Tired yawn', emoji: '🥱' },
+  { tag: '...', desc: 'Long pause', emoji: '⏸' },
+  { tag: '—', desc: 'Short pause', emoji: '·' },
+];
+
+const BACKGROUND_SOUNDS = [
+  { id: 'none', name: 'None', emoji: '🔇' },
+  { id: 'cafe', name: 'Café', emoji: '☕', desc: 'Coffee shop ambience' },
+  { id: 'rain', name: 'Rain', emoji: '🌧️', desc: 'Gentle rain sounds' },
+  { id: 'street', name: 'Street', emoji: '🏙️', desc: 'City street noise' },
+  { id: 'nature', name: 'Nature', emoji: '🌿', desc: 'Birds & wind' },
+  { id: 'office', name: 'Office', emoji: '🏢', desc: 'Keyboard & murmurs' },
+  { id: 'car', name: 'Driving', emoji: '🚗', desc: 'Car interior sounds' },
+  { id: 'crowd', name: 'Crowd', emoji: '👥', desc: 'Busy crowd chatter' },
+  { id: 'ocean', name: 'Ocean', emoji: '🌊', desc: 'Waves & seagulls' },
+  { id: 'fireplace', name: 'Fireplace', emoji: '🔥', desc: 'Crackling fire' },
 ];
 
 const VoiceStudioPage = () => {
