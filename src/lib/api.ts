@@ -66,7 +66,14 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  if (!getApiUrl()) {
+    throw new Error('Backend URL not configured. Go to Settings → Backend URL to set it.');
+  }
   const res = await fetch(toUrl(path), init);
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('text/html')) {
+    throw new Error('Backend unreachable — got HTML instead of JSON. Check your Backend URL in Settings.');
+  }
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
     try {
