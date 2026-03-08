@@ -48,109 +48,137 @@ export function initWhatsApp(db) {
 }
 
 async function startConnection(db) {
+  if (isConnecting) return;
+  isConnecting = true;
+
   // Clear any pending reconnect
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 
-  if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
+  // Ensure a single active socket instance
+  if (sock) {
+    try { sock.ev.removeAllListeners('connection.update'); } catch {}
+    try { sock.ev.removeAllListeners('messages.upsert'); } catch {}
+    try { sock.ev.removeAllListeners('contacts.update'); } catch {}
+    try { sock.ev.removeAllListeners('creds.update'); } catch {}
+    try { sock.end?.(undefined); } catch {}
+    sock = null;
+  }
 
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  const { version } = await fetchLatestBaileysVersion();
+  try {
+    if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-  sock = makeWASocket({
-    version,
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
-    },
-    logger,
-    printQRInTerminal: true,
-    generateHighQualityLinkPreview: false,
-    keepAliveIntervalMs: 30000,
-  });
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    const { version } = await fetchLatestBaileysVersion();
 
-  sock.ev.on('creds.update', saveCreds);
+    sock = makeWASocket({
+      version,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
+      logger,
+      printQRInTerminal: true,
+      generateHighQualityLinkPreview: false,
+      keepAliveIntervalMs: 30000,
+    });
 
-  sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
-    if (qr) {
-      qrCode = qr;
-      connectionStatus = 'qr_waiting';
-      emit('qr', qr);
-    }
+    sock.ev.on('creds.update', saveCreds);
 
-    if (connection === 'open') {
-      qrCode = null;
-      connectionStatus = 'connected';
-      emit('connected', null);
-      console.log('✅ WhatsApp connected');
-      syncContacts(db);
-    }
-
-    if (connection === 'close') {
-      const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
-      if (reason === DisconnectReason.loggedOut) {
-        connectionStatus = 'disconnected';
-        emit('status', { status: 'disconnected' });
-        console.log('❌ Logged out. Clear session to reconnect.');
-      } else {
-        // Transient disconnect — keep showing connected while we reconnect
-        connectionStatus = 'reconnecting';
-        emit('status', { status: 'reconnecting' });
-        console.log('🔄 Auto-reconnecting in 3s...');
-        reconnectTimer = setTimeout(() => startConnection(db), 3000);
+    sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
+      if (qr) {
+        qrCode = qr;
+        connectionStatus = 'qr_waiting';
+        emit('qr', qr);
       }
-    }
-  });
 
-  // Listen for incoming messages
-  sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
-    if (type !== 'notify') return;
-    for (const msg of msgs) {
-      if (!msg.message || msg.key.fromMe) continue;
-      const jid = msg.key.remoteJid;
-      if (!jid || jid === 'status@broadcast') continue;
+      if (connection === 'open') {
+        qrCode = null;
+        connectionStatus = 'connected';
+        emit('connected', null);
+        console.log('✅ WhatsApp connected');
+        syncContacts(db);
+      }
 
-      // Store full international number with +
-      const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
-      const phone = '+' + rawNumber;
-      const pushName = msg.pushName || null;
+      if (connection === 'close') {
+        const statusCode = extractDisconnectStatusCode(lastDisconnect?.error);
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.badSession;
 
-      let contactId = getOrCreateContact(db, jid, phone, pushName);
-
-      const content = msg.message.conversation
-        || msg.message.extendedTextMessage?.text
-        || '';
-      const isVoice = !!msg.message.audioMessage;
-
-      const msgId = uuid();
-      db.prepare(`
-        INSERT OR IGNORE INTO messages (id, contact_id, jid, content, type, direction, timestamp, status, duration)
-        VALUES (?, ?, ?, ?, ?, 'received', ?, 'delivered', ?)
-      `).run(
-        msgId, contactId, jid, content,
-        isVoice ? 'voice' : 'text',
-        new Date((msg.messageTimestamp || Date.now() / 1000) * 1000).toISOString(),
-        msg.message.audioMessage?.seconds || null
-      );
-
-      db.prepare(`INSERT INTO stats (event, data) VALUES ('message_received', ?)`).run(JSON.stringify({ contactId }));
-      emit('message', { contactId, msgId });
-    }
-  });
-
-  // Sync contacts when they update (push names)
-  sock.ev.on('contacts.update', (updates) => {
-    for (const update of updates) {
-      if (update.id && update.notify) {
-        const rawNumber = update.id.replace('@s.whatsapp.net', '').replace('@g.us', '');
-        const phone = '+' + rawNumber;
-        const existing = db.prepare('SELECT id FROM contacts WHERE jid = ?').get(update.id);
-        if (existing) {
-          db.prepare('UPDATE contacts SET name = ?, phone = ?, updated_at = datetime("now") WHERE id = ?')
-            .run(update.notify, phone, existing.id);
+        if (isLoggedOut) {
+          connectionStatus = 'disconnected';
+          emit('status', { status: 'disconnected' });
+          console.log('❌ Logged out. Clear session to reconnect.');
+        } else {
+          connectionStatus = 'reconnecting';
+          emit('status', { status: 'reconnecting' });
+          console.log(`🔄 Connection closed (${statusCode ?? 'unknown'}), auto-reconnecting in 3s...`);
+          reconnectTimer = setTimeout(() => startConnection(db), 3000);
         }
       }
-    }
-  });
+    });
+
+    // Listen for incoming messages
+    sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
+      if (type !== 'notify') return;
+
+      for (const msg of msgs) {
+        try {
+          if (!msg.message || msg.key.fromMe) continue;
+          const jid = msg.key.remoteJid;
+          if (!jid || jid === 'status@broadcast') continue;
+
+          // Store full international number with +
+          const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+          const phone = '+' + rawNumber;
+          const pushName = msg.pushName || null;
+
+          const contactId = getOrCreateContact(db, jid, phone, pushName);
+
+          const content = msg.message.conversation
+            || msg.message.extendedTextMessage?.text
+            || '';
+          const isVoice = !!msg.message.audioMessage;
+
+          const msgId = uuid();
+          db.prepare(`
+            INSERT OR IGNORE INTO messages (id, contact_id, jid, content, type, direction, timestamp, status, duration)
+            VALUES (?, ?, ?, ?, ?, 'received', ?, 'delivered', ?)
+          `).run(
+            msgId, contactId, jid, content,
+            isVoice ? 'voice' : 'text',
+            toIsoTimestamp(msg.messageTimestamp),
+            msg.message.audioMessage?.seconds || null
+          );
+
+          db.prepare(`INSERT INTO stats (event, data) VALUES ('message_received', ?)`).run(JSON.stringify({ contactId }));
+          emit('message', { contactId, msgId });
+        } catch (err) {
+          console.error('messages.upsert handler error:', err?.message || err);
+        }
+      }
+    });
+
+    // Sync contacts when they update (push names)
+    sock.ev.on('contacts.update', (updates) => {
+      for (const update of updates) {
+        if (update.id && update.notify) {
+          const rawNumber = update.id.replace('@s.whatsapp.net', '').replace('@g.us', '');
+          const phone = '+' + rawNumber;
+          const existing = db.prepare('SELECT id FROM contacts WHERE jid = ?').get(update.id);
+          if (existing) {
+            db.prepare('UPDATE contacts SET name = ?, phone = ?, updated_at = datetime("now") WHERE id = ?')
+              .run(update.notify, phone, existing.id);
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.error('startConnection error:', err?.message || err);
+    connectionStatus = 'reconnecting';
+    emit('status', { status: 'reconnecting' });
+    reconnectTimer = setTimeout(() => startConnection(db), 3000);
+  } finally {
+    isConnecting = false;
+  }
 }
 
 function getOrCreateContact(db, jid, phone, pushName) {
