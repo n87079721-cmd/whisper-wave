@@ -55,13 +55,12 @@ export function createApiRouter(db, wa) {
     req.on('close', unsub);
   });
 
-  // ── Voices (fetch from user's ElevenLabs account) ──────────
+  // ── ElevenLabs ───────────────────────────────────────────
   router.get('/voices', async (req, res) => {
     try {
       const apiKey = getConfig(db, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
       if (!apiKey) {
-        // Fallback to hardcoded list if no API key
-        return res.json(VOICES);
+        return res.status(400).json({ error: 'ElevenLabs API key not configured. Set it in Settings.' });
       }
 
       const response = await fetch('https://api.elevenlabs.io/v1/voices', {
@@ -69,8 +68,8 @@ export function createApiRouter(db, wa) {
       });
 
       if (!response.ok) {
-        console.error('ElevenLabs voices API error:', response.status);
-        return res.json(VOICES); // fallback
+        const details = await response.text();
+        return res.status(response.status).json({ error: `ElevenLabs voices request failed: ${details}` });
       }
 
       const data = await response.json();
@@ -85,7 +84,38 @@ export function createApiRouter(db, wa) {
       res.json(voices);
     } catch (err) {
       console.error('Failed to fetch voices:', err.message);
-      res.json(VOICES); // fallback
+      res.status(500).json({ error: 'Failed to load voices from ElevenLabs' });
+    }
+  });
+
+  router.get('/elevenlabs/test', async (req, res) => {
+    try {
+      const apiKey = getConfig(db, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
+      if (!apiKey) {
+        return res.status(400).json({ error: 'ElevenLabs API key not configured. Set it in Settings.' });
+      }
+
+      const response = await fetch('https://api.elevenlabs.io/v1/voices', {
+        headers: { 'xi-api-key': apiKey },
+      });
+
+      if (!response.ok) {
+        const details = await response.text();
+        return res.status(response.status).json({ error: `ElevenLabs auth/test failed: ${details}` });
+      }
+
+      const data = await response.json();
+      const voices = data.voices || [];
+      const generatedVoices = voices.filter((v) => ['generated', 'cloned', 'professional'].includes(v.category)).length;
+
+      res.json({
+        success: true,
+        totalVoices: voices.length,
+        generatedVoices,
+        supportsV3Prompts: true,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'ElevenLabs test failed' });
     }
   });
 
