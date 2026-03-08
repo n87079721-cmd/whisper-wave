@@ -10,6 +10,9 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
+import NodeCache from 'node-cache';
+
+const msgRetryCounterCache = new NodeCache({ stdTTL: 600, checkperiod: 120 });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = path.join(__dirname, '..', 'data', 'auth');
@@ -21,6 +24,7 @@ let connectionStatus = 'disconnected';
 let eventListeners = [];
 let reconnectTimer = null;
 let isConnecting = false;
+let reconnectAttempt = 0;
 
 export function getWhatsAppState() {
   return { status: connectionStatus, qr: qrCode };
@@ -36,6 +40,17 @@ function emit(event, data) {
 }
 
 export function initWhatsApp(db) {
+  // Catch Baileys internal decryption errors (Bad MAC, Signal protocol) to prevent process crash
+  process.on('uncaughtException', (err) => {
+    const msg = err?.message || '';
+    if (msg.includes('Bad MAC') || msg.includes('decryptWhisperMessage') || msg.includes('SignalProtocol')) {
+      console.warn('⚠️ Suppressed Baileys decryption error:', msg);
+      return;
+    }
+    console.error('Uncaught exception:', err);
+    process.exit(1);
+  });
+
   startConnection(db);
   return {
     getState: getWhatsAppState,
@@ -80,6 +95,17 @@ async function startConnection(db) {
       printQRInTerminal: true,
       generateHighQualityLinkPreview: false,
       keepAliveIntervalMs: 30000,
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
+      msgRetryCounterCache,
+      getMessage: async (key) => {
+        // Baileys calls this to retry decryption of messages with Bad MAC errors
+        try {
+          const row = db.prepare('SELECT content FROM messages WHERE id = ?').get(key.id);
+          if (row?.content) return { conversation: row.content };
+        } catch {}
+        return undefined;
+      },
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -94,6 +120,7 @@ async function startConnection(db) {
       if (connection === 'open') {
         qrCode = null;
         connectionStatus = 'connected';
+        reconnectAttempt = 0;
         emit('connected', null);
         console.log('✅ WhatsApp connected');
         syncContacts(db);
@@ -105,13 +132,17 @@ async function startConnection(db) {
 
         if (isLoggedOut) {
           connectionStatus = 'disconnected';
+          reconnectAttempt = 0;
           emit('status', { status: 'disconnected' });
           console.log('❌ Logged out. Clear session to reconnect.');
         } else {
           connectionStatus = 'reconnecting';
           emit('status', { status: 'reconnecting' });
-          console.log(`🔄 Connection closed (${statusCode ?? 'unknown'}), auto-reconnecting in 3s...`);
-          reconnectTimer = setTimeout(() => startConnection(db), 3000);
+          const delays = [3000, 5000, 10000];
+          const delay = delays[Math.min(reconnectAttempt, delays.length - 1)];
+          reconnectAttempt++;
+          console.log(`🔄 Connection closed (${statusCode ?? 'unknown'}), reconnecting in ${delay / 1000}s (attempt ${reconnectAttempt})...`);
+          reconnectTimer = setTimeout(() => startConnection(db), delay);
         }
       }
     });
