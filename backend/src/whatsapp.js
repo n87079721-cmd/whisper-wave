@@ -433,31 +433,31 @@ function toIsoTimestamp(value) {
   return new Date().toISOString();
 }
 
-function getOrCreateContact(db, jid, phone, pushName) {
+function getOrCreateContact(db, jid, phone, pushName, isGroup = false) {
   const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ?').get(jid);
   if (existing) {
     // Update push name and phone if we have better data
     if (pushName && (!existing.name || existing.name === phone)) {
-      db.prepare('UPDATE contacts SET name = ?, phone = ?, updated_at = datetime("now") WHERE id = ?')
-        .run(pushName, phone, existing.id);
+      db.prepare('UPDATE contacts SET name = ?, phone = ?, is_group = ?, updated_at = datetime("now") WHERE id = ?')
+        .run(pushName, phone, isGroup ? 1 : 0, existing.id);
     } else if (existing.name !== phone) {
-      // Ensure phone is always in full format
-      db.prepare('UPDATE contacts SET phone = ?, updated_at = datetime("now") WHERE id = ?')
-        .run(phone, existing.id);
+      db.prepare('UPDATE contacts SET phone = ?, is_group = ?, updated_at = datetime("now") WHERE id = ?')
+        .run(phone, isGroup ? 1 : 0, existing.id);
     }
     return existing.id;
   }
 
   const id = uuid();
   db.prepare(`
-    INSERT INTO contacts (id, jid, name, phone) VALUES (?, ?, ?, ?)
-  `).run(id, jid, pushName || phone, phone);
+    INSERT INTO contacts (id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?)
+  `).run(id, jid, pushName || phone, phone, isGroup ? 1 : 0);
   return id;
 }
 
 async function syncContacts(db) {
   try {
-    console.log('📇 Contact sync initiated');
+    console.log('📇 Contact sync initiated — waiting for history events from Baileys');
+    // Actual sync happens via messaging-history.set, contacts.upsert, and contacts.update events
   } catch (err) {
     console.error('Contact sync error:', err.message);
   }
