@@ -1,19 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Mic, Play, Square, Send, Volume2, Loader2, ChevronDown } from 'lucide-react';
-import { api, type Contact } from '@/lib/api';
+import { api, type Contact, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 
-const voices = [
-  { id: 'JBFqnCBsd6RMkjVDRZzb', name: 'George', desc: 'Warm, authoritative' },
-  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah', desc: 'Friendly, natural' },
-  { id: 'TX3LPaxmHKxFdv7VOQHJ', name: 'Liam', desc: 'Calm, professional' },
-  { id: 'pFZP5JQG7iQjIQuC4Bku', name: 'Lily', desc: 'Gentle, soothing' },
+const MODELS = [
+  { id: 'eleven_multilingual_v2', name: 'Multilingual v2', desc: 'Highest quality, 29 languages' },
+  { id: 'eleven_turbo_v2_5', name: 'Turbo v2.5', desc: 'Low latency, high quality' },
+  { id: 'eleven_monolingual_v1', name: 'English v1', desc: 'English only, legacy' },
 ];
 
 const VoiceStudioPage = () => {
   const [text, setText] = useState('');
-  const [selectedVoice, setSelectedVoice] = useState(voices[0].id);
+  const [voices, setVoices] = useState<Voice[]>([]);
+  const [selectedVoice, setSelectedVoice] = useState('JBFqnCBsd6RMkjVDRZzb');
+  const [selectedModel, setSelectedModel] = useState('eleven_multilingual_v2');
   const [isGenerating, setIsGenerating] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -25,6 +26,10 @@ const VoiceStudioPage = () => {
 
   useEffect(() => {
     api.getContacts().then(setContacts).catch(() => {});
+    api.getVoices().then(v => {
+      setVoices(v);
+      if (v.length > 0) setSelectedVoice(v[0].id);
+    }).catch(() => {});
   }, []);
 
   const handleGenerate = async () => {
@@ -32,7 +37,7 @@ const VoiceStudioPage = () => {
     setIsGenerating(true);
     setAudioUrl(null);
     try {
-      const blob = await api.previewVoice(text, selectedVoice);
+      const blob = await api.previewVoice(text, selectedVoice, selectedModel);
       const url = URL.createObjectURL(blob);
       setAudioUrl(url);
     } catch (err: any) {
@@ -57,9 +62,9 @@ const VoiceStudioPage = () => {
     if (!selectedContact || !text) return;
     setSending(true);
     try {
-      const res = await api.sendVoice(selectedContact, text, selectedVoice);
+      const res = await api.sendVoice(selectedContact, text, selectedVoice, selectedModel);
       if (res.error) throw new Error(res.error);
-      toast.success('Voice note sent!');
+      toast.success('Voice note sent as PTT!');
     } catch (err: any) {
       toast.error(err.message || 'Failed to send voice note');
     } finally {
@@ -68,6 +73,7 @@ const VoiceStudioPage = () => {
   };
 
   const selected = contacts.find(c => c.id === selectedContact);
+  const currentVoice = voices.find(v => v.id === selectedVoice);
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -81,28 +87,49 @@ const VoiceStudioPage = () => {
         animate={{ opacity: 1, y: 0 }}
         className="glass rounded-xl p-6 space-y-5"
       >
+        {/* Model selection */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">Model</label>
+          <div className="flex gap-2 flex-wrap">
+            {MODELS.map(model => (
+              <button
+                key={model.id}
+                onClick={() => setSelectedModel(model.id)}
+                className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                  selectedModel === model.id
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                }`}
+                title={model.desc}
+              >
+                {model.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Voice selection */}
         <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">Voice</label>
-          <div className="grid grid-cols-2 gap-2">
+          <label className="text-sm font-medium text-foreground">Voice Avatar</label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
             {voices.map(voice => (
               <button
                 key={voice.id}
                 onClick={() => setSelectedVoice(voice.id)}
-                className={`flex items-center gap-3 p-3 rounded-lg text-left transition-all ${
+                className={`flex items-center gap-2 p-2.5 rounded-lg text-left transition-all ${
                   selectedVoice === voice.id
                     ? 'bg-primary/15 border border-primary/30'
                     : 'bg-secondary border border-transparent hover:border-border'
                 }`}
               >
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs ${
                   selectedVoice === voice.id ? 'bg-primary/20' : 'bg-muted'
                 }`}>
-                  <Volume2 className={`w-4 h-4 ${selectedVoice === voice.id ? 'text-primary' : 'text-muted-foreground'}`} />
+                  {voice.gender === 'male' ? '♂' : voice.gender === 'female' ? '♀' : '◎'}
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-foreground">{voice.name}</p>
-                  <p className="text-xs text-muted-foreground">{voice.desc}</p>
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-foreground truncate">{voice.name}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{voice.desc}</p>
                 </div>
               </button>
             ))}
@@ -176,6 +203,10 @@ const VoiceStudioPage = () => {
               onEnded={() => setIsPlaying(false)}
             />
 
+            <p className="text-xs text-muted-foreground">
+              ✓ Will be sent as OGG/Opus PTT voice note with waveform display
+            </p>
+
             {/* Contact selector for sending */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-foreground">Send to</label>
@@ -185,7 +216,7 @@ const VoiceStudioPage = () => {
                   className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground"
                 >
                   <span className={selected ? 'text-foreground' : 'text-muted-foreground'}>
-                    {selected ? `${selected.name || selected.phone}` : 'Select recipient'}
+                    {selected ? `${selected.name || selected.phone} (${selected.phone})` : 'Select recipient'}
                   </span>
                   <ChevronDown className="w-4 h-4 text-muted-foreground" />
                 </button>
@@ -197,7 +228,7 @@ const VoiceStudioPage = () => {
                         onClick={() => { setSelectedContact(c.id); setShowContacts(false); }}
                         className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-secondary transition-colors"
                       >
-                        {c.name || c.phone}
+                        {c.name || c.phone} <span className="text-muted-foreground text-xs">({c.phone})</span>
                       </button>
                     ))}
                   </div>

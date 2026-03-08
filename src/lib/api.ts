@@ -12,9 +12,14 @@ export const api = {
     return res.json();
   },
 
-  // SSE for real-time updates
   createEventSource() {
     return new EventSource(`${API_URL}/api/events`);
+  },
+
+  // Voices
+  async getVoices(): Promise<Voice[]> {
+    const res = await fetch(`${API_URL}/api/voices`);
+    return res.json();
   },
 
   // Contacts
@@ -44,20 +49,20 @@ export const api = {
     return res.json();
   },
 
-  async sendVoice(contactId: string, text: string, voiceId?: string) {
+  async sendVoice(contactId: string, text: string, voiceId?: string, modelId?: string) {
     const res = await fetch(`${API_URL}/api/send/voice`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contactId, text, voiceId }),
+      body: JSON.stringify({ contactId, text, voiceId, modelId }),
     });
     return res.json();
   },
 
-  async previewVoice(text: string, voiceId?: string): Promise<Blob> {
+  async previewVoice(text: string, voiceId?: string, modelId?: string): Promise<Blob> {
     const res = await fetch(`${API_URL}/api/voice/preview`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voiceId }),
+      body: JSON.stringify({ text, voiceId, modelId }),
     });
     if (!res.ok) {
       const err = await res.json();
@@ -92,7 +97,14 @@ export const api = {
   },
 };
 
-// Types from backend
+// Types
+export interface Voice {
+  id: string;
+  name: string;
+  desc: string;
+  gender: string;
+}
+
 export interface Contact {
   id: string;
   jid: string;
@@ -103,7 +115,6 @@ export interface Contact {
   last_seen: string | null;
   updated_at: string;
   message_count?: number;
-  // For conversations
   last_message?: string;
   last_type?: string;
   last_timestamp?: string;

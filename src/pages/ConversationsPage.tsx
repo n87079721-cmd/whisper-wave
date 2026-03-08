@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Search, Mic, Check, CheckCheck } from 'lucide-react';
-import { api, type Contact, type Message } from '@/lib/api';
+import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ChevronDown } from 'lucide-react';
+import { api, type Contact, type Message, type Voice } from '@/lib/api';
+import { toast } from 'sonner';
 
 const ConversationsPage = () => {
   const [conversations, setConversations] = useState<Contact[]>([]);
@@ -10,20 +11,39 @@ const ConversationsPage = () => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // Reply state
+  const [replyText, setReplyText] = useState('');
+  const [replyMode, setReplyMode] = useState<'text' | 'voice'>('text');
+  const [sending, setSending] = useState(false);
+  const [voices, setVoices] = useState<Voice[]>([]);
+  const [selectedVoice, setSelectedVoice] = useState('JBFqnCBsd6RMkjVDRZzb');
+
+  // Voice preview
+  const [previewing, setPreviewing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     api.getConversations().then(data => {
       setConversations(data);
       setLoading(false);
     }).catch(() => setLoading(false));
+    api.getVoices().then(setVoices).catch(() => {});
   }, []);
 
   useEffect(() => {
     if (!selectedContact) return;
-    api.getMessages(selectedContact.id).then(setMessages).catch(() => {});
+    api.getMessages(selectedContact.id).then(msgs => {
+      setMessages(msgs);
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    }).catch(() => {});
   }, [selectedContact]);
 
   const filtered = conversations.filter(c =>
-    (c.name || '').toLowerCase().includes(search.toLowerCase())
+    (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (c.phone || '').includes(search)
   );
 
   const formatTime = (ts: string) => {
@@ -36,6 +56,57 @@ const ConversationsPage = () => {
     if (status === 'read') return <CheckCheck className="w-3.5 h-3.5 text-primary" />;
     if (status === 'delivered') return <CheckCheck className="w-3.5 h-3.5 text-muted-foreground" />;
     return <Check className="w-3.5 h-3.5 text-muted-foreground" />;
+  };
+
+  const handleSendReply = async () => {
+    if (!selectedContact || !replyText.trim()) return;
+    setSending(true);
+    try {
+      if (replyMode === 'text') {
+        const res = await api.sendText(selectedContact.id, replyText);
+        if (res.error) throw new Error(res.error);
+        toast.success('Message sent');
+      } else {
+        const res = await api.sendVoice(selectedContact.id, replyText, selectedVoice);
+        if (res.error) throw new Error(res.error);
+        toast.success('Voice note sent');
+      }
+      setReplyText('');
+      setPreviewUrl(null);
+      // Refresh messages
+      const msgs = await api.getMessages(selectedContact.id);
+      setMessages(msgs);
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handlePreviewVoice = async () => {
+    if (!replyText.trim()) return;
+    setPreviewing(true);
+    try {
+      const blob = await api.previewVoice(replyText, selectedVoice);
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl(url);
+    } catch (err: any) {
+      toast.error(err.message || 'Preview failed');
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play();
+      setIsPlaying(true);
+    }
   };
 
   return (
@@ -85,6 +156,7 @@ const ConversationsPage = () => {
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
                         {contact.last_type === 'voice' ? '🎤 Voice note' : contact.last_message}
                       </p>
+                      <p className="text-[10px] text-muted-foreground/60">{contact.phone}</p>
                     </div>
                   </button>
                 );
@@ -106,6 +178,8 @@ const ConversationsPage = () => {
                   <p className="text-xs text-muted-foreground">{selectedContact.phone}</p>
                 </div>
               </div>
+
+              {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-2">
                 {messages.map((msg, i) => (
                   <motion.div
@@ -148,6 +222,88 @@ const ConversationsPage = () => {
                     </div>
                   </motion.div>
                 ))}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Reply box */}
+              <div className="border-t border-border p-3 space-y-2">
+                {/* Voice preview */}
+                {previewUrl && (
+                  <div className="flex items-center gap-2 bg-secondary rounded-lg p-2">
+                    <button
+                      onClick={togglePlay}
+                      className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0"
+                    >
+                      {isPlaying ? <Square className="w-3 h-3 text-primary-foreground" /> : <Play className="w-3 h-3 text-primary-foreground ml-0.5" />}
+                    </button>
+                    <div className="flex-1 flex gap-0.5 items-center">
+                      {Array.from({ length: 30 }).map((_, i) => (
+                        <div key={i} className="w-0.5 bg-primary/50 rounded-full" style={{ height: `${Math.random() * 14 + 4}px` }} />
+                      ))}
+                    </div>
+                    <audio ref={audioRef} src={previewUrl} onEnded={() => setIsPlaying(false)} />
+                    <button onClick={() => setPreviewUrl(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+                  </div>
+                )}
+
+                {/* Mode toggle + voice selector */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setReplyMode('text'); setPreviewUrl(null); }}
+                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                      replyMode === 'text' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
+                    }`}
+                  >
+                    Text
+                  </button>
+                  <button
+                    onClick={() => setReplyMode('voice')}
+                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                      replyMode === 'voice' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
+                    }`}
+                  >
+                    🎤 Voice
+                  </button>
+                  {replyMode === 'voice' && voices.length > 0 && (
+                    <select
+                      value={selectedVoice}
+                      onChange={(e) => setSelectedVoice(e.target.value)}
+                      className="ml-auto px-2 py-1 rounded bg-secondary border border-border text-xs text-foreground"
+                    >
+                      {voices.map(v => (
+                        <option key={v.id} value={v.id}>{v.name}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* Input + send */}
+                <div className="flex gap-2">
+                  <input
+                    value={replyText}
+                    onChange={(e) => { setReplyText(e.target.value); setPreviewUrl(null); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
+                    placeholder={replyMode === 'voice' ? 'Type text to convert to voice note...' : 'Type a message...'}
+                    className="flex-1 px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  />
+                  {replyMode === 'voice' && (
+                    <button
+                      onClick={handlePreviewVoice}
+                      disabled={!replyText.trim() || previewing}
+                      className="px-3 py-2 rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors disabled:opacity-40"
+                      title="Preview voice"
+                    >
+                      {previewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Volume2 className="w-4 h-4" />}
+                    </button>
+                  )}
+                  <button
+                    onClick={handleSendReply}
+                    disabled={!replyText.trim() || sending}
+                    className="px-3 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
+                  >
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
             </>
           ) : (

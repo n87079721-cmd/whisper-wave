@@ -1,7 +1,7 @@
 import express from 'express';
 import { v4 as uuid } from 'uuid';
 import { getWhatsAppState, onWhatsAppEvent } from './whatsapp.js';
-import { generateVoiceNote } from './elevenlabs.js';
+import { generateVoiceNote, generatePreviewAudio, VOICES } from './elevenlabs.js';
 import QRCode from 'qrcode';
 
 export function createApiRouter(db, wa) {
@@ -35,7 +35,6 @@ export function createApiRouter(db, wa) {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    // Send current state immediately
     const state = wa.getState();
     send('status', { status: state.status });
 
@@ -48,10 +47,17 @@ export function createApiRouter(db, wa) {
         send('status', { status: 'connected' });
       } else if (event === 'message') {
         send('message', data);
+      } else if (event === 'status') {
+        send('status', data);
       }
     });
 
     req.on('close', unsub);
+  });
+
+  // ── Voices ────────────────────────────────────────────────
+  router.get('/voices', (req, res) => {
+    res.json(VOICES);
   });
 
   // ── Contacts ──────────────────────────────────────────────
@@ -75,7 +81,6 @@ export function createApiRouter(db, wa) {
   });
 
   router.get('/conversations', (req, res) => {
-    // Get contacts with their latest message
     const conversations = db.prepare(`
       SELECT c.*, m.content as last_message, m.type as last_type, m.timestamp as last_timestamp
       FROM contacts c
@@ -88,7 +93,7 @@ export function createApiRouter(db, wa) {
     res.json(conversations);
   });
 
-  // ── Send Message ──────────────────────────────────────────
+  // ── Send Text ─────────────────────────────────────────────
   router.post('/send/text', async (req, res) => {
     try {
       const { contactId, jid, message } = req.body;
@@ -105,7 +110,6 @@ export function createApiRouter(db, wa) {
 
       const sent = await wa.sendTextMessage(targetJid, message);
 
-      // Log message
       const msgId = uuid();
       const contactRow = db.prepare('SELECT id FROM contacts WHERE jid = ?').get(targetJid);
       if (contactRow) {
@@ -123,15 +127,15 @@ export function createApiRouter(db, wa) {
     }
   });
 
-  // ── Voice Note ────────────────────────────────────────────
+  // ── Send Voice Note (PTT, no caption) ─────────────────────
   router.post('/send/voice', async (req, res) => {
     try {
-      const { contactId, text, voiceId } = req.body;
+      const { contactId, text, voiceId, modelId } = req.body;
       if (!contactId || !text) {
         return res.status(400).json({ error: 'Missing contactId or text' });
       }
 
-      const apiKey = getConfig(db, 'elevenlabs_api_key');
+      const apiKey = getConfig(db, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
       if (!apiKey) {
         return res.status(400).json({ error: 'ElevenLabs API key not configured. Set it in Settings.' });
       }
@@ -139,13 +143,16 @@ export function createApiRouter(db, wa) {
       const contact = db.prepare('SELECT jid FROM contacts WHERE id = ?').get(contactId);
       if (!contact) return res.status(404).json({ error: 'Contact not found' });
 
-      // Generate TTS audio and convert to ogg/opus
-      const audioBuffer = await generateVoiceNote(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb');
+      // Generate TTS and convert to OGG/Opus
+      const audioBuffer = await generateVoiceNote(
+        apiKey, text,
+        voiceId || 'JBFqnCBsd6RMkjVDRZzb',
+        modelId || null
+      );
 
-      // Send as PTT voice note
+      // Send as PTT voice note — no caption, just audio with waveform
       await wa.sendVoiceNote(contact.jid, audioBuffer);
 
-      // Log
       const msgId = uuid();
       db.prepare(`
         INSERT INTO messages (id, contact_id, jid, content, type, direction, timestamp, status)
@@ -160,20 +167,24 @@ export function createApiRouter(db, wa) {
     }
   });
 
-  // Preview voice (returns audio for playback, doesn't send)
+  // ── Preview voice (MP3 for browser playback) ──────────────
   router.post('/voice/preview', async (req, res) => {
     try {
-      const { text, voiceId } = req.body;
+      const { text, voiceId, modelId } = req.body;
       if (!text) return res.status(400).json({ error: 'Missing text' });
 
-      const apiKey = getConfig(db, 'elevenlabs_api_key');
+      const apiKey = getConfig(db, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
       if (!apiKey) {
         return res.status(400).json({ error: 'ElevenLabs API key not configured' });
       }
 
-      const audioBuffer = await generateVoiceNote(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb');
-      res.set('Content-Type', 'audio/ogg');
-      res.send(Buffer.from(audioBuffer));
+      const audioBuffer = await generatePreviewAudio(
+        apiKey, text,
+        voiceId || 'JBFqnCBsd6RMkjVDRZzb',
+        modelId || null
+      );
+      res.set('Content-Type', 'audio/mpeg');
+      res.send(audioBuffer);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -182,7 +193,6 @@ export function createApiRouter(db, wa) {
   // ── Settings ──────────────────────────────────────────────
   router.get('/config/:key', (req, res) => {
     const val = getConfig(db, req.params.key);
-    // Don't return full API keys
     if (req.params.key.includes('api_key') && val) {
       res.json({ value: val.slice(0, 6) + '...' + val.slice(-4), exists: true });
     } else {
@@ -197,7 +207,6 @@ export function createApiRouter(db, wa) {
     res.json({ success: true });
   });
 
-  // Reconnect WhatsApp
   router.post('/reconnect', async (req, res) => {
     try {
       await wa.reconnect();
@@ -207,7 +216,6 @@ export function createApiRouter(db, wa) {
     }
   });
 
-  // Clear session
   router.post('/clear-session', async (req, res) => {
     try {
       await wa.clearSession();
