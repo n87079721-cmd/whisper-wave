@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Key, RefreshCw, Shield, Power, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react';
+import { Key, RefreshCw, Shield, Power, Eye, EyeOff, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
