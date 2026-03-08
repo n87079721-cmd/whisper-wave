@@ -6,6 +6,8 @@ import { getStoredApiUrl, setStoredApiUrl, isBackendConfigured } from '@/lib/api
 import { toast } from 'sonner';
 
 const SettingsPage = () => {
+  const [backendUrl, setBackendUrl] = useState(getStoredApiUrl());
+  const [backendSaved, setBackendSaved] = useState(isBackendConfigured());
   const [elevenLabsKey, setElevenLabsKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [autoEnabled, setAutoEnabled] = useState(false);
