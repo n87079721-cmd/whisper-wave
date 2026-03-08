@@ -40,6 +40,23 @@ const SettingsPage = () => {
     }
   };
 
+  const handleTestElevenLabs = async () => {
+    setTestingElevenLabs(true);
+    setTestResult(null);
+    try {
+      const result = await api.testElevenLabs();
+      const message = `Connected. Found ${result.totalVoices} voices (${result.generatedVoices} generated/cloned).`;
+      setTestResult({ ok: true, message });
+      toast.success('ElevenLabs connection is working');
+    } catch (err: any) {
+      const message = err.message || 'ElevenLabs connection failed';
+      setTestResult({ ok: false, message });
+      toast.error(message);
+    } finally {
+      setTestingElevenLabs(false);
+    }
+  };
+
   const handleReconnect = async () => {
     setReconnecting(true);
     try {
