@@ -1,11 +1,43 @@
-const rawApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim() || '';
-const isLocalDev =
-  typeof window !== 'undefined' &&
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const STORAGE_KEY = 'wa_api_url';
 
-const API_URL = (rawApiUrl || (isLocalDev ? 'http://localhost:3001' : '')).replace(/\/$/, '');
+function getApiUrl(): string {
+  // 1. localStorage (runtime config from Settings)
+  const stored = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
+  if (stored) return stored.replace(/\/$/, '');
 
-const toUrl = (path: string) => (API_URL ? `${API_URL}${path}` : path);
+  // 2. env var
+  const envUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim() || '';
+  if (envUrl) return envUrl.replace(/\/$/, '');
+
+  // 3. localhost fallback when running locally
+  const isLocalDev =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  if (isLocalDev) return 'http://localhost:3001';
+
+  return '';
+}
+
+export function getStoredApiUrl(): string {
+  return (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null) || '';
+}
+
+export function setStoredApiUrl(url: string) {
+  if (url) {
+    localStorage.setItem(STORAGE_KEY, url.replace(/\/$/, ''));
+  } else {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+}
+
+export function isBackendConfigured(): boolean {
+  return !!getApiUrl();
+}
+
+const toUrl = (path: string) => {
+  const base = getApiUrl();
+  return base ? `${base}${path}` : path;
+};
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(toUrl(path), init);
