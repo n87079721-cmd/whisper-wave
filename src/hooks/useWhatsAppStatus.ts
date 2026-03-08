@@ -40,6 +40,7 @@ export function useWhatsAppStatus() {
         refresh(); // Refresh stats on new message
       });
       es.onerror = () => {
+        setStatus((prev) => (prev === 'qr_waiting' ? prev : 'reconnecting'));
         // Reconnect after delay
         setTimeout(refresh, 5000);
       };

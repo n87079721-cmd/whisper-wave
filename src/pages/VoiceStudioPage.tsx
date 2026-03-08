@@ -45,10 +45,17 @@ const VoiceStudioPage = () => {
   useEffect(() => {
     api.getContacts().then(setContacts).catch(() => {});
     setLoadingVoices(true);
-    api.getVoices().then(v => {
-      setVoices(v);
-      if (v.length > 0) setSelectedVoice(v[0].id);
-    }).catch(() => {}).finally(() => setLoadingVoices(false));
+    api
+      .getVoices()
+      .then((v) => {
+        setVoices(v);
+        if (v.length > 0) setSelectedVoice(v[0].id);
+      })
+      .catch((err: Error) => {
+        setVoices([]);
+        toast.error(err.message || 'Failed to load voices from ElevenLabs');
+      })
+      .finally(() => setLoadingVoices(false));
   }, []);
 
   const handleGenerate = async () => {
