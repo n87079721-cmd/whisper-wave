@@ -438,7 +438,7 @@ function getOrCreateContact(db, jid, phone, pushName, isGroup = false) {
   if (existing) {
     // Update push name and phone if we have better data
     if (pushName && (!existing.name || existing.name === phone)) {
-      db.prepare('UPDATE contacts SET name = ?, phone = ?, is_group = ?, updated_at = datetime("now") WHERE id = ?')
+      db.prepare("UPDATE contacts SET name = ?, phone = ?, is_group = ?, updated_at = datetime('now') WHERE id = ?")
         .run(pushName, phone, isGroup ? 1 : 0, existing.id);
     } else if (existing.name !== phone) {
       db.prepare('UPDATE contacts SET phone = ?, is_group = ?, updated_at = datetime("now") WHERE id = ?')
