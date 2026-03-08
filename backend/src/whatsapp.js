@@ -372,7 +372,7 @@ async function startConnection(db) {
           const phone = '+' + rawNumber;
           const existing = db.prepare('SELECT id FROM contacts WHERE jid = ?').get(update.id);
           if (existing) {
-            db.prepare('UPDATE contacts SET name = ?, phone = ?, updated_at = datetime("now") WHERE id = ?')
+            db.prepare("UPDATE contacts SET name = ?, phone = ?, updated_at = datetime('now') WHERE id = ?")
               .run(update.notify, phone, existing.id);
           }
         }
