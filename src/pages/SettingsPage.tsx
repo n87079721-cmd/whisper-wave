@@ -124,13 +124,33 @@ const SettingsPage = () => {
             {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         </div>
-        <button
-          onClick={handleSaveKey}
-          disabled={!elevenLabsKey || saving}
-          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40"
-        >
-          {saving ? 'Saving...' : 'Save Key'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSaveKey}
+            disabled={!elevenLabsKey || saving}
+            className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40"
+          >
+            {saving ? 'Saving...' : 'Save Key'}
+          </button>
+          <button
+            onClick={handleTestElevenLabs}
+            disabled={testingElevenLabs}
+            className="px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-sm font-medium hover:bg-secondary/80 transition-colors disabled:opacity-40"
+          >
+            {testingElevenLabs ? 'Testing...' : 'Test Connection'}
+          </button>
+        </div>
+
+        {testResult && (
+          <div className={`flex items-start gap-2 rounded-lg px-3 py-2 border ${testResult.ok ? 'bg-primary/10 border-primary/25' : 'bg-destructive/10 border-destructive/25'}`}>
+            {testResult.ok ? (
+              <CheckCircle className="w-4 h-4 text-primary mt-0.5" />
+            ) : (
+              <XCircle className="w-4 h-4 text-destructive mt-0.5" />
+            )}
+            <p className={`text-xs ${testResult.ok ? 'text-primary' : 'text-destructive'}`}>{testResult.message}</p>
+          </div>
+        )}
       </motion.div>
 
       {/* Session Management */}
