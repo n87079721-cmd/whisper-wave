@@ -103,7 +103,7 @@ const VoiceStudioPage = () => {
     if (!selectedContact || !text) return;
     setSending(true);
     try {
-      const res = await api.sendVoice(selectedContact, text, selectedVoice, selectedModel);
+      const res = await api.sendVoice(selectedContact, text, selectedVoice, selectedModel, selectedBg !== 'none' ? selectedBg : undefined);
       if (res.error) throw new Error(res.error);
       toast.success('Voice note sent as PTT!');
     } catch (err: any) {
