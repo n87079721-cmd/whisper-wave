@@ -1,20 +1,32 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Phone, MessageSquare } from 'lucide-react';
-import { mockContacts } from '@/lib/mockData';
+import { api, type Contact } from '@/lib/api';
 
 const ContactsPage = () => {
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
-  const filtered = mockContacts.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.phone.includes(search)
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.getContacts().then(data => {
+      setContacts(data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const filtered = contacts.filter(c =>
+    (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (c.phone || '').includes(search)
   );
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Contacts</h1>
-        <p className="text-sm text-muted-foreground mt-1">{mockContacts.length} contacts synced</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          {loading ? 'Loading...' : `${contacts.length} contacts synced`}
+        </p>
       </div>
 
       <div className="relative">
@@ -27,40 +39,36 @@ const ContactsPage = () => {
         />
       </div>
 
-      <div className="space-y-1">
-        {filtered.map((contact, i) => (
-          <motion.div
-            key={contact.id}
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: i * 0.03 }}
-            className="flex items-center justify-between p-3 rounded-lg hover:bg-secondary/80 transition-colors group cursor-pointer"
-          >
-            <div className="flex items-center gap-3">
-              <div className="relative">
+      {filtered.length === 0 && !loading ? (
+        <p className="text-sm text-muted-foreground text-center py-8">
+          {contacts.length === 0 ? 'No contacts yet. Connect WhatsApp to sync contacts.' : 'No contacts match your search.'}
+        </p>
+      ) : (
+        <div className="space-y-1">
+          {filtered.map((contact, i) => (
+            <motion.div
+              key={contact.id}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.03 }}
+              className="flex items-center justify-between p-3 rounded-lg hover:bg-secondary/80 transition-colors group cursor-pointer"
+            >
+              <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground">
-                  {contact.name.split(' ').map(n => n[0]).join('')}
+                  {(contact.name || contact.phone || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
                 </div>
-                {contact.isOnline && (
-                  <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-primary rounded-full border-2 border-card" />
-                )}
+                <div>
+                  <p className="text-sm font-medium text-foreground">{contact.name || contact.phone}</p>
+                  <p className="text-xs text-muted-foreground">{contact.phone}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-medium text-foreground">{contact.name}</p>
-                <p className="text-xs text-muted-foreground">{contact.phone}</p>
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="text-xs text-muted-foreground mr-2">{contact.message_count || 0} msgs</span>
               </div>
-            </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button className="p-2 rounded-lg hover:bg-muted transition-colors">
-                <Phone className="w-4 h-4 text-muted-foreground" />
-              </button>
-              <button className="p-2 rounded-lg hover:bg-muted transition-colors">
-                <MessageSquare className="w-4 h-4 text-muted-foreground" />
-              </button>
-            </div>
-          </motion.div>
-        ))}
-      </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

@@ -1,15 +1,43 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Send, ChevronDown, Mic, Type } from 'lucide-react';
-import { mockContacts } from '@/lib/mockData';
+import { Send, ChevronDown, Mic, Type, Loader2 } from 'lucide-react';
+import { api, type Contact } from '@/lib/api';
+import { toast } from 'sonner';
 
 const SendMessagePage = () => {
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState('');
   const [message, setMessage] = useState('');
   const [sendAs, setSendAs] = useState<'text' | 'voice'>('text');
   const [showContacts, setShowContacts] = useState(false);
+  const [sending, setSending] = useState(false);
 
-  const selected = mockContacts.find(c => c.id === selectedContact);
+  useEffect(() => {
+    api.getContacts().then(setContacts).catch(() => {});
+  }, []);
+
+  const selected = contacts.find(c => c.id === selectedContact);
+
+  const handleSend = async () => {
+    if (!selectedContact || !message) return;
+    setSending(true);
+    try {
+      if (sendAs === 'text') {
+        const res = await api.sendText(selectedContact, message);
+        if (res.error) throw new Error(res.error);
+        toast.success('Message sent!');
+      } else {
+        const res = await api.sendVoice(selectedContact, message);
+        if (res.error) throw new Error(res.error);
+        toast.success('Voice note sent!');
+      }
+      setMessage('');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send');
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -32,21 +60,25 @@ const SendMessagePage = () => {
               className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm text-foreground hover:bg-secondary/80 transition-colors"
             >
               <span className={selected ? 'text-foreground' : 'text-muted-foreground'}>
-                {selected ? `${selected.name} (${selected.phone})` : 'Select a contact'}
+                {selected ? `${selected.name || selected.phone} (${selected.phone})` : 'Select a contact'}
               </span>
               <ChevronDown className="w-4 h-4 text-muted-foreground" />
             </button>
             {showContacts && (
               <div className="absolute z-10 mt-1 w-full bg-popover border border-border rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                {mockContacts.map(c => (
-                  <button
-                    key={c.id}
-                    onClick={() => { setSelectedContact(c.id); setShowContacts(false); }}
-                    className="w-full text-left px-4 py-2.5 text-sm text-foreground hover:bg-secondary transition-colors"
-                  >
-                    {c.name} <span className="text-muted-foreground">({c.phone})</span>
-                  </button>
-                ))}
+                {contacts.length === 0 ? (
+                  <p className="px-4 py-3 text-sm text-muted-foreground">No contacts. Connect WhatsApp first.</p>
+                ) : (
+                  contacts.map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => { setSelectedContact(c.id); setShowContacts(false); }}
+                      className="w-full text-left px-4 py-2.5 text-sm text-foreground hover:bg-secondary transition-colors"
+                    >
+                      {c.name || c.phone} <span className="text-muted-foreground">({c.phone})</span>
+                    </button>
+                  ))
+                )}
               </div>
             )}
           </div>
@@ -101,11 +133,21 @@ const SendMessagePage = () => {
 
         {/* Send button */}
         <button
-          disabled={!selectedContact || !message}
+          onClick={handleSend}
+          disabled={!selectedContact || !message || sending}
           className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          <Send className="w-4 h-4" />
-          {sendAs === 'voice' ? 'Generate & Send Voice Note' : 'Send Message'}
+          {sending ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              {sendAs === 'voice' ? 'Generating & Sending...' : 'Sending...'}
+            </>
+          ) : (
+            <>
+              <Send className="w-4 h-4" />
+              {sendAs === 'voice' ? 'Generate & Send Voice Note' : 'Send Message'}
+            </>
+          )}
         </button>
       </motion.div>
     </div>
