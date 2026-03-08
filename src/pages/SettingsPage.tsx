@@ -94,7 +94,69 @@ const SettingsPage = () => {
         <p className="text-sm text-muted-foreground mt-1">Manage API keys and bot configuration</p>
       </div>
 
-      {/* ElevenLabs API Key */}
+      {/* Backend URL */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="glass rounded-xl p-6 space-y-4"
+      >
+        <div className="flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${backendSaved ? 'bg-primary/15' : 'bg-destructive/15'}`}>
+            <Globe className={`w-5 h-5 ${backendSaved ? 'text-primary' : 'text-destructive'}`} />
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground text-sm">Backend URL</h3>
+            <p className="text-xs text-muted-foreground">
+              Your Node.js backend address (e.g. http://your-server:3001).{' '}
+              {backendSaved && <span className="text-primary">✓ Configured</span>}
+            </p>
+          </div>
+        </div>
+        <input
+          type="text"
+          value={backendUrl}
+          onChange={(e) => setBackendUrl(e.target.value)}
+          placeholder="http://your-server-ip:3001"
+          className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+        />
+        {!backendSaved && (
+          <div className="flex items-start gap-2 rounded-lg px-3 py-2 border bg-destructive/10 border-destructive/25">
+            <XCircle className="w-4 h-4 text-destructive mt-0.5" />
+            <p className="text-xs text-destructive">
+              Backend URL is not set. The dashboard can't connect to your WhatsApp bot. Enter your backend URL and click Save.
+            </p>
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setStoredApiUrl(backendUrl);
+              setBackendSaved(!!backendUrl);
+              toast.success(backendUrl ? 'Backend URL saved — reloading...' : 'Backend URL cleared');
+              if (backendUrl) setTimeout(() => window.location.reload(), 500);
+            }}
+            className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            Save URL
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                await api.getStatus();
+                toast.success('Backend is reachable!');
+              } catch (err: any) {
+                toast.error(err.message || 'Cannot reach backend');
+              }
+            }}
+            disabled={!backendUrl}
+            className="px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-sm font-medium hover:bg-secondary/80 transition-colors disabled:opacity-40"
+          >
+            Test Connection
+          </button>
+        </div>
+      </motion.div>
+
+
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
