@@ -1,7 +1,7 @@
 import express from 'express';
 import { v4 as uuid } from 'uuid';
 import { getWhatsAppState, onWhatsAppEvent } from './whatsapp.js';
-import { generateVoiceNote, generatePreviewAudio, VOICES } from './elevenlabs.js';
+import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
 import QRCode from 'qrcode';
 
 export function createApiRouter(db, wa) {
