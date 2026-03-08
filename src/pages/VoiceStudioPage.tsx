@@ -1,20 +1,34 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Mic, Play, Square, Send, Volume2, Loader2, ChevronDown } from 'lucide-react';
+import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info } from 'lucide-react';
 import { api, type Contact, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 
 const MODELS = [
   { id: 'eleven_multilingual_v2', name: 'Multilingual v2', desc: 'Highest quality, 29 languages' },
+  { id: 'eleven_v3', name: 'v3 (Gina-style)', desc: 'Latest model with speech tags & emotions' },
   { id: 'eleven_turbo_v2_5', name: 'Turbo v2.5', desc: 'Low latency, high quality' },
   { id: 'eleven_monolingual_v1', name: 'English v1', desc: 'English only, legacy' },
+];
+
+const SPEECH_TAGS = [
+  { tag: '[happy]', desc: 'Joyful tone' },
+  { tag: '[sad]', desc: 'Melancholy tone' },
+  { tag: '[angry]', desc: 'Frustrated tone' },
+  { tag: '[excited]', desc: 'High energy' },
+  { tag: '[whisper]', desc: 'Soft whisper' },
+  { tag: '[calm]', desc: 'Relaxed, soothing' },
+  { tag: '[serious]', desc: 'Grave tone' },
+  { tag: '[sarcastic]', desc: 'Ironic delivery' },
+  { tag: '...', desc: 'Long pause' },
+  { tag: '—', desc: 'Short pause' },
 ];
 
 const VoiceStudioPage = () => {
   const [text, setText] = useState('');
   const [voices, setVoices] = useState<Voice[]>([]);
-  const [selectedVoice, setSelectedVoice] = useState('JBFqnCBsd6RMkjVDRZzb');
-  const [selectedModel, setSelectedModel] = useState('eleven_multilingual_v2');
+  const [selectedVoice, setSelectedVoice] = useState('');
+  const [selectedModel, setSelectedModel] = useState('eleven_v3');
   const [isGenerating, setIsGenerating] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -22,14 +36,19 @@ const VoiceStudioPage = () => {
   const [selectedContact, setSelectedContact] = useState('');
   const [showContacts, setShowContacts] = useState(false);
   const [sending, setSending] = useState(false);
+  const [voiceFilter, setVoiceFilter] = useState('');
+  const [showTagHelp, setShowTagHelp] = useState(false);
+  const [loadingVoices, setLoadingVoices] = useState(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     api.getContacts().then(setContacts).catch(() => {});
+    setLoadingVoices(true);
     api.getVoices().then(v => {
       setVoices(v);
       if (v.length > 0) setSelectedVoice(v[0].id);
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setLoadingVoices(false));
   }, []);
 
   const handleGenerate = async () => {
@@ -72,8 +91,31 @@ const VoiceStudioPage = () => {
     }
   };
 
+  const insertTag = (tag: string) => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      setText(prev => prev + ' ' + tag + ' ');
+      return;
+    }
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const newText = text.slice(0, start) + tag + ' ' + text.slice(end);
+    setText(newText);
+    setAudioUrl(null);
+    setTimeout(() => {
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = start + tag.length + 1;
+    }, 0);
+  };
+
+  const filteredVoices = voices.filter(v =>
+    !voiceFilter || v.name.toLowerCase().includes(voiceFilter.toLowerCase()) ||
+    v.desc.toLowerCase().includes(voiceFilter.toLowerCase())
+  );
+
   const selected = contacts.find(c => c.id === selectedContact);
   const currentVoice = voices.find(v => v.id === selectedVoice);
+  const isV3 = selectedModel === 'eleven_v3';
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -103,6 +145,7 @@ const VoiceStudioPage = () => {
                 title={model.desc}
               >
                 {model.name}
+                {model.id === 'eleven_v3' && <Sparkles className="w-3 h-3 inline ml-1" />}
               </button>
             ))}
           </div>
@@ -110,9 +153,21 @@ const VoiceStudioPage = () => {
 
         {/* Voice selection */}
         <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">Voice Avatar</label>
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-foreground">
+              Your Voices {loadingVoices && <Loader2 className="w-3 h-3 inline animate-spin ml-1" />}
+            </label>
+            <span className="text-xs text-muted-foreground">{voices.length} voices from your account</span>
+          </div>
+          <input
+            type="text"
+            placeholder="Search voices..."
+            value={voiceFilter}
+            onChange={e => setVoiceFilter(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+          />
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
-            {voices.map(voice => (
+            {filteredVoices.map(voice => (
               <button
                 key={voice.id}
                 onClick={() => setSelectedVoice(voice.id)}
@@ -122,27 +177,68 @@ const VoiceStudioPage = () => {
                     : 'bg-secondary border border-transparent hover:border-border'
                 }`}
               >
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs ${
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs shrink-0 ${
                   selectedVoice === voice.id ? 'bg-primary/20' : 'bg-muted'
                 }`}>
                   {voice.gender === 'male' ? '♂' : voice.gender === 'female' ? '♀' : '◎'}
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs font-medium text-foreground truncate">{voice.name}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">{voice.desc}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">
+                    {voice.category && <span className="capitalize">{voice.category} · </span>}
+                    {voice.desc}
+                  </p>
                 </div>
               </button>
             ))}
+            {filteredVoices.length === 0 && !loadingVoices && (
+              <p className="text-xs text-muted-foreground col-span-full py-4 text-center">
+                No voices found. Make sure your ElevenLabs API key is set in Settings.
+              </p>
+            )}
           </div>
         </div>
+
+        {/* Speech tags helper (shown for v3) */}
+        {isV3 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-foreground">Speech Tags</label>
+              <button onClick={() => setShowTagHelp(!showTagHelp)} className="text-muted-foreground hover:text-foreground">
+                <Info className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {showTagHelp && (
+              <p className="text-xs text-muted-foreground bg-secondary rounded-lg p-2">
+                v3 supports emotion & pace tags. Insert them before text to control delivery.
+                Example: <code className="text-primary">[happy] How are you doing today?</code>
+              </p>
+            )}
+            <div className="flex gap-1.5 flex-wrap">
+              {SPEECH_TAGS.map(st => (
+                <button
+                  key={st.tag}
+                  onClick={() => insertTag(st.tag)}
+                  className="px-2 py-1 rounded-md bg-secondary text-xs text-secondary-foreground hover:bg-secondary/80 transition-colors border border-border"
+                  title={st.desc}
+                >
+                  {st.tag}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Text input */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-foreground">Text to speak</label>
           <textarea
+            ref={textareaRef}
             value={text}
             onChange={(e) => { setText(e.target.value); setAudioUrl(null); }}
-            placeholder="Type or paste the text you want to convert to a voice note..."
+            placeholder={isV3
+              ? "[happy] Hey! How are you doing today? ... I was just thinking about you."
+              : "Type or paste the text you want to convert to a voice note..."}
             rows={4}
             className="w-full px-4 py-3 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
           />
