@@ -171,7 +171,7 @@ async function startConnection(db) {
       printQRInTerminal: true,
       generateHighQualityLinkPreview: false,
       keepAliveIntervalMs: 30000,
-      syncFullHistory: false,
+      syncFullHistory: true,
       markOnlineOnConnect: false,
       msgRetryCounterCache,
       getMessage: async (key) => {
@@ -225,41 +225,56 @@ async function startConnection(db) {
       }
     });
 
-    // Listen for incoming messages
+    // Listen for incoming messages (both real-time 'notify' and history 'append')
     sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
-      if (type !== 'notify') return;
-
       for (const msg of msgs) {
         try {
-          if (!msg.message || msg.key.fromMe) continue;
+          if (!msg.message) continue;
           const jid = msg.key.remoteJid;
           if (!jid || jid === 'status@broadcast') continue;
 
-          // Store full international number with +
+          const isFromMe = msg.key.fromMe;
           const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
           const phone = '+' + rawNumber;
           const pushName = msg.pushName || null;
+          const isGroup = jid.endsWith('@g.us');
 
-          const contactId = getOrCreateContact(db, jid, phone, pushName);
+          const contactId = getOrCreateContact(db, jid, phone, pushName, isGroup);
 
           const content = msg.message.conversation
             || msg.message.extendedTextMessage?.text
+            || msg.message.imageMessage?.caption
+            || msg.message.videoMessage?.caption
             || '';
           const isVoice = !!msg.message.audioMessage;
+          const isImage = !!msg.message.imageMessage;
+          const isVideo = !!msg.message.videoMessage;
+          const isDocument = !!msg.message.documentMessage;
 
-          const msgId = uuid();
+          let msgType = 'text';
+          if (isVoice) msgType = 'voice';
+          else if (isImage) msgType = 'image';
+          else if (isVideo) msgType = 'video';
+          else if (isDocument) msgType = 'document';
+
+          const direction = isFromMe ? 'sent' : 'received';
+          const msgId = msg.key.id || uuid();
+
           db.prepare(`
             INSERT OR IGNORE INTO messages (id, contact_id, jid, content, type, direction, timestamp, status, duration)
-            VALUES (?, ?, ?, ?, ?, 'received', ?, 'delivered', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
-            msgId, contactId, jid, content,
-            isVoice ? 'voice' : 'text',
+            msgId, contactId, jid, content, msgType, direction,
             toIsoTimestamp(msg.messageTimestamp),
+            isFromMe ? 'sent' : 'delivered',
             msg.message.audioMessage?.seconds || null
           );
 
-          db.prepare(`INSERT INTO stats (event, data) VALUES ('message_received', ?)`).run(JSON.stringify({ contactId }));
-          emit('message', { contactId, msgId });
+          // Only track stats for real-time notifications
+          if (type === 'notify' && !isFromMe) {
+            db.prepare(`INSERT INTO stats (event, data) VALUES ('message_received', ?)`).run(JSON.stringify({ contactId }));
+            emit('message', { contactId, msgId });
+          }
         } catch (err) {
           if (isSignalSessionError(err)) {
             console.warn('⚠️ Suppressed message decrypt error in upsert handler:', err?.message || err);
@@ -269,6 +284,84 @@ async function startConnection(db) {
           console.error('messages.upsert handler error:', err?.message || err);
         }
       }
+    });
+
+    // Handle history sync (existing chats loaded on connect)
+    sock.ev.on('messaging-history.set', ({ chats, contacts: syncedContacts, messages: historyMsgs }) => {
+      console.log(`📜 History sync: ${chats?.length || 0} chats, ${syncedContacts?.length || 0} contacts, ${historyMsgs?.length || 0} messages`);
+
+      // Import contacts from history
+      if (syncedContacts?.length) {
+        for (const c of syncedContacts) {
+          try {
+            const jid = c.id;
+            if (!jid || jid === 'status@broadcast') continue;
+            const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+            const phone = '+' + rawNumber;
+            const isGroup = jid.endsWith('@g.us');
+            getOrCreateContact(db, jid, phone, c.notify || c.name || null, isGroup);
+          } catch {}
+        }
+      }
+
+      // Import chats as contacts (in case contacts list is sparse)
+      if (chats?.length) {
+        for (const chat of chats) {
+          try {
+            const jid = chat.id;
+            if (!jid || jid === 'status@broadcast') continue;
+            const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+            const phone = '+' + rawNumber;
+            const isGroup = jid.endsWith('@g.us');
+            getOrCreateContact(db, jid, phone, chat.name || null, isGroup);
+          } catch {}
+        }
+      }
+
+      // Import history messages
+      if (historyMsgs?.length) {
+        for (const { message: msg } of historyMsgs) {
+          try {
+            if (!msg?.message) continue;
+            const jid = msg.key?.remoteJid;
+            if (!jid || jid === 'status@broadcast') continue;
+
+            const isFromMe = msg.key.fromMe;
+            const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+            const phone = '+' + rawNumber;
+            const isGroup = jid.endsWith('@g.us');
+
+            const contactId = getOrCreateContact(db, jid, phone, msg.pushName || null, isGroup);
+
+            const content = msg.message.conversation
+              || msg.message.extendedTextMessage?.text
+              || msg.message.imageMessage?.caption
+              || msg.message.videoMessage?.caption
+              || '';
+
+            const isVoice = !!msg.message.audioMessage;
+            let msgType = 'text';
+            if (isVoice) msgType = 'voice';
+            else if (msg.message.imageMessage) msgType = 'image';
+            else if (msg.message.videoMessage) msgType = 'video';
+            else if (msg.message.documentMessage) msgType = 'document';
+
+            const msgId = msg.key.id || uuid();
+            db.prepare(`
+              INSERT OR IGNORE INTO messages (id, contact_id, jid, content, type, direction, timestamp, status, duration)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+              msgId, contactId, jid, content, msgType,
+              isFromMe ? 'sent' : 'received',
+              toIsoTimestamp(msg.messageTimestamp),
+              isFromMe ? 'sent' : 'delivered',
+              msg.message.audioMessage?.seconds || null
+            );
+          } catch {}
+        }
+      }
+
+      emit('history_sync', { chats: chats?.length || 0, messages: historyMsgs?.length || 0 });
     });
 
     // Sync contacts when they update (push names)
@@ -283,6 +376,20 @@ async function startConnection(db) {
               .run(update.notify, phone, existing.id);
           }
         }
+      }
+    });
+
+    // Also handle contacts.upsert for initial contact sync
+    sock.ev.on('contacts.upsert', (contacts) => {
+      for (const c of contacts) {
+        try {
+          const jid = c.id;
+          if (!jid || jid === 'status@broadcast') continue;
+          const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+          const phone = '+' + rawNumber;
+          const isGroup = jid.endsWith('@g.us');
+          getOrCreateContact(db, jid, phone, c.notify || c.name || null, isGroup);
+        } catch {}
       }
     });
   } catch (err) {
@@ -326,31 +433,31 @@ function toIsoTimestamp(value) {
   return new Date().toISOString();
 }
 
-function getOrCreateContact(db, jid, phone, pushName) {
+function getOrCreateContact(db, jid, phone, pushName, isGroup = false) {
   const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ?').get(jid);
   if (existing) {
     // Update push name and phone if we have better data
     if (pushName && (!existing.name || existing.name === phone)) {
-      db.prepare('UPDATE contacts SET name = ?, phone = ?, updated_at = datetime("now") WHERE id = ?')
-        .run(pushName, phone, existing.id);
+      db.prepare('UPDATE contacts SET name = ?, phone = ?, is_group = ?, updated_at = datetime("now") WHERE id = ?')
+        .run(pushName, phone, isGroup ? 1 : 0, existing.id);
     } else if (existing.name !== phone) {
-      // Ensure phone is always in full format
-      db.prepare('UPDATE contacts SET phone = ?, updated_at = datetime("now") WHERE id = ?')
-        .run(phone, existing.id);
+      db.prepare('UPDATE contacts SET phone = ?, is_group = ?, updated_at = datetime("now") WHERE id = ?')
+        .run(phone, isGroup ? 1 : 0, existing.id);
     }
     return existing.id;
   }
 
   const id = uuid();
   db.prepare(`
-    INSERT INTO contacts (id, jid, name, phone) VALUES (?, ?, ?, ?)
-  `).run(id, jid, pushName || phone, phone);
+    INSERT INTO contacts (id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?)
+  `).run(id, jid, pushName || phone, phone, isGroup ? 1 : 0);
   return id;
 }
 
 async function syncContacts(db) {
   try {
-    console.log('📇 Contact sync initiated');
+    console.log('📇 Contact sync initiated — waiting for history events from Baileys');
+    // Actual sync happens via messaging-history.set, contacts.upsert, and contacts.update events
   } catch (err) {
     console.error('Contact sync error:', err.message);
   }
