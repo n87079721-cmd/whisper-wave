@@ -287,7 +287,7 @@ const VoiceStudioPage = () => {
             value={text}
             onChange={(e) => { setText(e.target.value); setAudioUrl(null); }}
             placeholder={isV3
-              ? "[happy] Hey! How are you doing today? ... I was just thinking about you."
+              ? "[laughing] Oh stop it! ... [whispering] But seriously, I miss you."
               : "Type or paste the text you want to convert to a voice note..."}
             rows={4}
             className="w-full px-4 py-3 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
