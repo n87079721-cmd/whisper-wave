@@ -261,6 +261,11 @@ async function startConnection(db) {
           db.prepare(`INSERT INTO stats (event, data) VALUES ('message_received', ?)`).run(JSON.stringify({ contactId }));
           emit('message', { contactId, msgId });
         } catch (err) {
+          if (isSignalSessionError(err)) {
+            console.warn('⚠️ Suppressed message decrypt error in upsert handler:', err?.message || err);
+            triggerSignalSessionRepair(db, err);
+            continue;
+          }
           console.error('messages.upsert handler error:', err?.message || err);
         }
       }
