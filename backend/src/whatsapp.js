@@ -24,6 +24,7 @@ let connectionStatus = 'disconnected';
 let eventListeners = [];
 let reconnectTimer = null;
 let isConnecting = false;
+let reconnectAttempt = 0;
 
 export function getWhatsAppState() {
   return { status: connectionStatus, qr: qrCode };
