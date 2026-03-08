@@ -225,15 +225,15 @@ const VoiceStudioPage = () => {
         {isV3 && (
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-foreground">Speech Tags</label>
+              <label className="text-sm font-medium text-foreground">Expression Tags</label>
               <button onClick={() => setShowTagHelp(!showTagHelp)} className="text-muted-foreground hover:text-foreground">
                 <Info className="w-3.5 h-3.5" />
               </button>
             </div>
             {showTagHelp && (
               <p className="text-xs text-muted-foreground bg-secondary rounded-lg p-2">
-                v3 supports emotion & pace tags. Insert them before text to control delivery.
-                Example: <code className="text-primary">[happy] How are you doing today?</code>
+                v3 supports expression tags that make the voice react naturally — laughing, whispering, sighing, etc.
+                Example: <code className="text-primary">[laughing] Oh stop it, you're too funny!</code>
               </p>
             )}
             <div className="flex gap-1.5 flex-wrap">
@@ -241,15 +241,43 @@ const VoiceStudioPage = () => {
                 <button
                   key={st.tag}
                   onClick={() => insertTag(st.tag)}
-                  className="px-2 py-1 rounded-md bg-secondary text-xs text-secondary-foreground hover:bg-secondary/80 transition-colors border border-border"
+                  className="px-2.5 py-1.5 rounded-md bg-secondary text-xs text-secondary-foreground hover:bg-secondary/80 transition-colors border border-border flex items-center gap-1"
                   title={st.desc}
                 >
-                  {st.tag}
+                  <span>{st.emoji}</span>
+                  <span>{st.tag}</span>
                 </button>
               ))}
             </div>
           </div>
         )}
+
+        {/* Background sounds */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">Background Sound</label>
+          <div className="flex gap-1.5 flex-wrap">
+            {BACKGROUND_SOUNDS.map(bg => (
+              <button
+                key={bg.id}
+                onClick={() => setSelectedBg(bg.id)}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1 border ${
+                  selectedBg === bg.id
+                    ? 'bg-primary/15 border-primary/30 text-foreground'
+                    : 'bg-secondary border-border text-secondary-foreground hover:bg-secondary/80'
+                }`}
+                title={bg.desc}
+              >
+                <span>{bg.emoji}</span>
+                <span>{bg.name}</span>
+              </button>
+            ))}
+          </div>
+          {selectedBg !== 'none' && (
+            <p className="text-xs text-muted-foreground">
+              🔊 {BACKGROUND_SOUNDS.find(b => b.id === selectedBg)?.desc} will be mixed into the audio
+            </p>
+          )}
+        </div>
 
         {/* Text input */}
         <div className="space-y-2">
