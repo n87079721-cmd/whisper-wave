@@ -48,6 +48,7 @@ const VoiceStudioPage = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState('');
+  const [selectedBg, setSelectedBg] = useState('none');
   const [showContacts, setShowContacts] = useState(false);
   const [sending, setSending] = useState(false);
   const [voiceFilter, setVoiceFilter] = useState('');
