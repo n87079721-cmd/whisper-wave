@@ -492,11 +492,28 @@ async function clearSession(db) {
   badMacTimestamps = [];
   repairInProgress = false;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+
+  // Close socket without triggering reconnect
   if (sock) {
+    try { sock.ev.removeAllListeners('connection.update'); } catch {}
+    try { sock.ev.removeAllListeners('messages.upsert'); } catch {}
+    try { sock.ev.removeAllListeners('contacts.update'); } catch {}
+    try { sock.ev.removeAllListeners('contacts.upsert'); } catch {}
+    try { sock.ev.removeAllListeners('messaging-history.set'); } catch {}
+    try { sock.ev.removeAllListeners('creds.update'); } catch {}
     try { await sock.logout(); } catch {}
+    try { sock.end?.(undefined); } catch {}
     sock = null;
   }
+
+  // Delete entire auth directory (session files, creds, keys)
   if (fs.existsSync(AUTH_DIR)) {
     fs.rmSync(AUTH_DIR, { recursive: true, force: true });
   }
+  // Recreate empty auth dir for next scan
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
+
+  isConnecting = false;
+  emit('status', { status: 'disconnected' });
+  console.log('🗑️ Session fully cleared. Scan QR to reconnect.');
 }
