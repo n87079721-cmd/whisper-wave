@@ -60,8 +60,8 @@ const DashboardPage = () => {
                 <Wifi className="w-6 h-6 text-primary" />
               </div>
             ) : (
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isWaiting ? 'bg-warning/15' : 'bg-destructive/15'}`}>
-                {isWaiting ? (
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isWaiting || isReconnecting ? 'bg-warning/15' : 'bg-destructive/15'}`}>
+                {isWaiting || isReconnecting ? (
                   <Loader2 className="w-6 h-6 text-warning animate-spin" />
                 ) : (
                   <WifiOff className="w-6 h-6 text-destructive" />
@@ -75,15 +75,18 @@ const DashboardPage = () => {
                   ? 'Session active and running'
                   : isWaiting
                   ? 'Scan QR code with WhatsApp → Linked Devices'
+                  : isReconnecting
+                  ? 'Connection interrupted, restoring session...'
                   : 'Click Connect to generate QR code'}
               </p>
             </div>
           </div>
           <button
             onClick={isConnected ? handleDisconnect : handleConnect}
-            className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+            disabled={isReconnecting}
+            className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-60"
           >
-            {isConnected ? 'Disconnect' : 'Connect'}
+            {isConnected ? 'Disconnect' : isReconnecting ? 'Reconnecting...' : 'Connect'}
           </button>
         </div>
 
