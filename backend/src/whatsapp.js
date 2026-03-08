@@ -171,7 +171,7 @@ async function startConnection(db) {
       printQRInTerminal: true,
       generateHighQualityLinkPreview: false,
       keepAliveIntervalMs: 30000,
-      syncFullHistory: false,
+      syncFullHistory: true,
       markOnlineOnConnect: false,
       msgRetryCounterCache,
       getMessage: async (key) => {
