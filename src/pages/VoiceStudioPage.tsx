@@ -6,22 +6,36 @@ import { toast } from 'sonner';
 
 const MODELS = [
   { id: 'eleven_multilingual_v2', name: 'Multilingual v2', desc: 'Highest quality, 29 languages' },
-  { id: 'eleven_v3', name: 'v3 (Gina-style)', desc: 'Latest model with speech tags & emotions' },
-  { id: 'eleven_turbo_v2_5', name: 'Turbo v2.5', desc: 'Low latency, high quality' },
+  { id: 'eleven_v3', name: 'v3 (Gina-style)', desc: 'Latest model with speech tags & expressions' },
   { id: 'eleven_monolingual_v1', name: 'English v1', desc: 'English only, legacy' },
 ];
 
 const SPEECH_TAGS = [
-  { tag: '[happy]', desc: 'Joyful tone' },
-  { tag: '[sad]', desc: 'Melancholy tone' },
-  { tag: '[angry]', desc: 'Frustrated tone' },
-  { tag: '[excited]', desc: 'High energy' },
-  { tag: '[whisper]', desc: 'Soft whisper' },
-  { tag: '[calm]', desc: 'Relaxed, soothing' },
-  { tag: '[serious]', desc: 'Grave tone' },
-  { tag: '[sarcastic]', desc: 'Ironic delivery' },
-  { tag: '...', desc: 'Long pause' },
-  { tag: '—', desc: 'Short pause' },
+  { tag: '[laughing]', desc: 'Laughing while talking', emoji: '😂' },
+  { tag: '[chuckling]', desc: 'Light chuckle', emoji: '🤭' },
+  { tag: '[sighing]', desc: 'Deep sigh', emoji: '😮‍💨' },
+  { tag: '[gasping]', desc: 'Surprised gasp', emoji: '😱' },
+  { tag: '[crying]', desc: 'Tearful voice', emoji: '😢' },
+  { tag: '[whispering]', desc: 'Quiet whisper', emoji: '🤫' },
+  { tag: '[shouting]', desc: 'Loud and projecting', emoji: '📢' },
+  { tag: '[clearing throat]', desc: 'Ahem moment', emoji: '😤' },
+  { tag: '[sniffling]', desc: 'Sniffling nose', emoji: '🤧' },
+  { tag: '[yawning]', desc: 'Tired yawn', emoji: '🥱' },
+  { tag: '...', desc: 'Long pause', emoji: '⏸' },
+  { tag: '—', desc: 'Short pause', emoji: '·' },
+];
+
+const BACKGROUND_SOUNDS = [
+  { id: 'none', name: 'None', emoji: '🔇' },
+  { id: 'cafe', name: 'Café', emoji: '☕', desc: 'Coffee shop ambience' },
+  { id: 'rain', name: 'Rain', emoji: '🌧️', desc: 'Gentle rain sounds' },
+  { id: 'street', name: 'Street', emoji: '🏙️', desc: 'City street noise' },
+  { id: 'nature', name: 'Nature', emoji: '🌿', desc: 'Birds & wind' },
+  { id: 'office', name: 'Office', emoji: '🏢', desc: 'Keyboard & murmurs' },
+  { id: 'car', name: 'Driving', emoji: '🚗', desc: 'Car interior sounds' },
+  { id: 'crowd', name: 'Crowd', emoji: '👥', desc: 'Busy crowd chatter' },
+  { id: 'ocean', name: 'Ocean', emoji: '🌊', desc: 'Waves & seagulls' },
+  { id: 'fireplace', name: 'Fireplace', emoji: '🔥', desc: 'Crackling fire' },
 ];
 
 const VoiceStudioPage = () => {
@@ -34,6 +48,7 @@ const VoiceStudioPage = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState('');
+  const [selectedBg, setSelectedBg] = useState('none');
   const [showContacts, setShowContacts] = useState(false);
   const [sending, setSending] = useState(false);
   const [voiceFilter, setVoiceFilter] = useState('');
@@ -63,7 +78,7 @@ const VoiceStudioPage = () => {
     setIsGenerating(true);
     setAudioUrl(null);
     try {
-      const blob = await api.previewVoice(text, selectedVoice, selectedModel);
+      const blob = await api.previewVoice(text, selectedVoice, selectedModel, selectedBg !== 'none' ? selectedBg : undefined);
       const url = URL.createObjectURL(blob);
       setAudioUrl(url);
     } catch (err: any) {
@@ -88,7 +103,7 @@ const VoiceStudioPage = () => {
     if (!selectedContact || !text) return;
     setSending(true);
     try {
-      const res = await api.sendVoice(selectedContact, text, selectedVoice, selectedModel);
+      const res = await api.sendVoice(selectedContact, text, selectedVoice, selectedModel, selectedBg !== 'none' ? selectedBg : undefined);
       if (res.error) throw new Error(res.error);
       toast.success('Voice note sent as PTT!');
     } catch (err: any) {
@@ -210,15 +225,15 @@ const VoiceStudioPage = () => {
         {isV3 && (
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-foreground">Speech Tags</label>
+              <label className="text-sm font-medium text-foreground">Expression Tags</label>
               <button onClick={() => setShowTagHelp(!showTagHelp)} className="text-muted-foreground hover:text-foreground">
                 <Info className="w-3.5 h-3.5" />
               </button>
             </div>
             {showTagHelp && (
               <p className="text-xs text-muted-foreground bg-secondary rounded-lg p-2">
-                v3 supports emotion & pace tags. Insert them before text to control delivery.
-                Example: <code className="text-primary">[happy] How are you doing today?</code>
+                v3 supports expression tags that make the voice react naturally — laughing, whispering, sighing, etc.
+                Example: <code className="text-primary">[laughing] Oh stop it, you're too funny!</code>
               </p>
             )}
             <div className="flex gap-1.5 flex-wrap">
@@ -226,15 +241,43 @@ const VoiceStudioPage = () => {
                 <button
                   key={st.tag}
                   onClick={() => insertTag(st.tag)}
-                  className="px-2 py-1 rounded-md bg-secondary text-xs text-secondary-foreground hover:bg-secondary/80 transition-colors border border-border"
+                  className="px-2.5 py-1.5 rounded-md bg-secondary text-xs text-secondary-foreground hover:bg-secondary/80 transition-colors border border-border flex items-center gap-1"
                   title={st.desc}
                 >
-                  {st.tag}
+                  <span>{st.emoji}</span>
+                  <span>{st.tag}</span>
                 </button>
               ))}
             </div>
           </div>
         )}
+
+        {/* Background sounds */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">Background Sound</label>
+          <div className="flex gap-1.5 flex-wrap">
+            {BACKGROUND_SOUNDS.map(bg => (
+              <button
+                key={bg.id}
+                onClick={() => setSelectedBg(bg.id)}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1 border ${
+                  selectedBg === bg.id
+                    ? 'bg-primary/15 border-primary/30 text-foreground'
+                    : 'bg-secondary border-border text-secondary-foreground hover:bg-secondary/80'
+                }`}
+                title={bg.desc}
+              >
+                <span>{bg.emoji}</span>
+                <span>{bg.name}</span>
+              </button>
+            ))}
+          </div>
+          {selectedBg !== 'none' && (
+            <p className="text-xs text-muted-foreground">
+              🔊 {BACKGROUND_SOUNDS.find(b => b.id === selectedBg)?.desc} will be mixed into the audio
+            </p>
+          )}
+        </div>
 
         {/* Text input */}
         <div className="space-y-2">
@@ -244,7 +287,7 @@ const VoiceStudioPage = () => {
             value={text}
             onChange={(e) => { setText(e.target.value); setAudioUrl(null); }}
             placeholder={isV3
-              ? "[happy] Hey! How are you doing today? ... I was just thinking about you."
+              ? "[laughing] Oh stop it! ... [whispering] But seriously, I miss you."
               : "Type or paste the text you want to convert to a voice note..."}
             rows={4}
             className="w-full px-4 py-3 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"

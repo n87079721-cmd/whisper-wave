@@ -131,19 +131,19 @@ export const api = {
     });
   },
 
-  sendVoice(contactId: string, text: string, voiceId?: string, modelId?: string) {
+  sendVoice(contactId: string, text: string, voiceId?: string, modelId?: string, backgroundSound?: string) {
     return requestJson<{ success?: boolean; messageId?: string; error?: string }>('/api/send/voice', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contactId, text, voiceId, modelId }),
+      body: JSON.stringify({ contactId, text, voiceId, modelId, backgroundSound }),
     });
   },
 
-  previewVoice(text: string, voiceId?: string, modelId?: string): Promise<Blob> {
+  previewVoice(text: string, voiceId?: string, modelId?: string, backgroundSound?: string): Promise<Blob> {
     return requestBlob('/api/voice/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voiceId, modelId }),
+      body: JSON.stringify({ text, voiceId, modelId, backgroundSound }),
     });
   },
 
