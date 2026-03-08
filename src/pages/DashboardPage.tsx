@@ -43,7 +43,7 @@ const DashboardPage = () => {
         </div>
         <StatusBadge
           connected={isConnected}
-          label={isWaiting ? 'QR Waiting' : undefined}
+          label={isWaiting ? 'QR Waiting' : isReconnecting ? 'Reconnecting' : undefined}
         />
       </div>
 
