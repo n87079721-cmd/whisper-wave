@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Key, RefreshCw, Shield, Power, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react';
+import { Key, RefreshCw, Shield, Power, Eye, EyeOff, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -11,6 +11,8 @@ const SettingsPage = () => {
   const [saving, setSaving] = useState(false);
   const [keyExists, setKeyExists] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [testingElevenLabs, setTestingElevenLabs] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
     api.getConfig('elevenlabs_api_key').then(data => {
@@ -35,6 +37,23 @@ const SettingsPage = () => {
       toast.error('Failed to save key');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTestElevenLabs = async () => {
+    setTestingElevenLabs(true);
+    setTestResult(null);
+    try {
+      const result = await api.testElevenLabs();
+      const message = `Connected. Found ${result.totalVoices} voices (${result.generatedVoices} generated/cloned).`;
+      setTestResult({ ok: true, message });
+      toast.success('ElevenLabs connection is working');
+    } catch (err: any) {
+      const message = err.message || 'ElevenLabs connection failed';
+      setTestResult({ ok: false, message });
+      toast.error(message);
+    } finally {
+      setTestingElevenLabs(false);
     }
   };
 
@@ -105,13 +124,33 @@ const SettingsPage = () => {
             {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         </div>
-        <button
-          onClick={handleSaveKey}
-          disabled={!elevenLabsKey || saving}
-          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40"
-        >
-          {saving ? 'Saving...' : 'Save Key'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSaveKey}
+            disabled={!elevenLabsKey || saving}
+            className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40"
+          >
+            {saving ? 'Saving...' : 'Save Key'}
+          </button>
+          <button
+            onClick={handleTestElevenLabs}
+            disabled={testingElevenLabs}
+            className="px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-sm font-medium hover:bg-secondary/80 transition-colors disabled:opacity-40"
+          >
+            {testingElevenLabs ? 'Testing...' : 'Test Connection'}
+          </button>
+        </div>
+
+        {testResult && (
+          <div className={`flex items-start gap-2 rounded-lg px-3 py-2 border ${testResult.ok ? 'bg-primary/10 border-primary/25' : 'bg-destructive/10 border-destructive/25'}`}>
+            {testResult.ok ? (
+              <CheckCircle className="w-4 h-4 text-primary mt-0.5" />
+            ) : (
+              <XCircle className="w-4 h-4 text-destructive mt-0.5" />
+            )}
+            <p className={`text-xs ${testResult.ok ? 'text-primary' : 'text-destructive'}`}>{testResult.message}</p>
+          </div>
+        )}
       </motion.div>
 
       {/* Session Management */}

@@ -1,99 +1,122 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const rawApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim() || '';
+const isLocalDev =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+const API_URL = (rawApiUrl || (isLocalDev ? 'http://localhost:3001' : '')).replace(/\/$/, '');
+
+const toUrl = (path: string) => (API_URL ? `${API_URL}${path}` : path);
+
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(toUrl(path), init);
+  const isJson = (res.headers.get('content-type') || '').includes('application/json');
+  const payload = isJson ? await res.json() : await res.text();
+
+  if (!res.ok) {
+    const message =
+      typeof payload === 'object' && payload && 'error' in payload
+        ? String((payload as { error?: string }).error)
+        : `Request failed (${res.status})`;
+    throw new Error(message);
+  }
+
+  return payload as T;
+}
+
+async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const res = await fetch(toUrl(path), init);
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const err = await res.json();
+      if (err?.error) message = err.error;
+    } catch {}
+    throw new Error(message);
+  }
+  return res.blob();
+}
 
 export const api = {
   // Status & QR
-  async getStatus() {
-    const res = await fetch(`${API_URL}/api/status`);
-    return res.json();
+  getStatus() {
+    return requestJson<{ status: 'disconnected' | 'qr_waiting' | 'connected' | 'reconnecting'; qr: string | null; stats?: Stats }>('/api/status');
   },
 
-  async getQR() {
-    const res = await fetch(`${API_URL}/api/qr`);
-    return res.json();
+  getQR() {
+    return requestJson<{ qr: string | null; status: string }>('/api/qr');
   },
 
   createEventSource() {
-    return new EventSource(`${API_URL}/api/events`);
+    return new EventSource(toUrl('/api/events'));
   },
 
   // Voices
-  async getVoices(): Promise<Voice[]> {
-    const res = await fetch(`${API_URL}/api/voices`);
-    return res.json();
+  getVoices(): Promise<Voice[]> {
+    return requestJson<Voice[]>('/api/voices');
+  },
+
+  testElevenLabs(): Promise<{ success: boolean; totalVoices: number; generatedVoices: number; supportsV3Prompts: boolean }> {
+    return requestJson('/api/elevenlabs/test');
   },
 
   // Contacts
-  async getContacts() {
-    const res = await fetch(`${API_URL}/api/contacts`);
-    return res.json();
+  getContacts() {
+    return requestJson<Contact[]>('/api/contacts');
   },
 
   // Conversations
-  async getConversations() {
-    const res = await fetch(`${API_URL}/api/conversations`);
-    return res.json();
+  getConversations() {
+    return requestJson<Contact[]>('/api/conversations');
   },
 
-  async getMessages(contactId: string) {
-    const res = await fetch(`${API_URL}/api/messages/${contactId}`);
-    return res.json();
+  getMessages(contactId: string) {
+    return requestJson<Message[]>(`/api/messages/${contactId}`);
   },
 
   // Send
-  async sendText(contactId: string, message: string) {
-    const res = await fetch(`${API_URL}/api/send/text`, {
+  sendText(contactId: string, message: string) {
+    return requestJson<{ success?: boolean; messageId?: string; error?: string }>('/api/send/text', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contactId, message }),
     });
-    return res.json();
   },
 
-  async sendVoice(contactId: string, text: string, voiceId?: string, modelId?: string) {
-    const res = await fetch(`${API_URL}/api/send/voice`, {
+  sendVoice(contactId: string, text: string, voiceId?: string, modelId?: string) {
+    return requestJson<{ success?: boolean; messageId?: string; error?: string }>('/api/send/voice', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contactId, text, voiceId, modelId }),
     });
-    return res.json();
   },
 
-  async previewVoice(text: string, voiceId?: string, modelId?: string): Promise<Blob> {
-    const res = await fetch(`${API_URL}/api/voice/preview`, {
+  previewVoice(text: string, voiceId?: string, modelId?: string): Promise<Blob> {
+    return requestBlob('/api/voice/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, voiceId, modelId }),
     });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error);
-    }
-    return res.blob();
   },
 
   // Config
-  async getConfig(key: string) {
-    const res = await fetch(`${API_URL}/api/config/${key}`);
-    return res.json();
+  getConfig(key: string) {
+    return requestJson<{ value: string; exists: boolean }>(`/api/config/${key}`);
   },
 
-  async setConfig(key: string, value: string) {
-    const res = await fetch(`${API_URL}/api/config`, {
+  setConfig(key: string, value: string) {
+    return requestJson<{ success: boolean }>('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, value }),
     });
-    return res.json();
   },
 
-  async reconnect() {
-    const res = await fetch(`${API_URL}/api/reconnect`, { method: 'POST' });
-    return res.json();
+  reconnect() {
+    return requestJson<{ success: boolean }>('/api/reconnect', { method: 'POST' });
   },
 
-  async clearSession() {
-    const res = await fetch(`${API_URL}/api/clear-session`, { method: 'POST' });
-    return res.json();
+  clearSession() {
+    return requestJson<{ success: boolean }>('/api/clear-session', { method: 'POST' });
   },
 };
 
