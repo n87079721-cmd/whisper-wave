@@ -1,22 +1,53 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Send, ChevronDown, Mic, Type, Loader2 } from 'lucide-react';
-import { api, type Contact } from '@/lib/api';
+import { Send, ChevronDown, Mic, Type, Loader2, Play, Square, Volume2 } from 'lucide-react';
+import { api, type Contact, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 
 const SendMessagePage = () => {
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [voices, setVoices] = useState<Voice[]>([]);
   const [selectedContact, setSelectedContact] = useState('');
   const [message, setMessage] = useState('');
   const [sendAs, setSendAs] = useState<'text' | 'voice'>('text');
+  const [selectedVoice, setSelectedVoice] = useState('JBFqnCBsd6RMkjVDRZzb');
   const [showContacts, setShowContacts] = useState(false);
   const [sending, setSending] = useState(false);
 
+  // Voice preview
+  const [previewing, setPreviewing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
   useEffect(() => {
     api.getContacts().then(setContacts).catch(() => {});
+    api.getVoices().then(v => {
+      setVoices(v);
+      if (v.length > 0) setSelectedVoice(v[0].id);
+    }).catch(() => {});
   }, []);
 
   const selected = contacts.find(c => c.id === selectedContact);
+
+  const handlePreview = async () => {
+    if (!message.trim()) return;
+    setPreviewing(true);
+    try {
+      const blob = await api.previewVoice(message, selectedVoice);
+      setPreviewUrl(URL.createObjectURL(blob));
+    } catch (err: any) {
+      toast.error(err.message || 'Preview failed');
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) { audioRef.current.pause(); setIsPlaying(false); }
+    else { audioRef.current.play(); setIsPlaying(true); }
+  };
 
   const handleSend = async () => {
     if (!selectedContact || !message) return;
@@ -27,11 +58,12 @@ const SendMessagePage = () => {
         if (res.error) throw new Error(res.error);
         toast.success('Message sent!');
       } else {
-        const res = await api.sendVoice(selectedContact, message);
+        const res = await api.sendVoice(selectedContact, message, selectedVoice);
         if (res.error) throw new Error(res.error);
-        toast.success('Voice note sent!');
+        toast.success('Voice note sent as PTT!');
       }
       setMessage('');
+      setPreviewUrl(null);
     } catch (err: any) {
       toast.error(err.message || 'Failed to send');
     } finally {
@@ -75,7 +107,7 @@ const SendMessagePage = () => {
                       onClick={() => { setSelectedContact(c.id); setShowContacts(false); }}
                       className="w-full text-left px-4 py-2.5 text-sm text-foreground hover:bg-secondary transition-colors"
                     >
-                      {c.name || c.phone} <span className="text-muted-foreground">({c.phone})</span>
+                      {c.name || c.phone} <span className="text-muted-foreground text-xs">({c.phone})</span>
                     </button>
                   ))
                 )}
@@ -89,7 +121,7 @@ const SendMessagePage = () => {
           <label className="text-sm font-medium text-foreground">Send as</label>
           <div className="flex gap-2">
             <button
-              onClick={() => setSendAs('text')}
+              onClick={() => { setSendAs('text'); setPreviewUrl(null); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 sendAs === 'text'
                   ? 'bg-primary text-primary-foreground'
@@ -111,6 +143,22 @@ const SendMessagePage = () => {
           </div>
         </div>
 
+        {/* Voice selector */}
+        {sendAs === 'voice' && voices.length > 0 && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">Voice</label>
+            <select
+              value={selectedVoice}
+              onChange={(e) => { setSelectedVoice(e.target.value); setPreviewUrl(null); }}
+              className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+            >
+              {voices.map(v => (
+                <option key={v.id} value={v.id}>{v.name} — {v.desc}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Message input */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-foreground">
@@ -118,17 +166,50 @@ const SendMessagePage = () => {
           </label>
           <textarea
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={(e) => { setMessage(e.target.value); setPreviewUrl(null); }}
             placeholder={sendAs === 'voice' ? 'Type text to generate voice note...' : 'Type your message...'}
             rows={4}
             className="w-full px-4 py-3 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
           />
         </div>
 
+        {/* Voice preview */}
         {sendAs === 'voice' && (
-          <p className="text-xs text-muted-foreground">
-            Voice note will be generated via ElevenLabs TTS, converted to OGG/Opus, and sent as a PTT voice message with waveform.
-          </p>
+          <>
+            <button
+              onClick={handlePreview}
+              disabled={!message.trim() || previewing}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-secondary text-foreground text-sm font-medium hover:bg-secondary/80 transition-colors disabled:opacity-40"
+            >
+              {previewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Volume2 className="w-4 h-4" />}
+              {previewing ? 'Generating preview...' : 'Preview Voice'}
+            </button>
+
+            {previewUrl && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center gap-3 bg-secondary/70 rounded-lg p-3"
+              >
+                <button
+                  onClick={togglePlay}
+                  className="w-9 h-9 rounded-full bg-primary flex items-center justify-center flex-shrink-0"
+                >
+                  {isPlaying ? <Square className="w-3.5 h-3.5 text-primary-foreground" /> : <Play className="w-3.5 h-3.5 text-primary-foreground ml-0.5" />}
+                </button>
+                <div className="flex-1 flex gap-0.5 items-center">
+                  {Array.from({ length: 35 }).map((_, i) => (
+                    <div key={i} className="w-0.5 bg-primary/50 rounded-full" style={{ height: `${Math.random() * 18 + 4}px` }} />
+                  ))}
+                </div>
+                <audio ref={audioRef} src={previewUrl} onEnded={() => setIsPlaying(false)} />
+              </motion.div>
+            )}
+
+            <p className="text-xs text-muted-foreground">
+              ✓ Sent as OGG/Opus PTT — shows native WhatsApp waveform
+            </p>
+          </>
         )}
 
         {/* Send button */}
