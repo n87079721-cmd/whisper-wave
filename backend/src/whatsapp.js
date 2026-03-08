@@ -25,6 +25,9 @@ let eventListeners = [];
 let reconnectTimer = null;
 let isConnecting = false;
 let reconnectAttempt = 0;
+let processGuardsInstalled = false;
+let badMacTimestamps = [];
+let repairInProgress = false;
 
 export function getWhatsAppState() {
   return { status: connectionStatus, qr: qrCode };
@@ -39,18 +42,91 @@ function emit(event, data) {
   eventListeners.forEach(l => l(event, data));
 }
 
-export function initWhatsApp(db) {
-  // Catch Baileys internal decryption errors (Bad MAC, Signal protocol) to prevent process crash
+function isSignalSessionError(err) {
+  const message = (err?.message || err?.toString?.() || '').toLowerCase();
+  return (
+    message.includes('bad mac') ||
+    message.includes('failed to decrypt message with any known session') ||
+    message.includes('decryptwhispermessage') ||
+    message.includes('sessioncipher') ||
+    message.includes('signalprotocol')
+  );
+}
+
+function purgeCorruptedSignalSessions() {
+  if (!fs.existsSync(AUTH_DIR)) return 0;
+  const files = fs.readdirSync(AUTH_DIR);
+  const targets = files.filter((name) => /^session-.*\.json$/i.test(name) || /^sender-key-.*\.json$/i.test(name));
+
+  for (const file of targets) {
+    try {
+      fs.rmSync(path.join(AUTH_DIR, file), { force: true });
+    } catch {}
+  }
+
+  return targets.length;
+}
+
+function triggerSignalSessionRepair(db, sourceError) {
+  const now = Date.now();
+  badMacTimestamps.push(now);
+  badMacTimestamps = badMacTimestamps.filter((ts) => now - ts < 60000);
+
+  // Repair only if we see repeated decryption failures in a short window.
+  if (badMacTimestamps.length < 3 || repairInProgress) return;
+
+  repairInProgress = true;
+  console.warn(`⚠️ Detected repeated Signal decrypt failures. Starting auto-repair (${sourceError?.message || 'Bad MAC'})`);
+
+  setTimeout(async () => {
+    try {
+      connectionStatus = 'reconnecting';
+      emit('status', { status: 'reconnecting' });
+
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+
+      const removed = purgeCorruptedSignalSessions();
+      console.log(`🛠️ Cleared ${removed} Signal session file(s). Reconnecting...`);
+
+      await startConnection(db);
+    } catch (err) {
+      console.error('Signal session auto-repair failed:', err?.message || err);
+    } finally {
+      repairInProgress = false;
+      badMacTimestamps = [];
+    }
+  }, 200);
+}
+
+function installProcessGuards(db) {
+  if (processGuardsInstalled) return;
+  processGuardsInstalled = true;
+
   process.on('uncaughtException', (err) => {
-    const msg = err?.message || '';
-    if (msg.includes('Bad MAC') || msg.includes('decryptWhisperMessage') || msg.includes('SignalProtocol')) {
-      console.warn('⚠️ Suppressed Baileys decryption error:', msg);
+    if (isSignalSessionError(err)) {
+      console.warn('⚠️ Suppressed uncaught Signal session error:', err?.message || err);
+      triggerSignalSessionRepair(db, err);
       return;
     }
     console.error('Uncaught exception:', err);
     process.exit(1);
   });
 
+  process.on('unhandledRejection', (reason) => {
+    if (isSignalSessionError(reason)) {
+      console.warn('⚠️ Suppressed unhandled Signal session rejection:', reason?.message || reason);
+      triggerSignalSessionRepair(db, reason);
+      return;
+    }
+    console.error('Unhandled rejection:', reason);
+  });
+}
+
+export function initWhatsApp(db) {
+  installProcessGuards(db);
   startConnection(db);
   return {
     getState: getWhatsAppState,
