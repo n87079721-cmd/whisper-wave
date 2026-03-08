@@ -85,14 +85,17 @@ async function startConnection(db) {
     }
 
     if (connection === 'close') {
-      connectionStatus = 'disconnected';
-      emit('status', { status: 'disconnected' });
       const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
-      if (reason !== DisconnectReason.loggedOut) {
+      if (reason === DisconnectReason.loggedOut) {
+        connectionStatus = 'disconnected';
+        emit('status', { status: 'disconnected' });
+        console.log('❌ Logged out. Clear session to reconnect.');
+      } else {
+        // Transient disconnect — keep showing connected while we reconnect
+        connectionStatus = 'reconnecting';
+        emit('status', { status: 'reconnecting' });
         console.log('🔄 Auto-reconnecting in 3s...');
         reconnectTimer = setTimeout(() => startConnection(db), 3000);
-      } else {
-        console.log('❌ Logged out. Clear session to reconnect.');
       }
     }
   });
