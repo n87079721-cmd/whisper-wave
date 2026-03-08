@@ -10,6 +10,7 @@
     "@whiskeysockets/baileys": "^6.7.16",
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
+    "node-cache": "^5.1.2",
     "dotenv": "^16.6.1",
     "express": "^4.21.1",
     "fluent-ffmpeg": "^2.1.3",
