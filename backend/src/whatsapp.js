@@ -84,6 +84,17 @@ async function startConnection(db) {
       printQRInTerminal: true,
       generateHighQualityLinkPreview: false,
       keepAliveIntervalMs: 30000,
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
+      msgRetryCounterCache,
+      getMessage: async (key) => {
+        // Baileys calls this to retry decryption of messages with Bad MAC errors
+        try {
+          const row = db.prepare('SELECT content FROM messages WHERE id = ?').get(key.id);
+          if (row?.content) return { conversation: row.content };
+        } catch {}
+        return undefined;
+      },
     });
 
     sock.ev.on('creds.update', saveCreds);
