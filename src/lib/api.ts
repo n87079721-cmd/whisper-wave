@@ -40,8 +40,18 @@ const toUrl = (path: string) => {
 };
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!getApiUrl()) {
+    throw new Error('Backend URL not configured. Go to Settings → Backend URL to set it.');
+  }
   const res = await fetch(toUrl(path), init);
-  const isJson = (res.headers.get('content-type') || '').includes('application/json');
+  const ct = res.headers.get('content-type') || '';
+  
+  // Detect HTML response (means we hit the Vite server, not the backend)
+  if (ct.includes('text/html')) {
+    throw new Error('Backend unreachable — got HTML instead of JSON. Check your Backend URL in Settings.');
+  }
+
+  const isJson = ct.includes('application/json');
   const payload = isJson ? await res.json() : await res.text();
 
   if (!res.ok) {
