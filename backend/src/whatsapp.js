@@ -372,7 +372,7 @@ async function startConnection(db) {
           const phone = '+' + rawNumber;
           const existing = db.prepare('SELECT id FROM contacts WHERE jid = ?').get(update.id);
           if (existing) {
-            db.prepare('UPDATE contacts SET name = ?, phone = ?, updated_at = datetime("now") WHERE id = ?')
+            db.prepare("UPDATE contacts SET name = ?, phone = ?, updated_at = datetime('now') WHERE id = ?")
               .run(update.notify, phone, existing.id);
           }
         }
@@ -438,10 +438,10 @@ function getOrCreateContact(db, jid, phone, pushName, isGroup = false) {
   if (existing) {
     // Update push name and phone if we have better data
     if (pushName && (!existing.name || existing.name === phone)) {
-      db.prepare('UPDATE contacts SET name = ?, phone = ?, is_group = ?, updated_at = datetime("now") WHERE id = ?')
+      db.prepare("UPDATE contacts SET name = ?, phone = ?, is_group = ?, updated_at = datetime('now') WHERE id = ?")
         .run(pushName, phone, isGroup ? 1 : 0, existing.id);
     } else if (existing.name !== phone) {
-      db.prepare('UPDATE contacts SET phone = ?, is_group = ?, updated_at = datetime("now") WHERE id = ?')
+      db.prepare("UPDATE contacts SET phone = ?, is_group = ?, updated_at = datetime('now') WHERE id = ?")
         .run(phone, isGroup ? 1 : 0, existing.id);
     }
     return existing.id;
@@ -492,11 +492,28 @@ async function clearSession(db) {
   badMacTimestamps = [];
   repairInProgress = false;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+
+  // Close socket without triggering reconnect
   if (sock) {
+    try { sock.ev.removeAllListeners('connection.update'); } catch {}
+    try { sock.ev.removeAllListeners('messages.upsert'); } catch {}
+    try { sock.ev.removeAllListeners('contacts.update'); } catch {}
+    try { sock.ev.removeAllListeners('contacts.upsert'); } catch {}
+    try { sock.ev.removeAllListeners('messaging-history.set'); } catch {}
+    try { sock.ev.removeAllListeners('creds.update'); } catch {}
     try { await sock.logout(); } catch {}
+    try { sock.end?.(undefined); } catch {}
     sock = null;
   }
+
+  // Delete entire auth directory (session files, creds, keys)
   if (fs.existsSync(AUTH_DIR)) {
     fs.rmSync(AUTH_DIR, { recursive: true, force: true });
   }
+  // Recreate empty auth dir for next scan
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
+
+  isConnecting = false;
+  emit('status', { status: 'disconnected' });
+  console.log('🗑️ Session fully cleared. Scan QR to reconnect.');
 }
