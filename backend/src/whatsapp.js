@@ -286,6 +286,11 @@ async function startConnection(db) {
       }
     });
   } catch (err) {
+    if (isSignalSessionError(err)) {
+      console.warn('⚠️ startConnection hit Signal session error:', err?.message || err);
+      triggerSignalSessionRepair(db, err);
+      return;
+    }
     console.error('startConnection error:', err?.message || err);
     connectionStatus = 'reconnecting';
     emit('status', { status: 'reconnecting' });
