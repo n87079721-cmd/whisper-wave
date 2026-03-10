@@ -84,24 +84,16 @@ const SettingsPage = () => {
     }
   };
 
-  const handleReconnect = async () => {
-    setReconnecting(true);
-    try {
-      await api.reconnect();
-      toast.success('Reconnecting...');
-    } catch {
-      toast.error('Failed to reconnect');
-    } finally {
-      setReconnecting(false);
-    }
-  };
-
-  const handleClearSession = async () => {
+  const handleLogout = async () => {
+    if (!confirm('This will disconnect your WhatsApp account. You will need to scan the QR code again to reconnect. Continue?')) return;
+    setLoggingOut(true);
     try {
       await api.clearSession();
-      toast.success('Session cleared');
+      toast.success('WhatsApp logged out successfully');
     } catch {
-      toast.error('Failed to clear session');
+      toast.error('Failed to logout');
+    } finally {
+      setLoggingOut(false);
     }
   };
 
