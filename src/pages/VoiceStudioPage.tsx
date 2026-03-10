@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2 } from 'lucide-react';
 import { api, type Contact, type Voice } from '@/lib/api';
@@ -10,20 +10,73 @@ const MODELS = [
   { id: 'eleven_monolingual_v1', name: 'English v1', desc: 'English only, legacy' },
 ];
 
-const SPEECH_TAGS = [
-  { tag: '[laughing]', desc: 'Laughing while talking', emoji: '😂' },
-  { tag: '[chuckling]', desc: 'Light chuckle', emoji: '🤭' },
-  { tag: '[sighing]', desc: 'Deep sigh', emoji: '😮‍💨' },
-  { tag: '[gasping]', desc: 'Surprised gasp', emoji: '😱' },
-  { tag: '[crying]', desc: 'Tearful voice', emoji: '😢' },
-  { tag: '[whispering]', desc: 'Quiet whisper', emoji: '🤫' },
-  { tag: '[shouting]', desc: 'Loud and projecting', emoji: '📢' },
-  { tag: '[clearing throat]', desc: 'Ahem moment', emoji: '😤' },
-  { tag: '[sniffling]', desc: 'Sniffling nose', emoji: '🤧' },
-  { tag: '[yawning]', desc: 'Tired yawn', emoji: '🥱' },
-  { tag: '...', desc: 'Long pause', emoji: '⏸' },
-  { tag: '—', desc: 'Short pause', emoji: '·' },
-];
+const TAG_CATEGORIES = {
+  'Emotions': [
+    { tag: '[laughing]', desc: 'Laughing while talking', emoji: '😂' },
+    { tag: '[chuckling]', desc: 'Light chuckle', emoji: '🤭' },
+    { tag: '[crying]', desc: 'Tearful voice', emoji: '😢' },
+    { tag: '[sobbing]', desc: 'Heavy crying', emoji: '😭' },
+    { tag: '[excited]', desc: 'Excited and enthusiastic', emoji: '🤩' },
+    { tag: '[surprised]', desc: 'Surprised reaction', emoji: '😲' },
+    { tag: '[angry]', desc: 'Angry tone', emoji: '😡' },
+    { tag: '[frustrated]', desc: 'Frustrated and annoyed', emoji: '😤' },
+    { tag: '[nervous]', desc: 'Nervous and anxious', emoji: '😰' },
+    { tag: '[scared]', desc: 'Fearful voice', emoji: '😨' },
+    { tag: '[disgusted]', desc: 'Disgusted reaction', emoji: '🤢' },
+    { tag: '[proud]', desc: 'Proud and confident', emoji: '😏' },
+    { tag: '[embarrassed]', desc: 'Embarrassed tone', emoji: '😳' },
+    { tag: '[sad]', desc: 'Sad and melancholic', emoji: '😞' },
+    { tag: '[happy]', desc: 'Happy and joyful', emoji: '😊' },
+    { tag: '[nostalgic]', desc: 'Wistful and nostalgic', emoji: '🥹' },
+  ],
+  'Reactions': [
+    { tag: '[gasping]', desc: 'Surprised gasp', emoji: '😱' },
+    { tag: '[sighing]', desc: 'Deep sigh', emoji: '😮‍💨' },
+    { tag: '[groaning]', desc: 'Frustrated groan', emoji: '😩' },
+    { tag: '[scoffing]', desc: 'Dismissive scoff', emoji: '🙄' },
+    { tag: '[tutting]', desc: 'Disapproving tut', emoji: '👎' },
+    { tag: '[snickering]', desc: 'Snickering under breath', emoji: '😏' },
+    { tag: '[giggling]', desc: 'Playful giggle', emoji: '🤗' },
+    { tag: '[cackling]', desc: 'Loud evil laugh', emoji: '😈' },
+    { tag: '[hmm]', desc: 'Thinking hmm', emoji: '🤔' },
+    { tag: '[ugh]', desc: 'Disgusted ugh', emoji: '😒' },
+    { tag: '[wow]', desc: 'Amazed wow', emoji: '🤯' },
+    { tag: '[oh]', desc: 'Realization moment', emoji: '💡' },
+  ],
+  'Voice Style': [
+    { tag: '[whispering]', desc: 'Quiet whisper', emoji: '🤫' },
+    { tag: '[shouting]', desc: 'Loud and projecting', emoji: '📢' },
+    { tag: '[mumbling]', desc: 'Mumbling quietly', emoji: '🫣' },
+    { tag: '[singing]', desc: 'Singing tone', emoji: '🎵' },
+    { tag: '[sarcastic]', desc: 'Sarcastic tone', emoji: '😒' },
+    { tag: '[mocking]', desc: 'Mocking imitation', emoji: '🤪' },
+    { tag: '[dramatic]', desc: 'Over-dramatic delivery', emoji: '🎭' },
+    { tag: '[deadpan]', desc: 'Flat, deadpan delivery', emoji: '😐' },
+    { tag: '[seductive]', desc: 'Smooth, flirty tone', emoji: '😘' },
+    { tag: '[pleading]', desc: 'Begging, pleading tone', emoji: '🥺' },
+    { tag: '[comforting]', desc: 'Warm, soothing tone', emoji: '🤗' },
+    { tag: '[storytelling]', desc: 'Narrative, engaging tone', emoji: '📖' },
+  ],
+  'Body Sounds': [
+    { tag: '[clearing throat]', desc: 'Ahem moment', emoji: '😤' },
+    { tag: '[sniffling]', desc: 'Sniffling nose', emoji: '🤧' },
+    { tag: '[yawning]', desc: 'Tired yawn', emoji: '🥱' },
+    { tag: '[coughing]', desc: 'Light cough', emoji: '😷' },
+    { tag: '[hiccupping]', desc: 'Hiccup sound', emoji: '🫢' },
+    { tag: '[snoring]', desc: 'Snoring sound', emoji: '😴' },
+    { tag: '[burping]', desc: 'Burp sound', emoji: '🫨' },
+    { tag: '[gulping]', desc: 'Nervous gulp', emoji: '😬' },
+    { tag: '[panting]', desc: 'Out of breath', emoji: '🏃' },
+    { tag: '[shivering]', desc: 'Cold and shivering', emoji: '🥶' },
+  ],
+  'Pauses & Flow': [
+    { tag: '...', desc: 'Long pause', emoji: '⏸' },
+    { tag: '—', desc: 'Short pause / interruption', emoji: '·' },
+    { tag: '~', desc: 'Trailing off', emoji: '💭' },
+    { tag: '*inhale*', desc: 'Deep breath in', emoji: '🌬️' },
+    { tag: '*exhale*', desc: 'Breath out', emoji: '💨' },
+  ],
+};
 
 
 const VoiceStudioPage = () => {
@@ -44,6 +97,7 @@ const VoiceStudioPage = () => {
   const [loadingVoices, setLoadingVoices] = useState(true);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [originalText, setOriginalText] = useState<string | null>(null);
+  const [activeTagCategory, setActiveTagCategory] = useState('Emotions');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -213,7 +267,7 @@ const VoiceStudioPage = () => {
 
         {/* Speech tags helper (shown for v3) */}
         {isV3 && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="flex items-center gap-2">
               <label className="text-sm font-medium text-foreground">Expression Tags</label>
               <button onClick={() => setShowTagHelp(!showTagHelp)} className="text-muted-foreground hover:text-foreground">
@@ -223,11 +277,29 @@ const VoiceStudioPage = () => {
             {showTagHelp && (
               <p className="text-xs text-muted-foreground bg-secondary rounded-lg p-2">
                 v3 supports expression tags that make the voice react naturally — laughing, whispering, sighing, etc.
+                Click any tag to insert it at the cursor position.
                 Example: <code className="text-primary">[laughing] Oh stop it, you're too funny!</code>
               </p>
             )}
+            {/* Category tabs */}
             <div className="flex gap-1.5 flex-wrap">
-              {SPEECH_TAGS.map(st => (
+              {Object.keys(TAG_CATEGORIES).map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setActiveTagCategory(cat)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all border ${
+                    activeTagCategory === cat
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+            {/* Tags for active category */}
+            <div className="flex gap-1.5 flex-wrap">
+              {TAG_CATEGORIES[activeTagCategory as keyof typeof TAG_CATEGORIES].map(st => (
                 <button
                   key={st.tag}
                   onClick={() => insertTag(st.tag)}
