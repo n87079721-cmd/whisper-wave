@@ -13,8 +13,17 @@ export function useWhatsAppStatus() {
       const data = await api.getStatus();
       setStatus(data.status);
       if (data.stats) setStats(data.stats);
-    } catch {
-      // Keep previous state on transient backend/network errors to avoid false logout UI
+      // If QR waiting, also fetch the QR data URL
+      if (data.status === 'qr_waiting') {
+        try {
+          const qrData = await api.getQR();
+          if (qrData.qr) setQr(qrData.qr);
+        } catch {}
+      } else if (data.status === 'connected') {
+        setQr(null);
+      }
+    } catch (err) {
+      console.error('[WA Status] refresh error:', err);
       setStatus((prev) => (prev === 'qr_waiting' ? prev : 'reconnecting'));
     }
   }, []);
