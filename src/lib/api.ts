@@ -147,6 +147,15 @@ export const api = {
     });
   },
 
+  // Enhance text with AI
+  enhanceText(text: string) {
+    return requestJson<{ enhanced: string }>('/api/enhance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+  },
+
   // Config
   getConfig(key: string) {
     return requestJson<{ value: string; exists: boolean }>(`/api/config/${key}`);
