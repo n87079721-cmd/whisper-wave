@@ -5,8 +5,8 @@ import { api, type Contact, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 
 const MODELS = [
-  { id: 'eleven_multilingual_v2', name: 'Multilingual v2', desc: 'Highest quality, 29 languages' },
-  { id: 'eleven_v3', name: 'v3 (Gina-style)', desc: 'Latest model with speech tags & expressions' },
+  { id: 'eleven_v3', name: 'v3 Human Mode ✨', desc: 'Most natural & expressive — recommended' },
+  { id: 'eleven_multilingual_v2', name: 'Multilingual v2', desc: 'High quality, 29 languages' },
   { id: 'eleven_monolingual_v1', name: 'English v1', desc: 'English only, legacy' },
 ];
 

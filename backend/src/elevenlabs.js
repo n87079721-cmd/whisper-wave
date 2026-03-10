@@ -119,9 +119,10 @@ export async function generatePreviewAudio(apiKey, text, voiceId, modelId) {
         model_id: model,
         voice_settings: {
           stability: 0.3,
-          similarity_boost: 0.6,
-          style: 0.7,
+          similarity_boost: 0.65,
+          style: 0.8,
           use_speaker_boost: true,
+          speed: 0.95,
         },
       }),
     }
