@@ -276,6 +276,13 @@ async function startConnection(db) {
           if (type === 'notify' && !isFromMe) {
             db.prepare(`INSERT INTO stats (event, data) VALUES ('message_received', ?)`).run(JSON.stringify({ contactId }));
             emit('message', { contactId, msgId });
+
+            // AI Auto-Reply (only for non-group, real-time messages)
+            if (!isGroup) {
+              handleAutoReply(db, contactId, jid, phone, pushName).catch(err => {
+                console.error('Auto-reply error:', err?.message || err);
+              });
+            }
           }
         } catch (err) {
           if (isSignalSessionError(err)) {
