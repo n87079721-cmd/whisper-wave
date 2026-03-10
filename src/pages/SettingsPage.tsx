@@ -242,6 +242,48 @@ const SettingsPage = () => {
         )}
       </motion.div>
 
+      {/* OpenAI API Key */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="glass rounded-xl p-6 space-y-4"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center">
+            <Brain className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground text-sm">OpenAI API Key</h3>
+            <p className="text-xs text-muted-foreground">
+              Required for the ✨ Enhance feature in Voice Studio.{' '}
+              {openaiKeyExists && <span className="text-primary">✓ Key saved</span>}
+            </p>
+          </div>
+        </div>
+        <div className="relative">
+          <input
+            type={showOpenaiKey ? 'text' : 'password'}
+            value={openaiKey}
+            onChange={(e) => setOpenaiKey(e.target.value)}
+            placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+            className="w-full px-4 py-2.5 pr-10 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+          />
+          <button
+            onClick={() => setShowOpenaiKey(!showOpenaiKey)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {showOpenaiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </button>
+        </div>
+        <button
+          onClick={handleSaveOpenaiKey}
+          disabled={!openaiKey || savingOpenai}
+          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40"
+        >
+          {savingOpenai ? 'Saving...' : 'Save Key'}
+        </button>
+      </motion.div>
+
       {/* Session Management */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
