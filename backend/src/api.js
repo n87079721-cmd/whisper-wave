@@ -241,7 +241,8 @@ export function createApiRouter(db, wa) {
       const audioBuffer = await generatePreviewAudio(
         apiKey, text,
         voiceId || 'JBFqnCBsd6RMkjVDRZzb',
-        modelId || null
+        modelId || null,
+        backgroundSound || null
       );
       res.set('Content-Type', 'audio/mpeg');
       res.send(audioBuffer);
