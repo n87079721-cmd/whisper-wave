@@ -230,7 +230,7 @@ export function createApiRouter(db, wa) {
   // ── Preview voice (MP3 for browser playback) ──────────────
   router.post('/voice/preview', async (req, res) => {
     try {
-      const { text, voiceId, modelId } = req.body;
+      const { text, voiceId, modelId, backgroundSound } = req.body;
       if (!text) return res.status(400).json({ error: 'Missing text' });
 
       const apiKey = getConfig(db, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
