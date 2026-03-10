@@ -17,7 +17,7 @@ const SettingsPage = () => {
   const [savingOpenai, setSavingOpenai] = useState(false);
   const [keyExists, setKeyExists] = useState(false);
   const [openaiKeyExists, setOpenaiKeyExists] = useState(false);
-  const [reconnecting, setReconnecting] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [testingElevenLabs, setTestingElevenLabs] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
