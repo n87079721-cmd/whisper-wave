@@ -25,7 +25,7 @@ const Index = () => {
   return (
     <div className="flex min-h-screen bg-background">
       <DashboardSidebar activePage={activePage} onPageChange={setActivePage} />
-      <main className="flex-1 p-6 overflow-auto">
+      <main className="flex-1 p-5 overflow-auto">
         <ActiveComponent />
       </main>
     </div>
