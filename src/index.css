@@ -6,48 +6,53 @@
 
 @layer base {
   :root {
-    --background: 220 16% 8%;
-    --foreground: 210 20% 92%;
+    /* WhatsApp Dark Theme */
+    --background: 200 18% 10%;
+    --foreground: 0 0% 93%;
 
-    --card: 220 14% 11%;
-    --card-foreground: 210 20% 92%;
+    --card: 200 15% 13%;
+    --card-foreground: 0 0% 93%;
 
-    --popover: 220 14% 13%;
-    --popover-foreground: 210 20% 92%;
+    --popover: 200 15% 15%;
+    --popover-foreground: 0 0% 93%;
 
-    --primary: 142 70% 45%;
-    --primary-foreground: 220 16% 8%;
+    --primary: 150 60% 42%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 14% 16%;
-    --secondary-foreground: 210 20% 82%;
+    --secondary: 200 12% 17%;
+    --secondary-foreground: 0 0% 80%;
 
-    --muted: 220 12% 14%;
-    --muted-foreground: 215 12% 50%;
+    --muted: 200 10% 15%;
+    --muted-foreground: 200 8% 50%;
 
-    --accent: 142 50% 38%;
-    --accent-foreground: 210 20% 95%;
+    --accent: 150 45% 36%;
+    --accent-foreground: 0 0% 95%;
 
     --destructive: 0 72% 51%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive-foreground: 0 0% 98%;
 
-    --border: 220 12% 18%;
-    --input: 220 12% 18%;
-    --ring: 142 70% 45%;
+    --border: 200 10% 18%;
+    --input: 200 10% 18%;
+    --ring: 150 60% 42%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
 
-    --sidebar-background: 220 16% 6%;
-    --sidebar-foreground: 210 15% 70%;
-    --sidebar-primary: 142 70% 45%;
-    --sidebar-primary-foreground: 220 16% 8%;
-    --sidebar-accent: 220 14% 12%;
-    --sidebar-accent-foreground: 210 20% 92%;
-    --sidebar-border: 220 12% 14%;
-    --sidebar-ring: 142 70% 45%;
+    --sidebar-background: 200 20% 7%;
+    --sidebar-foreground: 200 8% 60%;
+    --sidebar-primary: 150 60% 42%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 200 14% 14%;
+    --sidebar-accent-foreground: 0 0% 93%;
+    --sidebar-border: 200 12% 14%;
+    --sidebar-ring: 150 60% 42%;
 
-    --success: 142 70% 45%;
+    --success: 150 60% 42%;
     --warning: 38 92% 50%;
     --info: 210 100% 56%;
+
+    --wa-teal-dark: 150 60% 42%;
+    --wa-bubble-out: 150 30% 20%;
+    --wa-bubble-in: 200 12% 17%;
   }
 }
 
@@ -61,7 +66,6 @@
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
   }
 
-  /* Custom scrollbar */
   ::-webkit-scrollbar {
     width: 6px;
   }
@@ -79,12 +83,15 @@
 
 @layer utilities {
   .glass {
-    @apply bg-card/80 backdrop-blur-xl border border-border/50;
+    @apply bg-card border border-border/50;
   }
   .glow-primary {
-    box-shadow: 0 0 20px hsl(var(--primary) / 0.15);
+    box-shadow: 0 0 12px hsl(var(--primary) / 0.1);
   }
   .text-gradient {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-[hsl(var(--primary))] to-[hsl(var(--accent))];
+  }
+  .wa-pattern {
+    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.02'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
   }
 }
