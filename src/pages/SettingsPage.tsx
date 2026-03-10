@@ -39,6 +39,9 @@ const SettingsPage = () => {
     api.getConfig('automation_enabled').then(data => {
       setAutoEnabled(data.value === 'true');
     }).catch(() => {});
+    api.getConfig('ai_system_prompt').then(data => {
+      if (data.exists) setSystemPrompt(data.value || '');
+    }).catch(() => {});
   }, []);
 
   const handleSaveKey = async () => {
