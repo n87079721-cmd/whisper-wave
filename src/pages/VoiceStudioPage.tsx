@@ -54,6 +54,8 @@ const VoiceStudioPage = () => {
   const [voiceFilter, setVoiceFilter] = useState('');
   const [showTagHelp, setShowTagHelp] = useState(false);
   const [loadingVoices, setLoadingVoices] = useState(true);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [originalText, setOriginalText] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
