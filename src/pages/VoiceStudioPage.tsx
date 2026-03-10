@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2 } from 'lucide-react';
 import { api, type Contact, type Voice } from '@/lib/api';
