@@ -242,32 +242,6 @@ const VoiceStudioPage = () => {
           </div>
         )}
 
-        {/* Background sounds */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">Background Sound</label>
-          <div className="flex gap-1.5 flex-wrap">
-            {BACKGROUND_SOUNDS.map(bg => (
-              <button
-                key={bg.id}
-                onClick={() => setSelectedBg(bg.id)}
-                className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1 border ${
-                  selectedBg === bg.id
-                    ? 'bg-primary/15 border-primary/30 text-foreground'
-                    : 'bg-secondary border-border text-secondary-foreground hover:bg-secondary/80'
-                }`}
-                title={bg.desc}
-              >
-                <span>{bg.emoji}</span>
-                <span>{bg.name}</span>
-              </button>
-            ))}
-          </div>
-          {selectedBg !== 'none' && (
-            <p className="text-xs text-muted-foreground">
-              🔊 {BACKGROUND_SOUNDS.find(b => b.id === selectedBg)?.desc} will be mixed into the audio
-            </p>
-          )}
-        </div>
 
         {/* Text input */}
         <div className="space-y-2">
