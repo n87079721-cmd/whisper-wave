@@ -71,9 +71,10 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId) {
           model_id: model,
           voice_settings: {
             stability: 0.3,
-            similarity_boost: 0.6,
-            style: 0.7,
+            similarity_boost: 0.65,
+            style: 0.8,
             use_speaker_boost: true,
+            speed: 0.95,
           },
         }),
       }
@@ -89,7 +90,7 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId) {
 
     // Convert MP3 → OGG/Opus for WhatsApp PTT (waveform display)
     execSync(
-      `${ffmpeg} -y -i "${mp3Path}" -c:a libopus -b:a 64k -ar 48000 -ac 1 -application voip "${oggPath}"`,
+      `${ffmpeg} -y -i "${mp3Path}" -c:a libopus -b:a 128k -ar 48000 -ac 1 -application audio "${oggPath}"`,
       { stdio: 'pipe' }
     );
 
@@ -118,9 +119,10 @@ export async function generatePreviewAudio(apiKey, text, voiceId, modelId) {
         model_id: model,
         voice_settings: {
           stability: 0.3,
-          similarity_boost: 0.6,
-          style: 0.7,
+          similarity_boost: 0.65,
+          style: 0.8,
           use_speaker_boost: true,
+          speed: 0.95,
         },
       }),
     }
