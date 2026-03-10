@@ -189,7 +189,7 @@ export function createApiRouter(db, wa) {
   // ── Send Voice Note (PTT, no caption) ─────────────────────
   router.post('/send/voice', async (req, res) => {
     try {
-      const { contactId, text, voiceId, modelId } = req.body;
+      const { contactId, text, voiceId, modelId, backgroundSound } = req.body;
       if (!contactId || !text) {
         return res.status(400).json({ error: 'Missing contactId or text' });
       }
@@ -206,7 +206,8 @@ export function createApiRouter(db, wa) {
       const audioBuffer = await generateVoiceNote(
         apiKey, text,
         voiceId || 'JBFqnCBsd6RMkjVDRZzb',
-        modelId || null
+        modelId || null,
+        backgroundSound || null
       );
 
       // Send as PTT voice note — no caption, just audio with waveform
@@ -229,7 +230,7 @@ export function createApiRouter(db, wa) {
   // ── Preview voice (MP3 for browser playback) ──────────────
   router.post('/voice/preview', async (req, res) => {
     try {
-      const { text, voiceId, modelId } = req.body;
+      const { text, voiceId, modelId, backgroundSound } = req.body;
       if (!text) return res.status(400).json({ error: 'Missing text' });
 
       const apiKey = getConfig(db, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
@@ -240,7 +241,8 @@ export function createApiRouter(db, wa) {
       const audioBuffer = await generatePreviewAudio(
         apiKey, text,
         voiceId || 'JBFqnCBsd6RMkjVDRZzb',
-        modelId || null
+        modelId || null,
+        backgroundSound || null
       );
       res.set('Content-Type', 'audio/mpeg');
       res.send(audioBuffer);
