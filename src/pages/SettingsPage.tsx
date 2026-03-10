@@ -13,6 +13,8 @@ const SettingsPage = () => {
   const [showKey, setShowKey] = useState(false);
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [autoEnabled, setAutoEnabled] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [savingPrompt, setSavingPrompt] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingOpenai, setSavingOpenai] = useState(false);
   const [keyExists, setKeyExists] = useState(false);
