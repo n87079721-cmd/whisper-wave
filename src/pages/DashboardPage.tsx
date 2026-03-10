@@ -1,10 +1,12 @@
 import { motion } from 'framer-motion';
-import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2 } from 'lucide-react';
+import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2, AlertTriangle, Settings } from 'lucide-react';
 import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
 import StatusBadge from '@/components/StatusBadge';
-import { api } from '@/lib/api';
+import { api, isBackendConfigured } from '@/lib/api';
+import { Link } from 'react-router-dom';
 
 const DashboardPage = () => {
+  const backendReady = isBackendConfigured();
   const { status, qr, stats } = useWhatsAppStatus();
 
   const isConnected = status === 'connected';
@@ -28,6 +30,30 @@ const DashboardPage = () => {
 
   return (
     <div className="space-y-5 wa-pattern min-h-full">
+      {/* Backend not configured banner */}
+      {!backendReady && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-lg bg-warning/10 border border-warning/30 p-4 flex items-center gap-3"
+        >
+          <AlertTriangle className="w-5 h-5 text-warning shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-foreground">Backend not configured</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Deploy the backend on your VPS, then set the URL in Settings to connect.
+            </p>
+          </div>
+          <Link
+            to="/settings"
+            className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors flex items-center gap-1.5"
+          >
+            <Settings className="w-3.5 h-3.5" />
+            Settings
+          </Link>
+        </motion.div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
