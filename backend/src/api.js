@@ -206,7 +206,8 @@ export function createApiRouter(db, wa) {
       const audioBuffer = await generateVoiceNote(
         apiKey, text,
         voiceId || 'JBFqnCBsd6RMkjVDRZzb',
-        modelId || null
+        modelId || null,
+        backgroundSound || null
       );
 
       // Send as PTT voice note — no caption, just audio with waveform
