@@ -25,18 +25,6 @@ const SPEECH_TAGS = [
   { tag: '—', desc: 'Short pause', emoji: '·' },
 ];
 
-const BACKGROUND_SOUNDS = [
-  { id: 'none', name: 'None', emoji: '🔇' },
-  { id: 'cafe', name: 'Café', emoji: '☕', desc: 'Coffee shop ambience' },
-  { id: 'rain', name: 'Rain', emoji: '🌧️', desc: 'Gentle rain sounds' },
-  { id: 'street', name: 'Street', emoji: '🏙️', desc: 'City street noise' },
-  { id: 'nature', name: 'Nature', emoji: '🌿', desc: 'Birds & wind' },
-  { id: 'office', name: 'Office', emoji: '🏢', desc: 'Keyboard & murmurs' },
-  { id: 'car', name: 'Driving', emoji: '🚗', desc: 'Car interior sounds' },
-  { id: 'crowd', name: 'Crowd', emoji: '👥', desc: 'Busy crowd chatter' },
-  { id: 'ocean', name: 'Ocean', emoji: '🌊', desc: 'Waves & seagulls' },
-  { id: 'fireplace', name: 'Fireplace', emoji: '🔥', desc: 'Crackling fire' },
-];
 
 const VoiceStudioPage = () => {
   const [text, setText] = useState('');
