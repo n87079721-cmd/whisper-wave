@@ -249,6 +249,63 @@ export function createApiRouter(db, wa) {
     }
   });
 
+  // ── Enhance text with OpenAI ────────────────────────────
+  router.post('/enhance', async (req, res) => {
+    try {
+      const { text } = req.body;
+      if (!text) return res.status(400).json({ error: 'Missing text' });
+
+      const apiKey = getConfig(db, 'openai_api_key') || process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        return res.status(400).json({ error: 'OpenAI API key not configured. Set it in Settings.' });
+      }
+
+      const systemPrompt = `You rewrite text for natural voice delivery using ElevenLabs v3.
+Rules:
+- Add expression tags where contextually appropriate: [laughing], [sighing], [whispering], [gasping], [crying], [chuckling], [sniffling], [yawning], [clearing throat], [shouting]
+- Add natural pauses: ... (long pause), — (short pause/interruption)
+- Use contractions (I'm, don't, can't, won't, it's, that's, we're, they're)
+- Add subtle filler words where natural (honestly, you know, I mean, like, basically, right)
+- Add trailing thoughts and natural hesitations
+- Make the text sound like someone actually talking, not reading
+- Keep the same meaning and roughly similar length
+- Return ONLY the enhanced text, nothing else — no quotes, no explanation`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: text },
+          ],
+          temperature: 0.8,
+          max_tokens: 1024,
+        }),
+      });
+
+      if (!response.ok) {
+        const details = await response.text();
+        return res.status(response.status).json({ error: `OpenAI request failed: ${details}` });
+      }
+
+      const data = await response.json();
+      const enhanced = data.choices?.[0]?.message?.content?.trim();
+      if (!enhanced) {
+        return res.status(500).json({ error: 'No response from OpenAI' });
+      }
+
+      res.json({ enhanced });
+    } catch (err) {
+      console.error('Enhance failed:', err.message);
+      res.status(500).json({ error: err.message || 'Enhancement failed' });
+    }
+  });
+
   // ── Settings ──────────────────────────────────────────────
   router.get('/config/:key', (req, res) => {
     const val = getConfig(db, req.params.key);

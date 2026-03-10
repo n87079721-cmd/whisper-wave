@@ -294,7 +294,44 @@ const VoiceStudioPage = () => {
             rows={4}
             className="w-full px-4 py-3 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
           />
-          <p className="text-xs text-muted-foreground">{text.length} characters</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">{text.length} characters</p>
+            {isV3 && (
+              <div className="flex items-center gap-2">
+                {originalText !== null && (
+                  <button
+                    onClick={() => { setText(originalText); setOriginalText(null); setAudioUrl(null); }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-secondary text-xs text-secondary-foreground hover:bg-secondary/80 transition-colors border border-border"
+                  >
+                    <Undo2 className="w-3 h-3" />
+                    Undo
+                  </button>
+                )}
+                <button
+                  onClick={async () => {
+                    if (!text.trim()) return;
+                    setIsEnhancing(true);
+                    try {
+                      const res = await api.enhanceText(text);
+                      setOriginalText(text);
+                      setText(res.enhanced);
+                      setAudioUrl(null);
+                      toast.success('Text enhanced!');
+                    } catch (err: any) {
+                      toast.error(err.message || 'Failed to enhance text');
+                    } finally {
+                      setIsEnhancing(false);
+                    }
+                  }}
+                  disabled={!text.trim() || isEnhancing}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-primary/15 text-xs text-primary font-medium hover:bg-primary/25 transition-colors border border-primary/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {isEnhancing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+                  {isEnhancing ? 'Enhancing...' : '✨ Enhance'}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Generate */}
