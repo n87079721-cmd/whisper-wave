@@ -28,6 +28,12 @@ const SettingsPage = () => {
         setElevenLabsKey(data.value || '');
       }
     }).catch(() => {});
+    api.getConfig('openai_api_key').then(data => {
+      if (data.exists) {
+        setOpenaiKeyExists(true);
+        setOpenaiKey(data.value || '');
+      }
+    }).catch(() => {});
     api.getConfig('automation_enabled').then(data => {
       setAutoEnabled(data.value === 'true');
     }).catch(() => {});
