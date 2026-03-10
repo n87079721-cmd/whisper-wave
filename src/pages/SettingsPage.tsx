@@ -340,18 +340,58 @@ const SettingsPage = () => {
           </button>
         </div>
         {autoEnabled && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            className="mt-4 p-3 rounded-lg bg-warning/10 border border-warning/20"
-          >
-            <div className="flex items-start gap-2">
-              <Shield className="w-4 h-4 text-warning mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-warning">
-                Automation is enabled. The bot will automatically process incoming messages based on your configured rules.
-              </p>
-            </div>
-          </motion.div>
+          <AnimatePresence>
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mt-4 space-y-4"
+            >
+              <div className="p-3 rounded-lg bg-warning/10 border border-warning/20">
+                <div className="flex items-start gap-2">
+                  <Shield className="w-4 h-4 text-warning mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-warning">
+                    Automation is ON. The bot will auto-reply to incoming messages using AI based on conversation history. Uses your OpenAI API key.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-muted-foreground" />
+                  <label className="text-sm font-medium text-foreground">AI System Prompt</label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Tell the AI how to behave. E.g. your name, tone, topics to avoid, language preferences.
+                </p>
+                <textarea
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  placeholder="You are replying as [your name]. Reply naturally and casually in the same language as the conversation..."
+                  rows={4}
+                  className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
+                />
+                <button
+                  onClick={async () => {
+                    setSavingPrompt(true);
+                    try {
+                      await api.setConfig('ai_system_prompt', systemPrompt);
+                      toast.success('System prompt saved');
+                    } catch {
+                      toast.error('Failed to save prompt');
+                    } finally {
+                      setSavingPrompt(false);
+                    }
+                  }}
+                  disabled={savingPrompt}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40"
+                >
+                  {savingPrompt ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {savingPrompt ? 'Saving...' : 'Save Prompt'}
+                </button>
+              </div>
+            </motion.div>
+          </AnimatePresence>
         )}
       </motion.div>
     </div>
