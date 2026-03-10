@@ -11,8 +11,10 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import NodeCache from 'node-cache';
+import { generateReply } from './ai.js';
 
 const msgRetryCounterCache = new NodeCache({ stdTTL: 600, checkperiod: 120 });
+const autoReplyCooldowns = new Map(); // jid -> last reply timestamp
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = path.join(__dirname, '..', 'data', 'auth');
@@ -274,6 +276,13 @@ async function startConnection(db) {
           if (type === 'notify' && !isFromMe) {
             db.prepare(`INSERT INTO stats (event, data) VALUES ('message_received', ?)`).run(JSON.stringify({ contactId }));
             emit('message', { contactId, msgId });
+
+            // AI Auto-Reply (only for non-group, real-time messages)
+            if (!isGroup) {
+              handleAutoReply(db, contactId, jid, phone, pushName).catch(err => {
+                console.error('Auto-reply error:', err?.message || err);
+              });
+            }
           }
         } catch (err) {
           if (isSignalSessionError(err)) {
@@ -461,6 +470,61 @@ async function syncContacts(db) {
   } catch (err) {
     console.error('Contact sync error:', err.message);
   }
+}
+
+async function handleAutoReply(db, contactId, jid, phone, contactName) {
+  // Check if automation is enabled
+  const autoConfig = db.prepare("SELECT value FROM config WHERE key = 'automation_enabled'").get();
+  if (!autoConfig || autoConfig.value !== 'true') return;
+
+  // Cooldown check (5 seconds per contact)
+  const now = Date.now();
+  const lastReply = autoReplyCooldowns.get(jid) || 0;
+  if (now - lastReply < 5000) {
+    console.log(`⏳ Auto-reply cooldown active for ${jid}`);
+    return;
+  }
+
+  // Get OpenAI key
+  const keyRow = db.prepare("SELECT value FROM config WHERE key = 'openai_api_key'").get();
+  if (!keyRow?.value) {
+    console.log('⚠️ Auto-reply skipped: no OpenAI API key configured');
+    return;
+  }
+
+  // Get system prompt
+  const promptRow = db.prepare("SELECT value FROM config WHERE key = 'ai_system_prompt'").get();
+  const systemPrompt = promptRow?.value || '';
+
+  // Load last 50 messages for context
+  const messages = db.prepare(`
+    SELECT content, direction, type FROM messages 
+    WHERE contact_id = ? AND type = 'text' AND content IS NOT NULL AND content != ''
+    ORDER BY timestamp DESC LIMIT 50
+  `).all(contactId).reverse();
+
+  if (messages.length === 0) return;
+
+  console.log(`🤖 Generating auto-reply for ${contactName || phone} (${messages.length} messages context)`);
+
+  const replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
+
+  // Send via WhatsApp
+  const sent = await sendTextMessage(jid, replyText);
+  const replyId = sent?.key?.id || uuid();
+
+  // Save to DB
+  db.prepare(`
+    INSERT OR IGNORE INTO messages (id, contact_id, jid, content, type, direction, timestamp, status)
+    VALUES (?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent')
+  `).run(replyId, contactId, jid, replyText);
+
+  db.prepare(`INSERT INTO stats (event, data) VALUES ('auto_reply_sent', ?)`).run(JSON.stringify({ contactId }));
+
+  // Set cooldown
+  autoReplyCooldowns.set(jid, Date.now());
+
+  console.log(`✅ Auto-reply sent to ${contactName || phone}: "${replyText.substring(0, 50)}..."`);
 }
 
 async function sendTextMessage(jid, text) {
