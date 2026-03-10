@@ -72,7 +72,7 @@ const SendMessagePage = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-4 md:space-y-6 max-w-2xl">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Send Message</h1>
         <p className="text-sm text-muted-foreground mt-1">Compose and send to any contact</p>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, RefreshCw } from 'lucide-react';
+import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -58,7 +58,7 @@ const ConversationsPage = () => {
         const current = selectedContactRef.current;
         if (current) refreshMessages(current.id);
       });
-      es.onerror = () => {}; // SSE reconnects automatically
+      es.onerror = () => {};
     } catch {}
 
     const interval = setInterval(() => {
@@ -110,7 +110,6 @@ const ConversationsPage = () => {
       }
       setReplyText('');
       setPreviewUrl(null);
-      // Refresh messages
       const msgs = await api.getMessages(selectedContact.id);
       setMessages(msgs);
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
@@ -146,13 +145,16 @@ const ConversationsPage = () => {
     }
   };
 
+  // On mobile: show either list or chat
+  const showChatOnMobile = !!selectedContact;
+
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold text-foreground">Conversations</h1>
+      <h1 className="text-xl md:text-2xl font-bold text-foreground">Conversations</h1>
 
-      <div className="flex gap-4 h-[calc(100vh-180px)]">
-        {/* Contact list */}
-        <div className="w-72 flex-shrink-0 glass rounded-xl overflow-hidden flex flex-col">
+      <div className="flex gap-4 h-[calc(100vh-180px)] md:h-[calc(100vh-180px)] h-[calc(100dvh-160px)]">
+        {/* Contact list - hidden on mobile when chat is open */}
+        <div className={`${showChatOnMobile ? 'hidden md:flex' : 'flex'} w-full md:w-72 flex-shrink-0 glass rounded-xl overflow-hidden flex-col`}>
           <div className="p-3 border-b border-border">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -202,11 +204,18 @@ const ConversationsPage = () => {
           </div>
         </div>
 
-        {/* Chat view */}
-        <div className="flex-1 glass rounded-xl overflow-hidden flex flex-col">
+        {/* Chat view - full width on mobile */}
+        <div className={`${!showChatOnMobile ? 'hidden md:flex' : 'flex'} flex-1 glass rounded-xl overflow-hidden flex-col`}>
           {selectedContact ? (
             <>
-              <div className="px-4 py-3 border-b border-border flex items-center gap-3">
+              <div className="px-3 md:px-4 py-3 border-b border-border flex items-center gap-3">
+                {/* Back button on mobile */}
+                <button
+                  onClick={() => setSelectedContact(null)}
+                  className="md:hidden p-1 -ml-1 text-muted-foreground hover:text-foreground"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
                 <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground">
                   {(selectedContact.name || selectedContact.phone || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
                 </div>
@@ -217,7 +226,7 @@ const ConversationsPage = () => {
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-2">
                 {messages.map((msg, i) => (
                   <motion.div
                     key={msg.id}
@@ -227,7 +236,7 @@ const ConversationsPage = () => {
                     className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
-                      className={`max-w-[65%] px-3 py-2 rounded-xl text-sm ${
+                      className={`max-w-[80%] md:max-w-[65%] px-3 py-2 rounded-xl text-sm ${
                         msg.direction === 'sent'
                           ? 'bg-primary/20 text-foreground rounded-br-sm'
                           : 'bg-secondary text-foreground rounded-bl-sm'
@@ -263,8 +272,7 @@ const ConversationsPage = () => {
               </div>
 
               {/* Reply box */}
-              <div className="border-t border-border p-3 space-y-2">
-                {/* Voice preview */}
+              <div className="border-t border-border p-2 md:p-3 space-y-2">
                 {previewUrl && (
                   <div className="flex items-center gap-2 bg-secondary rounded-lg p-2">
                     <button
@@ -283,11 +291,10 @@ const ConversationsPage = () => {
                   </div>
                 )}
 
-                {/* Mode toggle + voice selector */}
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => { setReplyMode('text'); setPreviewUrl(null); }}
-                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                       replyMode === 'text' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
                     }`}
                   >
@@ -295,7 +302,7 @@ const ConversationsPage = () => {
                   </button>
                   <button
                     onClick={() => setReplyMode('voice')}
-                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                       replyMode === 'voice' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
                     }`}
                   >
@@ -305,7 +312,7 @@ const ConversationsPage = () => {
                     <select
                       value={selectedVoice}
                       onChange={(e) => setSelectedVoice(e.target.value)}
-                      className="ml-auto px-2 py-1 rounded bg-secondary border border-border text-xs text-foreground"
+                      className="ml-auto px-2 py-1 rounded bg-secondary border border-border text-xs text-foreground max-w-[120px]"
                     >
                       {voices.map(v => (
                         <option key={v.id} value={v.id}>{v.name}</option>
@@ -314,20 +321,19 @@ const ConversationsPage = () => {
                   )}
                 </div>
 
-                {/* Input + send */}
                 <div className="flex gap-2">
                   <input
                     value={replyText}
                     onChange={(e) => { setReplyText(e.target.value); setPreviewUrl(null); }}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
-                    placeholder={replyMode === 'voice' ? 'Type text to convert to voice note...' : 'Type a message...'}
-                    className="flex-1 px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                    placeholder={replyMode === 'voice' ? 'Text to voice...' : 'Type a message...'}
+                    className="flex-1 px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 min-w-0"
                   />
                   {replyMode === 'voice' && (
                     <button
                       onClick={handlePreviewVoice}
                       disabled={!replyText.trim() || previewing}
-                      className="px-3 py-2 rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors disabled:opacity-40"
+                      className="px-2.5 py-2 rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors disabled:opacity-40 flex-shrink-0"
                       title="Preview voice"
                     >
                       {previewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Volume2 className="w-4 h-4" />}
@@ -336,7 +342,7 @@ const ConversationsPage = () => {
                   <button
                     onClick={handleSendReply}
                     disabled={!replyText.trim() || sending}
-                    className="px-3 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
+                    className="px-2.5 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
                   >
                     {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   </button>
