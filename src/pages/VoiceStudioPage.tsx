@@ -25,18 +25,6 @@ const SPEECH_TAGS = [
   { tag: '—', desc: 'Short pause', emoji: '·' },
 ];
 
-const BACKGROUND_SOUNDS = [
-  { id: 'none', name: 'None', emoji: '🔇' },
-  { id: 'cafe', name: 'Café', emoji: '☕', desc: 'Coffee shop ambience' },
-  { id: 'rain', name: 'Rain', emoji: '🌧️', desc: 'Gentle rain sounds' },
-  { id: 'street', name: 'Street', emoji: '🏙️', desc: 'City street noise' },
-  { id: 'nature', name: 'Nature', emoji: '🌿', desc: 'Birds & wind' },
-  { id: 'office', name: 'Office', emoji: '🏢', desc: 'Keyboard & murmurs' },
-  { id: 'car', name: 'Driving', emoji: '🚗', desc: 'Car interior sounds' },
-  { id: 'crowd', name: 'Crowd', emoji: '👥', desc: 'Busy crowd chatter' },
-  { id: 'ocean', name: 'Ocean', emoji: '🌊', desc: 'Waves & seagulls' },
-  { id: 'fireplace', name: 'Fireplace', emoji: '🔥', desc: 'Crackling fire' },
-];
 
 const VoiceStudioPage = () => {
   const [text, setText] = useState('');
@@ -48,7 +36,7 @@ const VoiceStudioPage = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState('');
-  const [selectedBg, setSelectedBg] = useState('none');
+  
   const [showContacts, setShowContacts] = useState(false);
   const [sending, setSending] = useState(false);
   const [voiceFilter, setVoiceFilter] = useState('');
@@ -80,7 +68,7 @@ const VoiceStudioPage = () => {
     setIsGenerating(true);
     setAudioUrl(null);
     try {
-      const blob = await api.previewVoice(text, selectedVoice, selectedModel, selectedBg !== 'none' ? selectedBg : undefined);
+      const blob = await api.previewVoice(text, selectedVoice, selectedModel);
       const url = URL.createObjectURL(blob);
       setAudioUrl(url);
     } catch (err: any) {
@@ -105,7 +93,7 @@ const VoiceStudioPage = () => {
     if (!selectedContact || !text) return;
     setSending(true);
     try {
-      const res = await api.sendVoice(selectedContact, text, selectedVoice, selectedModel, selectedBg !== 'none' ? selectedBg : undefined);
+      const res = await api.sendVoice(selectedContact, text, selectedVoice, selectedModel);
       if (res.error) throw new Error(res.error);
       toast.success('Voice note sent as PTT!');
     } catch (err: any) {
@@ -254,32 +242,6 @@ const VoiceStudioPage = () => {
           </div>
         )}
 
-        {/* Background sounds */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">Background Sound</label>
-          <div className="flex gap-1.5 flex-wrap">
-            {BACKGROUND_SOUNDS.map(bg => (
-              <button
-                key={bg.id}
-                onClick={() => setSelectedBg(bg.id)}
-                className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1 border ${
-                  selectedBg === bg.id
-                    ? 'bg-primary/15 border-primary/30 text-foreground'
-                    : 'bg-secondary border-border text-secondary-foreground hover:bg-secondary/80'
-                }`}
-                title={bg.desc}
-              >
-                <span>{bg.emoji}</span>
-                <span>{bg.name}</span>
-              </button>
-            ))}
-          </div>
-          {selectedBg !== 'none' && (
-            <p className="text-xs text-muted-foreground">
-              🔊 {BACKGROUND_SOUNDS.find(b => b.id === selectedBg)?.desc} will be mixed into the audio
-            </p>
-          )}
-        </div>
 
         {/* Text input */}
         <div className="space-y-2">
