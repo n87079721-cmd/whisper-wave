@@ -276,36 +276,30 @@ const SettingsPage = () => {
         </button>
       </motion.div>
 
-      {/* Session Management */}
+      {/* WhatsApp Logout */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05 }}
         className="glass rounded-xl p-6 space-y-4"
       >
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-info/15 flex items-center justify-center">
-            <RefreshCw className="w-5 h-5 text-info" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-destructive/15 flex items-center justify-center">
+              <LogOut className="w-5 h-5 text-destructive" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-foreground text-sm">WhatsApp Logout</h3>
+              <p className="text-xs text-muted-foreground">Disconnect and remove your WhatsApp session</p>
+            </div>
           </div>
-          <div>
-            <h3 className="font-semibold text-foreground text-sm">WhatsApp Session</h3>
-            <p className="text-xs text-muted-foreground">Manage your WhatsApp Web connection</p>
-          </div>
-        </div>
-        <div className="flex gap-2">
           <button
-            onClick={handleReconnect}
-            disabled={reconnecting}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-sm hover:bg-secondary/80 transition-colors disabled:opacity-40"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-destructive/15 text-destructive text-sm font-medium hover:bg-destructive/25 transition-colors disabled:opacity-40"
           >
-            {reconnecting && <Loader2 className="w-4 h-4 animate-spin" />}
-            Reconnect Session
-          </button>
-          <button
-            onClick={handleClearSession}
-            className="px-4 py-2 rounded-lg bg-destructive/15 text-destructive text-sm hover:bg-destructive/25 transition-colors"
-          >
-            Clear Session
+            {loggingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+            {loggingOut ? 'Logging out...' : 'Logout'}
           </button>
         </div>
       </motion.div>
