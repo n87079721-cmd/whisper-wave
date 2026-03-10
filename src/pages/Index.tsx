@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import DashboardSidebar from '@/components/DashboardSidebar';
+import MobileBottomNav from '@/components/MobileBottomNav';
 import DashboardPage from '@/pages/DashboardPage';
 import ContactsPage from '@/pages/ContactsPage';
 import ConversationsPage from '@/pages/ConversationsPage';
@@ -24,10 +25,18 @@ const Index = () => {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <DashboardSidebar activePage={activePage} onPageChange={setActivePage} />
-      <main className="flex-1 p-5 overflow-auto">
+      {/* Desktop sidebar */}
+      <div className="hidden md:block">
+        <DashboardSidebar activePage={activePage} onPageChange={setActivePage} />
+      </div>
+      
+      {/* Main content - add bottom padding on mobile for nav */}
+      <main className="flex-1 p-3 md:p-5 overflow-auto pb-20 md:pb-5">
         <ActiveComponent />
       </main>
+
+      {/* Mobile bottom nav */}
+      <MobileBottomNav activePage={activePage} onPageChange={setActivePage} />
     </div>
   );
 };
