@@ -511,7 +511,7 @@ async function handleAutoReply(db, contactId, jid, phone, contactName) {
 
   // Send via WhatsApp
   const sent = await sendTextMessage(jid, replyText);
-  const replyId = sent?.key?.id || require('crypto').randomUUID();
+  const replyId = sent?.key?.id || uuid();
 
   // Save to DB
   db.prepare(`
