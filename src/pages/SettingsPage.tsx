@@ -53,6 +53,20 @@ const SettingsPage = () => {
     }
   };
 
+  const handleSaveOpenaiKey = async () => {
+    if (!openaiKey) return;
+    setSavingOpenai(true);
+    try {
+      await api.setConfig('openai_api_key', openaiKey);
+      setOpenaiKeyExists(true);
+      toast.success('OpenAI API key saved');
+    } catch {
+      toast.error('Failed to save key');
+    } finally {
+      setSavingOpenai(false);
+    }
+  };
+
   const handleTestElevenLabs = async () => {
     setTestingElevenLabs(true);
     setTestResult(null);
