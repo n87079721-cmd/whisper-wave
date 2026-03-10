@@ -1,10 +1,12 @@
 import { motion } from 'framer-motion';
-import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2 } from 'lucide-react';
+import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2, AlertTriangle, Settings } from 'lucide-react';
 import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
 import StatusBadge from '@/components/StatusBadge';
-import { api } from '@/lib/api';
+import { api, isBackendConfigured } from '@/lib/api';
+import { Link } from 'react-router-dom';
 
 const DashboardPage = () => {
+  const backendReady = isBackendConfigured();
   const { status, qr, stats } = useWhatsAppStatus();
 
   const isConnected = status === 'connected';
