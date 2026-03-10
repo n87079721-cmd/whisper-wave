@@ -266,7 +266,7 @@ const VoiceStudioPage = () => {
 
         {/* Speech tags helper (shown for v3) */}
         {isV3 && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="flex items-center gap-2">
               <label className="text-sm font-medium text-foreground">Expression Tags</label>
               <button onClick={() => setShowTagHelp(!showTagHelp)} className="text-muted-foreground hover:text-foreground">
@@ -276,11 +276,29 @@ const VoiceStudioPage = () => {
             {showTagHelp && (
               <p className="text-xs text-muted-foreground bg-secondary rounded-lg p-2">
                 v3 supports expression tags that make the voice react naturally — laughing, whispering, sighing, etc.
+                Click any tag to insert it at the cursor position.
                 Example: <code className="text-primary">[laughing] Oh stop it, you're too funny!</code>
               </p>
             )}
+            {/* Category tabs */}
             <div className="flex gap-1.5 flex-wrap">
-              {SPEECH_TAGS.map(st => (
+              {Object.keys(TAG_CATEGORIES).map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setActiveTagCategory(cat)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all border ${
+                    activeTagCategory === cat
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+            {/* Tags for active category */}
+            <div className="flex gap-1.5 flex-wrap">
+              {TAG_CATEGORIES[activeTagCategory as keyof typeof TAG_CATEGORIES].map(st => (
                 <button
                   key={st.tag}
                   onClick={() => insertTag(st.tag)}
