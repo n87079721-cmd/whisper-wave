@@ -189,7 +189,7 @@ export function createApiRouter(db, wa) {
   // ── Send Voice Note (PTT, no caption) ─────────────────────
   router.post('/send/voice', async (req, res) => {
     try {
-      const { contactId, text, voiceId, modelId } = req.body;
+      const { contactId, text, voiceId, modelId, backgroundSound } = req.body;
       if (!contactId || !text) {
         return res.status(400).json({ error: 'Missing contactId or text' });
       }
