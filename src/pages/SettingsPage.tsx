@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Key, RefreshCw, Shield, Power, Eye, EyeOff, Loader2, CheckCircle, XCircle, Globe, Brain } from 'lucide-react';
+import { Key, Shield, Power, Eye, EyeOff, Loader2, CheckCircle, XCircle, Globe, Brain, LogOut } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getStoredApiUrl, setStoredApiUrl, isBackendConfigured } from '@/lib/api';
 import { toast } from 'sonner';
