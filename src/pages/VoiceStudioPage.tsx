@@ -68,7 +68,7 @@ const VoiceStudioPage = () => {
     setIsGenerating(true);
     setAudioUrl(null);
     try {
-      const blob = await api.previewVoice(text, selectedVoice, selectedModel, selectedBg !== 'none' ? selectedBg : undefined);
+      const blob = await api.previewVoice(text, selectedVoice, selectedModel);
       const url = URL.createObjectURL(blob);
       setAudioUrl(url);
     } catch (err: any) {
