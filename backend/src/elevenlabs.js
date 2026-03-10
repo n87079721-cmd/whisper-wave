@@ -90,7 +90,7 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId) {
 
     // Convert MP3 → OGG/Opus for WhatsApp PTT (waveform display)
     execSync(
-      `${ffmpeg} -y -i "${mp3Path}" -c:a libopus -b:a 64k -ar 48000 -ac 1 -application voip "${oggPath}"`,
+      `${ffmpeg} -y -i "${mp3Path}" -c:a libopus -b:a 128k -ar 48000 -ac 1 -application audio "${oggPath}"`,
       { stdio: 'pipe' }
     );
 
