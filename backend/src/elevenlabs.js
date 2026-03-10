@@ -55,8 +55,8 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId) {
   const oggPath = path.join(TEMP_DIR, `${fileId}.ogg`);
 
   try {
-    // Use eleven_multilingual_v2 by default, support v3 if specified
-    const model = modelId || 'eleven_multilingual_v2';
+    // Use eleven_v3 by default for highest quality creative output
+    const model = modelId || 'eleven_v3';
 
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
@@ -70,9 +70,9 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId) {
           text,
           model_id: model,
           voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-            style: 0.3,
+            stability: 0.3,
+            similarity_boost: 0.6,
+            style: 0.7,
             use_speaker_boost: true,
           },
         }),
