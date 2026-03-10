@@ -97,6 +97,7 @@ const VoiceStudioPage = () => {
   const [loadingVoices, setLoadingVoices] = useState(true);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [originalText, setOriginalText] = useState<string | null>(null);
+  const [activeTagCategory, setActiveTagCategory] = useState('Emotions');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
