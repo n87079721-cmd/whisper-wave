@@ -214,6 +214,8 @@ async function startConnection(db) {
 
       if (connection === 'open') {
         qrCode = null;
+        pairingCode = null;
+        pendingPairingPhone = null;
         connectionStatus = 'connected';
         reconnectAttempt = 0;
         badMacTimestamps = [];
