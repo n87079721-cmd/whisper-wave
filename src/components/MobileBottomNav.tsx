@@ -2,12 +2,11 @@ import {
   LayoutDashboard,
   Users,
   MessageSquare,
-  Send,
   Mic,
   Settings,
 } from 'lucide-react';
 
-type Page = 'dashboard' | 'contacts' | 'conversations' | 'send' | 'voice' | 'settings';
+type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings';
 
 interface MobileBottomNavProps {
   activePage: Page;
@@ -17,7 +16,6 @@ interface MobileBottomNavProps {
 const navItems: { id: Page; label: string; icon: React.ElementType }[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'conversations', label: 'Chats', icon: MessageSquare },
-  { id: 'send', label: 'Send', icon: Send },
   { id: 'voice', label: 'Voice', icon: Mic },
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'settings', label: 'Settings', icon: Settings },
@@ -34,9 +32,7 @@ const MobileBottomNav = ({ activePage, onPageChange }: MobileBottomNavProps) => 
               key={item.id}
               onClick={() => onPageChange(item.id)}
               className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg transition-colors min-w-0 flex-1 ${
-                isActive
-                  ? 'text-primary'
-                  : 'text-sidebar-foreground'
+                isActive ? 'text-primary' : 'text-sidebar-foreground'
               }`}
             >
               <item.icon className={`w-5 h-5 ${isActive ? 'text-primary' : ''}`} />

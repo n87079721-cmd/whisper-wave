@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Key, Shield, Power, Eye, EyeOff, Loader2, CheckCircle, XCircle, Globe, Brain, LogOut, MessageSquare, Save, Clock, Dice5, Gauge } from 'lucide-react';
+import { Key, Shield, Power, Loader2, Globe, Brain, LogOut, MessageSquare, Save, Clock, Dice5, Gauge } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getStoredApiUrl, setStoredApiUrl, isBackendConfigured } from '@/lib/api';
 import { toast } from 'sonner';
@@ -11,8 +11,6 @@ const SettingsPage = () => {
   const [backendSaved, setBackendSaved] = useState(isBackendConfigured());
   const [elevenLabsKey, setElevenLabsKey] = useState('');
   const [openaiKey, setOpenaiKey] = useState('');
-  const [showKey, setShowKey] = useState(false);
-  const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [autoEnabled, setAutoEnabled] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [savingPrompt, setSavingPrompt] = useState(false);
@@ -21,10 +19,8 @@ const SettingsPage = () => {
   const [keyExists, setKeyExists] = useState(false);
   const [openaiKeyExists, setOpenaiKeyExists] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [testingElevenLabs, setTestingElevenLabs] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
-  // New availability settings
+  // Availability settings
   const [activeHoursStart, setActiveHoursStart] = useState('10:00');
   const [activeHoursEnd, setActiveHoursEnd] = useState('23:00');
   const [replyChance, setReplyChance] = useState(70);
@@ -32,10 +28,10 @@ const SettingsPage = () => {
 
   useEffect(() => {
     api.getConfig('elevenlabs_api_key').then(data => {
-      if (data.exists) { setKeyExists(true); setElevenLabsKey(data.value || ''); }
+      if (data.exists) { setKeyExists(true); setElevenLabsKey(''); }
     }).catch(() => {});
     api.getConfig('openai_api_key').then(data => {
-      if (data.exists) { setOpenaiKeyExists(true); setOpenaiKey(data.value || ''); }
+      if (data.exists) { setOpenaiKeyExists(true); setOpenaiKey(''); }
     }).catch(() => {});
     api.getConfig('automation_enabled').then(data => {
       setAutoEnabled(data.value === 'true');
@@ -43,7 +39,6 @@ const SettingsPage = () => {
     api.getConfig('ai_system_prompt').then(data => {
       if (data.exists) setSystemPrompt(data.value || '');
     }).catch(() => {});
-    // Load availability settings
     api.getConfig('ai_active_hours_start').then(data => {
       if (data.exists) setActiveHoursStart(data.value || '10:00');
     }).catch(() => {});
@@ -64,6 +59,7 @@ const SettingsPage = () => {
     try {
       await api.setConfig('elevenlabs_api_key', elevenLabsKey);
       setKeyExists(true);
+      setElevenLabsKey('');
       toast.success('API key saved');
     } catch { toast.error('Failed to save key'); }
     finally { setSaving(false); }
@@ -75,24 +71,10 @@ const SettingsPage = () => {
     try {
       await api.setConfig('openai_api_key', openaiKey);
       setOpenaiKeyExists(true);
+      setOpenaiKey('');
       toast.success('OpenAI API key saved');
     } catch { toast.error('Failed to save key'); }
     finally { setSavingOpenai(false); }
-  };
-
-  const handleTestElevenLabs = async () => {
-    setTestingElevenLabs(true);
-    setTestResult(null);
-    try {
-      const result = await api.testElevenLabs();
-      const message = `Connected. Found ${result.totalVoices} voices (${result.generatedVoices} generated/cloned).`;
-      setTestResult({ ok: true, message });
-      toast.success('ElevenLabs connection is working');
-    } catch (err: any) {
-      const message = err.message || 'ElevenLabs connection failed';
-      setTestResult({ ok: false, message });
-      toast.error(message);
-    } finally { setTestingElevenLabs(false); }
   };
 
   const handleLogout = async () => {
@@ -112,11 +94,8 @@ const SettingsPage = () => {
   };
 
   const saveAvailabilitySetting = async (key: string, value: string) => {
-    try {
-      await api.setConfig(key, value);
-    } catch {
-      toast.error('Failed to save setting');
-    }
+    try { await api.setConfig(key, value); }
+    catch { toast.error('Failed to save setting'); }
   };
 
   return (
@@ -126,38 +105,7 @@ const SettingsPage = () => {
         <p className="text-sm text-muted-foreground mt-1">Manage API keys and bot configuration</p>
       </div>
 
-      {/* Backend URL */}
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-6 space-y-4">
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${backendSaved ? 'bg-primary/15' : 'bg-destructive/15'}`}>
-            <Globe className={`w-5 h-5 ${backendSaved ? 'text-primary' : 'text-destructive'}`} />
-          </div>
-          <div>
-            <h3 className="font-semibold text-foreground text-sm">Backend URL</h3>
-            <p className="text-xs text-muted-foreground">
-              Your Node.js backend address (e.g. http://your-server:3001).{' '}
-              {backendSaved && <span className="text-primary">✓ Configured</span>}
-            </p>
-          </div>
-        </div>
-        <input type="text" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)}
-          placeholder="http://your-server-ip:3001"
-          className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50" />
-        {!backendSaved && (
-          <div className="flex items-start gap-2 rounded-lg px-3 py-2 border bg-destructive/10 border-destructive/25">
-            <XCircle className="w-4 h-4 text-destructive mt-0.5" />
-            <p className="text-xs text-destructive">Backend URL is not set. Enter your backend URL and click Save.</p>
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          <button onClick={() => { setStoredApiUrl(backendUrl); setBackendSaved(!!backendUrl); toast.success(backendUrl ? 'Backend URL saved — reloading...' : 'Backend URL cleared'); if (backendUrl) setTimeout(() => window.location.reload(), 500); }}
-            className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">Save URL</button>
-          <button onClick={async () => { try { await api.getStatus(); toast.success('Backend is reachable!'); } catch (err: any) { toast.error(err.message || 'Cannot reach backend'); } }}
-            disabled={!backendUrl} className="px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-sm font-medium hover:bg-secondary/80 transition-colors disabled:opacity-40">Test Connection</button>
-        </div>
-      </motion.div>
-
-      {/* ElevenLabs API Key */}
+      {/* ElevenLabs API Key — input only, no reveal */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-6 space-y-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center"><Key className="w-5 h-5 text-primary" /></div>
@@ -166,44 +114,31 @@ const SettingsPage = () => {
             <p className="text-xs text-muted-foreground">Required for voice note generation. {keyExists && <span className="text-primary">✓ Key saved</span>}</p>
           </div>
         </div>
-        <div className="relative">
-          <input type={showKey ? 'text' : 'password'} value={elevenLabsKey} onChange={(e) => setElevenLabsKey(e.target.value)}
-            placeholder="sk_xxxxxxxxxxxxxxxxxxxxxxxx"
-            className="w-full px-4 py-2.5 pr-10 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50" />
-          <button onClick={() => setShowKey(!showKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
-            {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={handleSaveKey} disabled={!elevenLabsKey || saving} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40">{saving ? 'Saving...' : 'Save Key'}</button>
-          <button onClick={handleTestElevenLabs} disabled={testingElevenLabs} className="px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-sm font-medium hover:bg-secondary/80 transition-colors disabled:opacity-40">{testingElevenLabs ? 'Testing...' : 'Test Connection'}</button>
-        </div>
-        {testResult && (
-          <div className={`flex items-start gap-2 rounded-lg px-3 py-2 border ${testResult.ok ? 'bg-primary/10 border-primary/25' : 'bg-destructive/10 border-destructive/25'}`}>
-            {testResult.ok ? <CheckCircle className="w-4 h-4 text-primary mt-0.5" /> : <XCircle className="w-4 h-4 text-destructive mt-0.5" />}
-            <p className={`text-xs ${testResult.ok ? 'text-primary' : 'text-destructive'}`}>{testResult.message}</p>
-          </div>
-        )}
+        <input type="password" value={elevenLabsKey} onChange={(e) => setElevenLabsKey(e.target.value)}
+          placeholder={keyExists ? '••••••••••••••••' : 'sk_xxxxxxxxxxxxxxxxxxxxxxxx'}
+          className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50" />
+        <button onClick={handleSaveKey} disabled={!elevenLabsKey || saving}
+          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40">
+          {saving ? 'Saving...' : 'Save Key'}
+        </button>
       </motion.div>
 
-      {/* OpenAI API Key */}
+      {/* OpenAI API Key — input only, no reveal */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-6 space-y-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center"><Brain className="w-5 h-5 text-primary" /></div>
           <div>
             <h3 className="font-semibold text-foreground text-sm">OpenAI API Key</h3>
-            <p className="text-xs text-muted-foreground">Required for the ✨ Enhance feature in Voice Studio. {openaiKeyExists && <span className="text-primary">✓ Key saved</span>}</p>
+            <p className="text-xs text-muted-foreground">Required for AI auto-reply & enhance. {openaiKeyExists && <span className="text-primary">✓ Key saved</span>}</p>
           </div>
         </div>
-        <div className="relative">
-          <input type={showOpenaiKey ? 'text' : 'password'} value={openaiKey} onChange={(e) => setOpenaiKey(e.target.value)}
-            placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-            className="w-full px-4 py-2.5 pr-10 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50" />
-          <button onClick={() => setShowOpenaiKey(!showOpenaiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
-            {showOpenaiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-        </div>
-        <button onClick={handleSaveOpenaiKey} disabled={!openaiKey || savingOpenai} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40">{savingOpenai ? 'Saving...' : 'Save Key'}</button>
+        <input type="password" value={openaiKey} onChange={(e) => setOpenaiKey(e.target.value)}
+          placeholder={openaiKeyExists ? '••••••••••••••••' : 'sk-xxxxxxxxxxxxxxxxxxxxxxxx'}
+          className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50" />
+        <button onClick={handleSaveOpenaiKey} disabled={!openaiKey || savingOpenai}
+          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40">
+          {savingOpenai ? 'Saving...' : 'Save Key'}
+        </button>
       </motion.div>
 
       {/* WhatsApp Logout */}
@@ -216,7 +151,8 @@ const SettingsPage = () => {
               <p className="text-xs text-muted-foreground">Disconnect and remove your WhatsApp session</p>
             </div>
           </div>
-          <button onClick={handleLogout} disabled={loggingOut} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-destructive/15 text-destructive text-sm font-medium hover:bg-destructive/25 transition-colors disabled:opacity-40">
+          <button onClick={handleLogout} disabled={loggingOut}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-destructive/15 text-destructive text-sm font-medium hover:bg-destructive/25 transition-colors disabled:opacity-40">
             {loggingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
             {loggingOut ? 'Logging out...' : 'Logout'}
           </button>
@@ -244,7 +180,7 @@ const SettingsPage = () => {
                 <div className="flex items-start gap-2">
                   <Shield className="w-4 h-4 text-warning mt-0.5 flex-shrink-0" />
                   <p className="text-xs text-warning">
-                    Automation is ON. The bot will auto-reply with human-like timing — random delays, emoji reactions, and selective responses. Uses your OpenAI API key.
+                    Automation is ON. The bot will auto-reply with human-like timing — random delays, emoji reactions, and selective responses.
                   </p>
                 </div>
               </div>
@@ -255,7 +191,7 @@ const SettingsPage = () => {
                   <Clock className="w-4 h-4 text-primary" />
                   <label className="text-sm font-medium text-foreground">Active Hours</label>
                 </div>
-                <p className="text-xs text-muted-foreground">Only reply during these hours. Outside = silent (like you're sleeping).</p>
+                <p className="text-xs text-muted-foreground">Only reply during these hours. Outside = silent.</p>
                 <div className="flex items-center gap-3">
                   <div className="flex-1">
                     <label className="text-xs text-muted-foreground mb-1 block">From</label>
@@ -283,13 +219,9 @@ const SettingsPage = () => {
                   <span className="text-sm font-bold text-primary">{replyChance}%</span>
                 </div>
                 <p className="text-xs text-muted-foreground">How often should you reply? Celebrities don't answer everything 😎</p>
-                <Slider
-                  value={[replyChance]}
-                  onValueChange={(val) => setReplyChance(val[0])}
+                <Slider value={[replyChance]} onValueChange={(val) => setReplyChance(val[0])}
                   onValueCommit={(val) => saveAvailabilitySetting('ai_reply_chance', String(val[0]))}
-                  min={10} max={100} step={5}
-                  className="w-full"
-                />
+                  min={10} max={100} step={5} className="w-full" />
                 <div className="flex justify-between text-[10px] text-muted-foreground">
                   <span>Ghost mode 👻</span>
                   <span>Always available 📱</span>
@@ -302,22 +234,20 @@ const SettingsPage = () => {
                   <Gauge className="w-4 h-4 text-primary" />
                   <label className="text-sm font-medium text-foreground">Response Speed</label>
                 </div>
-                <p className="text-xs text-muted-foreground">How fast should replies come? Slower = more realistic for a busy person.</p>
+                <p className="text-xs text-muted-foreground">How fast should replies come? Slower = more realistic.</p>
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { id: 'fast', label: 'Quick', desc: '3–25s', emoji: '⚡' },
                     { id: 'normal', label: 'Normal', desc: '15–60s', emoji: '🕐' },
                     { id: 'slow', label: 'Celebrity', desc: '30–180s', emoji: '👑' },
                   ].map((option) => (
-                    <button
-                      key={option.id}
+                    <button key={option.id}
                       onClick={() => { setResponseSpeed(option.id); saveAvailabilitySetting('ai_response_speed', option.id); }}
                       className={`p-3 rounded-lg border text-center transition-all ${
                         responseSpeed === option.id
                           ? 'bg-primary/15 border-primary text-primary'
                           : 'bg-secondary border-border text-muted-foreground hover:border-primary/30'
-                      }`}
-                    >
+                      }`}>
                       <div className="text-lg mb-1">{option.emoji}</div>
                       <div className="text-xs font-medium">{option.label}</div>
                       <div className="text-[10px] opacity-70">{option.desc}</div>
@@ -332,9 +262,9 @@ const SettingsPage = () => {
                   <MessageSquare className="w-4 h-4 text-muted-foreground" />
                   <label className="text-sm font-medium text-foreground">AI System Prompt</label>
                 </div>
-                <p className="text-xs text-muted-foreground">Tell the AI how to behave. Leave empty for the default celebrity persona.</p>
+                <p className="text-xs text-muted-foreground">Leave empty for the default celebrity persona.</p>
                 <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)}
-                  placeholder="Leave empty for default celebrity persona, or customize: your name, tone, topics to avoid..."
+                  placeholder="Leave empty for default celebrity persona, or customize..."
                   rows={4}
                   className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none" />
                 <button onClick={async () => {
