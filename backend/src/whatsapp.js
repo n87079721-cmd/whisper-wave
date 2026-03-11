@@ -21,6 +21,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = path.join(__dirname, '..', 'data', 'auth');
 const logger = pino({ level: 'silent' });
 
+function resolveName(obj) {
+  return obj?.notify || obj?.verifiedName || obj?.name || obj?.pushName || null;
+}
+
 let sock = null;
 let qrCode = null;
 let pairingCode = null;
