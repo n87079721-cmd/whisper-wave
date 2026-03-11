@@ -35,7 +35,7 @@ let badMacTimestamps = [];
 let repairInProgress = false;
 
 export function getWhatsAppState() {
-  return { status: connectionStatus, qr: qrCode };
+  return { status: connectionStatus, qr: qrCode, pairingCode };
 }
 
 export function onWhatsAppEvent(listener) {
