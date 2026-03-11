@@ -22,13 +22,24 @@ export function useWhatsAppStatus() {
       } else if (data.status === 'connected') {
         setQr(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('[WA Status] refresh error:', err);
+      if (err?.message?.includes('Backend URL not configured')) {
+        setStatus('disconnected');
+        setQr(null);
+        return;
+      }
       setStatus((prev) => (prev === 'qr_waiting' ? prev : 'reconnecting'));
     }
   }, []);
 
   useEffect(() => {
+    if (!isBackendConfigured()) {
+      setStatus('disconnected');
+      setQr(null);
+      return;
+    }
+
     refresh();
 
     // SSE for real-time updates
@@ -52,6 +63,11 @@ export function useWhatsAppStatus() {
         refresh(); // Refresh stats when history syncs
       });
       es.onerror = () => {
+        if (!isBackendConfigured()) {
+          setStatus('disconnected');
+          setQr(null);
+          return;
+        }
         setStatus((prev) => (prev === 'qr_waiting' ? prev : 'reconnecting'));
         // Reconnect after delay
         setTimeout(refresh, 5000);
