@@ -48,6 +48,9 @@ export function useWhatsAppStatus() {
       es.addEventListener('message', () => {
         refresh(); // Refresh stats on new message
       });
+      es.addEventListener('history_sync', () => {
+        refresh(); // Refresh stats when history syncs
+      });
       es.onerror = () => {
         setStatus((prev) => (prev === 'qr_waiting' ? prev : 'reconnecting'));
         // Reconnect after delay
