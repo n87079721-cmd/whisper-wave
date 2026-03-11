@@ -11,10 +11,11 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import NodeCache from 'node-cache';
-import { generateReply } from './ai.js';
+import { generateReply, shouldReact, shouldAlsoReplyAfterReaction } from './ai.js';
 
 const msgRetryCounterCache = new NodeCache({ stdTTL: 600, checkperiod: 120 });
 const autoReplyCooldowns = new Map(); // jid -> last reply timestamp
+const messageBatchBuffers = new Map(); // jid -> { messages: [], timer, contactId, phone, contactName }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = path.join(__dirname, '..', 'data', 'auth');
@@ -279,7 +280,7 @@ async function startConnection(db) {
 
             // AI Auto-Reply (only for non-group, real-time messages)
             if (!isGroup) {
-              handleAutoReply(db, contactId, jid, phone, pushName).catch(err => {
+              handleAutoReply(db, contactId, jid, phone, pushName, msg.key).catch(err => {
                 console.error('Auto-reply error:', err?.message || err);
               });
             }
@@ -472,15 +473,106 @@ async function syncContacts(db) {
   }
 }
 
-async function handleAutoReply(db, contactId, jid, phone, contactName) {
+// ─── Human-like timing helpers ───
+
+function getConfigValue(db, key, fallback) {
+  const row = db.prepare("SELECT value FROM config WHERE key = ?").get(key);
+  return row?.value ?? fallback;
+}
+
+function isWithinActiveHours(db) {
+  const start = getConfigValue(db, 'ai_active_hours_start', '10:00');
+  const end = getConfigValue(db, 'ai_active_hours_end', '23:00');
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  const startMin = sh * 60 + sm;
+  const endMin = eh * 60 + em;
+  
+  if (startMin <= endMin) {
+    return currentMinutes >= startMin && currentMinutes <= endMin;
+  }
+  // Overnight range (e.g. 22:00 - 06:00)
+  return currentMinutes >= startMin || currentMinutes <= endMin;
+}
+
+function calculateDelay(messageLength, speed) {
+  // Returns delay in milliseconds
+  const ranges = {
+    fast:   { short: [3000, 12000],  medium: [8000, 25000],  long: [12000, 40000] },
+    normal: { short: [5000, 25000],  medium: [15000, 60000], long: [30000, 90000] },
+    slow:   { short: [15000, 45000], medium: [30000, 120000], long: [60000, 180000] },
+  };
+  const r = ranges[speed] || ranges.normal;
+  let range;
+  if (messageLength < 20) range = r.short;
+  else if (messageLength < 100) range = r.medium;
+  else range = r.long;
+  
+  return Math.floor(Math.random() * (range[1] - range[0])) + range[0];
+}
+
+async function sendReaction(jid, messageKey, emoji) {
+  if (!sock || connectionStatus !== 'connected') return;
+  try {
+    await sock.sendMessage(jid, {
+      react: { text: emoji, key: messageKey }
+    });
+    console.log(`😎 Reacted with ${emoji} to message in ${jid}`);
+  } catch (err) {
+    console.error('Failed to send reaction:', err?.message);
+  }
+}
+
+async function handleAutoReply(db, contactId, jid, phone, contactName, messageKey) {
   // Check if automation is enabled
   const autoConfig = db.prepare("SELECT value FROM config WHERE key = 'automation_enabled'").get();
   if (!autoConfig || autoConfig.value !== 'true') return;
 
-  // Cooldown check (5 seconds per contact)
+  // Active hours check
+  if (!isWithinActiveHours(db)) {
+    console.log(`🌙 Auto-reply skipped: outside active hours for ${jid}`);
+    return;
+  }
+
+  // Reply chance check (default 70%)
+  const replyChance = parseInt(getConfigValue(db, 'ai_reply_chance', '70'), 10);
+  if (Math.random() * 100 > replyChance) {
+    console.log(`🎲 Auto-reply skipped: rolled outside ${replyChance}% reply chance for ${jid}`);
+    // Even when skipping the reply, maybe still react
+    const reactionEmoji = shouldReact();
+    if (reactionEmoji && messageKey) {
+      const reactDelay = Math.floor(Math.random() * 5000) + 2000;
+      setTimeout(() => sendReaction(jid, messageKey, reactionEmoji), reactDelay);
+    }
+    return;
+  }
+
+  // Message batching: wait for rapid follow-up messages before replying
+  const existing = messageBatchBuffers.get(jid);
+  if (existing) {
+    clearTimeout(existing.timer);
+  }
+  
+  const batchEntry = existing || { messages: [], contactId, phone, contactName, messageKey };
+  batchEntry.messageKey = messageKey; // always use the latest message key for reactions
+  
+  batchEntry.timer = setTimeout(() => {
+    messageBatchBuffers.delete(jid);
+    executeAutoReply(db, contactId, jid, phone, contactName, messageKey).catch(err => {
+      console.error('Batched auto-reply error:', err?.message || err);
+    });
+  }, 8000); // Wait 8 seconds for follow-up messages
+  
+  messageBatchBuffers.set(jid, batchEntry);
+}
+
+async function executeAutoReply(db, contactId, jid, phone, contactName, messageKey) {
+  // Cooldown check (30 seconds per contact — longer to feel natural)
   const now = Date.now();
   const lastReply = autoReplyCooldowns.get(jid) || 0;
-  if (now - lastReply < 5000) {
+  if (now - lastReply < 30000) {
     console.log(`⏳ Auto-reply cooldown active for ${jid}`);
     return;
   }
@@ -505,26 +597,72 @@ async function handleAutoReply(db, contactId, jid, phone, contactName) {
 
   if (messages.length === 0) return;
 
+  const lastMsgContent = messages[messages.length - 1]?.content || '';
+  const speed = getConfigValue(db, 'ai_response_speed', 'normal');
+
+  // Maybe react with an emoji first
+  const reactionEmoji = shouldReact();
+  if (reactionEmoji && messageKey) {
+    const reactDelay = Math.floor(Math.random() * 3000) + 1000;
+    setTimeout(() => sendReaction(jid, messageKey, reactionEmoji), reactDelay);
+    
+    // Sometimes just react, no text reply
+    if (!shouldAlsoReplyAfterReaction()) {
+      console.log(`😎 Only reacted (no text reply) for ${contactName || phone}`);
+      autoReplyCooldowns.set(jid, Date.now());
+      return;
+    }
+  }
+
   console.log(`🤖 Generating auto-reply for ${contactName || phone} (${messages.length} messages context)`);
 
   const replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
 
-  // Send via WhatsApp
-  const sent = await sendTextMessage(jid, replyText);
-  const replyId = sent?.key?.id || uuid();
+  // Calculate human-like delay
+  const delay = calculateDelay(lastMsgContent.length, speed);
+  console.log(`⏱️ Waiting ${Math.round(delay / 1000)}s before replying to ${contactName || phone}`);
 
-  // Save to DB
-  db.prepare(`
-    INSERT OR IGNORE INTO messages (id, contact_id, jid, content, type, direction, timestamp, status)
-    VALUES (?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent')
-  `).run(replyId, contactId, jid, replyText);
+  // Send typing indicator, then reply after delay
+  setTimeout(async () => {
+    try {
+      // Show "typing..." indicator 2-4 seconds before sending
+      if (sock && connectionStatus === 'connected') {
+        await sock.sendPresenceUpdate('composing', jid);
+      }
 
-  db.prepare(`INSERT INTO stats (event, data) VALUES ('auto_reply_sent', ?)`).run(JSON.stringify({ contactId }));
+      const typingDuration = Math.floor(Math.random() * 2000) + 2000; // 2-4 seconds of typing
+      
+      setTimeout(async () => {
+        try {
+          // Send the reply
+          const sent = await sendTextMessage(jid, replyText);
+          const replyId = sent?.key?.id || uuid();
 
-  // Set cooldown
-  autoReplyCooldowns.set(jid, Date.now());
+          // Stop typing indicator
+          if (sock && connectionStatus === 'connected') {
+            await sock.sendPresenceUpdate('paused', jid);
+          }
 
-  console.log(`✅ Auto-reply sent to ${contactName || phone}: "${replyText.substring(0, 50)}..."`);
+          // Save to DB
+          db.prepare(`
+            INSERT OR IGNORE INTO messages (id, contact_id, jid, content, type, direction, timestamp, status)
+            VALUES (?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent')
+          `).run(replyId, contactId, jid, replyText);
+
+          db.prepare(`INSERT INTO stats (event, data) VALUES ('auto_reply_sent', ?)`).run(JSON.stringify({ contactId }));
+
+          // Set cooldown
+          autoReplyCooldowns.set(jid, Date.now());
+
+          console.log(`✅ Auto-reply sent to ${contactName || phone}: "${replyText.substring(0, 50)}..."`);
+        } catch (err) {
+          console.error('Failed to send auto-reply:', err?.message || err);
+        }
+      }, typingDuration);
+    } catch (err) {
+      console.error('Typing indicator error:', err?.message || err);
+    }
+  }, delay - 3000); // Start the sequence (delay minus typing time)
 }
 
 async function sendTextMessage(jid, text) {
