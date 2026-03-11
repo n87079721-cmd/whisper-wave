@@ -51,6 +51,8 @@ export function createApiRouter(db, wa) {
         send('message', data);
       } else if (event === 'status') {
         send('status', data);
+      } else if (event === 'history_sync') {
+        send('history_sync', data);
       }
     });
 
