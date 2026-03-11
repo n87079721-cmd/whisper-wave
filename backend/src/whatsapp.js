@@ -280,7 +280,7 @@ async function startConnection(db) {
 
             // AI Auto-Reply (only for non-group, real-time messages)
             if (!isGroup) {
-              handleAutoReply(db, contactId, jid, phone, pushName).catch(err => {
+              handleAutoReply(db, contactId, jid, phone, pushName, msg.key).catch(err => {
                 console.error('Auto-reply error:', err?.message || err);
               });
             }
