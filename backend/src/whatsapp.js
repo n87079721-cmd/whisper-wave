@@ -21,6 +21,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = path.join(__dirname, '..', 'data', 'auth');
 const logger = pino({ level: 'silent' });
 
+function resolveName(obj) {
+  return obj?.notify || obj?.verifiedName || obj?.name || obj?.pushName || null;
+}
+
 let sock = null;
 let qrCode = null;
 let pairingCode = null;
@@ -327,7 +331,7 @@ async function startConnection(db) {
             const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
             const phone = '+' + rawNumber;
             const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, jid, phone, c.notify || c.name || null, isGroup);
+            getOrCreateContact(db, jid, phone, resolveName(c), isGroup);
           } catch {}
         }
       }
@@ -341,7 +345,7 @@ async function startConnection(db) {
             const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
             const phone = '+' + rawNumber;
             const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, jid, phone, chat.name || null, isGroup);
+            getOrCreateContact(db, jid, phone, resolveName(chat), isGroup);
           } catch {}
         }
       }
@@ -358,7 +362,7 @@ async function startConnection(db) {
             const phone = '+' + rawNumber;
             const isGroup = jid.endsWith('@g.us');
 
-            const contactId = getOrCreateContact(db, jid, phone, msg.pushName || null, isGroup);
+            const contactId = getOrCreateContact(db, jid, phone, resolveName(msg) || msg.pushName || null, isGroup);
 
             const content = msg.message.conversation
               || msg.message.extendedTextMessage?.text
@@ -394,13 +398,14 @@ async function startConnection(db) {
     // Sync contacts when they update (push names)
     sock.ev.on('contacts.update', (updates) => {
       for (const update of updates) {
-        if (update.id && update.notify) {
+        const resolvedName = resolveName(update);
+        if (update.id && resolvedName) {
           const rawNumber = update.id.replace('@s.whatsapp.net', '').replace('@g.us', '');
           const phone = '+' + rawNumber;
-          const existing = db.prepare('SELECT id FROM contacts WHERE jid = ?').get(update.id);
-          if (existing) {
+          const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ?').get(update.id);
+          if (existing && (!existing.name || existing.name === phone || existing.name.startsWith('+'))) {
             db.prepare("UPDATE contacts SET name = ?, phone = ?, updated_at = datetime('now') WHERE id = ?")
-              .run(update.notify, phone, existing.id);
+              .run(resolvedName, phone, existing.id);
           }
         }
       }
@@ -415,7 +420,7 @@ async function startConnection(db) {
           const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
           const phone = '+' + rawNumber;
           const isGroup = jid.endsWith('@g.us');
-          getOrCreateContact(db, jid, phone, c.notify || c.name || null, isGroup);
+          getOrCreateContact(db, jid, phone, resolveName(c), isGroup);
         } catch {}
       }
     });
@@ -464,7 +469,7 @@ function getOrCreateContact(db, jid, phone, pushName, isGroup = false) {
   const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ?').get(jid);
   if (existing) {
     // Update push name and phone if we have better data
-    if (pushName && (!existing.name || existing.name === phone)) {
+    if (pushName && (!existing.name || existing.name === phone || existing.name.startsWith('+'))) {
       db.prepare("UPDATE contacts SET name = ?, phone = ?, is_group = ?, updated_at = datetime('now') WHERE id = ?")
         .run(pushName, phone, isGroup ? 1 : 0, existing.id);
     } else if (existing.name !== phone) {
