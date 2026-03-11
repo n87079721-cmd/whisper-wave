@@ -23,6 +23,8 @@ const logger = pino({ level: 'silent' });
 
 let sock = null;
 let qrCode = null;
+let pairingCode = null;
+let pendingPairingPhone = null;
 let connectionStatus = 'disconnected';
 let eventListeners = [];
 let reconnectTimer = null;
