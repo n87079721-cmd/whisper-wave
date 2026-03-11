@@ -334,6 +334,17 @@ Rules:
     }
   });
 
+  router.post('/pair-phone', async (req, res) => {
+    try {
+      const { phoneNumber } = req.body;
+      if (!phoneNumber) return res.status(400).json({ error: 'Missing phoneNumber' });
+      const code = await wa.requestPairingCode(phoneNumber);
+      res.json({ success: true, code });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.post('/clear-session', async (req, res) => {
     try {
       await wa.clearSession();
