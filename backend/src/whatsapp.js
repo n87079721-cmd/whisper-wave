@@ -362,7 +362,7 @@ async function startConnection(db) {
             const phone = '+' + rawNumber;
             const isGroup = jid.endsWith('@g.us');
 
-            const contactId = getOrCreateContact(db, jid, phone, msg.pushName || null, isGroup);
+            const contactId = getOrCreateContact(db, jid, phone, resolveName(msg) || msg.pushName || null, isGroup);
 
             const content = msg.message.conversation
               || msg.message.extendedTextMessage?.text
