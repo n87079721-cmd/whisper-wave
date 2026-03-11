@@ -22,7 +22,7 @@ const AUTH_DIR = path.join(__dirname, '..', 'data', 'auth');
 const logger = pino({ level: 'silent' });
 
 function resolveName(obj) {
-  return obj?.notify || obj?.verifiedName || obj?.name || obj?.pushName || null;
+  return obj?.name || obj?.verifiedName || obj?.notify || obj?.pushName || null;
 }
 
 let sock = null;
