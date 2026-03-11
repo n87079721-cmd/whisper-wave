@@ -11,10 +11,11 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import NodeCache from 'node-cache';
-import { generateReply } from './ai.js';
+import { generateReply, shouldReact, shouldAlsoReplyAfterReaction } from './ai.js';
 
 const msgRetryCounterCache = new NodeCache({ stdTTL: 600, checkperiod: 120 });
 const autoReplyCooldowns = new Map(); // jid -> last reply timestamp
+const messageBatchBuffers = new Map(); // jid -> { messages: [], timer, contactId, phone, contactName }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = path.join(__dirname, '..', 'data', 'auth');
