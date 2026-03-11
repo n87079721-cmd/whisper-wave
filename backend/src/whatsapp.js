@@ -398,13 +398,14 @@ async function startConnection(db) {
     // Sync contacts when they update (push names)
     sock.ev.on('contacts.update', (updates) => {
       for (const update of updates) {
-        if (update.id && update.notify) {
+        const resolvedName = resolveName(update);
+        if (update.id && resolvedName) {
           const rawNumber = update.id.replace('@s.whatsapp.net', '').replace('@g.us', '');
           const phone = '+' + rawNumber;
-          const existing = db.prepare('SELECT id FROM contacts WHERE jid = ?').get(update.id);
-          if (existing) {
+          const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ?').get(update.id);
+          if (existing && (!existing.name || existing.name === phone || existing.name.startsWith('+'))) {
             db.prepare("UPDATE contacts SET name = ?, phone = ?, updated_at = datetime('now') WHERE id = ?")
-              .run(update.notify, phone, existing.id);
+              .run(resolvedName, phone, existing.id);
           }
         }
       }
