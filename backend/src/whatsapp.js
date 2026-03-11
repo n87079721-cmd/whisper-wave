@@ -331,7 +331,7 @@ async function startConnection(db) {
             const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
             const phone = '+' + rawNumber;
             const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, jid, phone, c.notify || c.name || null, isGroup);
+            getOrCreateContact(db, jid, phone, resolveName(c), isGroup);
           } catch {}
         }
       }
