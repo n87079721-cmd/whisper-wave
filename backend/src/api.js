@@ -43,6 +43,8 @@ export function createApiRouter(db, wa) {
         QRCode.toDataURL(data, { width: 256, margin: 1 }).then(qrUrl => {
           send('qr', { qr: qrUrl });
         });
+      } else if (event === 'pairing_code') {
+        send('pairing_code', data);
       } else if (event === 'connected') {
         send('status', { status: 'connected' });
       } else if (event === 'message') {
