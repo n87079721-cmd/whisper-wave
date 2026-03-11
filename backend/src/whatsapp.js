@@ -130,6 +130,19 @@ function installProcessGuards(db) {
   });
 }
 
+export async function requestPairingWithPhone(phoneNumber) {
+  if (!sock) throw new Error('WhatsApp socket not initialised');
+  if (connectionStatus === 'connected') throw new Error('Already connected');
+  // Baileys expects the number without + or spaces, e.g. "17052024615"
+  const cleaned = phoneNumber.replace(/[^0-9]/g, '');
+  if (cleaned.length < 8) throw new Error('Invalid phone number');
+  pendingPairingPhone = cleaned;
+  const code = await sock.requestPairingCode(cleaned);
+  pairingCode = code;
+  emit('pairing_code', { code });
+  return code;
+}
+
 export function initWhatsApp(db) {
   installProcessGuards(db);
   startConnection(db);
@@ -140,6 +153,7 @@ export function initWhatsApp(db) {
     reconnect: () => startConnection(db),
     clearSession: () => clearSession(db),
     getSocket: () => sock,
+    requestPairingCode: requestPairingWithPhone,
   };
 }
 
