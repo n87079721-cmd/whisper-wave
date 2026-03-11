@@ -23,6 +23,8 @@ const logger = pino({ level: 'silent' });
 
 let sock = null;
 let qrCode = null;
+let pairingCode = null;
+let pendingPairingPhone = null;
 let connectionStatus = 'disconnected';
 let eventListeners = [];
 let reconnectTimer = null;
@@ -33,7 +35,7 @@ let badMacTimestamps = [];
 let repairInProgress = false;
 
 export function getWhatsAppState() {
-  return { status: connectionStatus, qr: qrCode };
+  return { status: connectionStatus, qr: qrCode, pairingCode };
 }
 
 export function onWhatsAppEvent(listener) {
@@ -128,6 +130,19 @@ function installProcessGuards(db) {
   });
 }
 
+export async function requestPairingWithPhone(phoneNumber) {
+  if (!sock) throw new Error('WhatsApp socket not initialised');
+  if (connectionStatus === 'connected') throw new Error('Already connected');
+  // Baileys expects the number without + or spaces, e.g. "17052024615"
+  const cleaned = phoneNumber.replace(/[^0-9]/g, '');
+  if (cleaned.length < 8) throw new Error('Invalid phone number');
+  pendingPairingPhone = cleaned;
+  const code = await sock.requestPairingCode(cleaned);
+  pairingCode = code;
+  emit('pairing_code', { code });
+  return code;
+}
+
 export function initWhatsApp(db) {
   installProcessGuards(db);
   startConnection(db);
@@ -138,6 +153,7 @@ export function initWhatsApp(db) {
     reconnect: () => startConnection(db),
     clearSession: () => clearSession(db),
     getSocket: () => sock,
+    requestPairingCode: requestPairingWithPhone,
   };
 }
 
@@ -198,6 +214,8 @@ async function startConnection(db) {
 
       if (connection === 'open') {
         qrCode = null;
+        pairingCode = null;
+        pendingPairingPhone = null;
         connectionStatus = 'connected';
         reconnectAttempt = 0;
         badMacTimestamps = [];

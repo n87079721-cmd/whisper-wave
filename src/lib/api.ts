@@ -88,11 +88,19 @@ async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
 export const api = {
   // Status & QR
   getStatus() {
-    return requestJson<{ status: 'disconnected' | 'qr_waiting' | 'connected' | 'reconnecting'; qr: string | null; stats?: Stats }>('/api/status');
+    return requestJson<{ status: 'disconnected' | 'qr_waiting' | 'connected' | 'reconnecting'; qr: string | null; pairingCode?: string | null; stats?: Stats }>('/api/status');
   },
 
   getQR() {
     return requestJson<{ qr: string | null; status: string }>('/api/qr');
+  },
+
+  pairPhone(phoneNumber: string) {
+    return requestJson<{ success: boolean; code: string }>('/api/pair-phone', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phoneNumber }),
+    });
   },
 
   createEventSource() {

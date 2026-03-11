@@ -1,6 +1,6 @@
 import express from 'express';
 import { v4 as uuid } from 'uuid';
-import { getWhatsAppState, onWhatsAppEvent } from './whatsapp.js';
+import { getWhatsAppState, onWhatsAppEvent, requestPairingWithPhone } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
 import QRCode from 'qrcode';
 
@@ -43,6 +43,8 @@ export function createApiRouter(db, wa) {
         QRCode.toDataURL(data, { width: 256, margin: 1 }).then(qrUrl => {
           send('qr', { qr: qrUrl });
         });
+      } else if (event === 'pairing_code') {
+        send('pairing_code', data);
       } else if (event === 'connected') {
         send('status', { status: 'connected' });
       } else if (event === 'message') {
@@ -329,6 +331,17 @@ Rules:
     try {
       await wa.reconnect();
       res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/pair-phone', async (req, res) => {
+    try {
+      const { phoneNumber } = req.body;
+      if (!phoneNumber) return res.status(400).json({ error: 'Missing phoneNumber' });
+      const code = await wa.requestPairingCode(phoneNumber);
+      res.json({ success: true, code });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
