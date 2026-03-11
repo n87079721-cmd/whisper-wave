@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '@/lib/api';
+import { api, isBackendConfigured } from '@/lib/api';
 
 type ConnectionStatus = 'disconnected' | 'qr_waiting' | 'connected' | 'reconnecting';
 
