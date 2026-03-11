@@ -469,7 +469,7 @@ function getOrCreateContact(db, jid, phone, pushName, isGroup = false) {
   const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ?').get(jid);
   if (existing) {
     // Update push name and phone if we have better data
-    if (pushName && (!existing.name || existing.name === phone)) {
+    if (pushName && (!existing.name || existing.name === phone || existing.name.startsWith('+'))) {
       db.prepare("UPDATE contacts SET name = ?, phone = ?, is_group = ?, updated_at = datetime('now') WHERE id = ?")
         .run(pushName, phone, isGroup ? 1 : 0, existing.id);
     } else if (existing.name !== phone) {
