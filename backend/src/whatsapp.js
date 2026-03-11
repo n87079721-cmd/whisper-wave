@@ -726,6 +726,16 @@ async function clearSession(db) {
     sock = null;
   }
 
+  // Wipe all data so next account starts fresh
+  try {
+    db.prepare('DELETE FROM messages').run();
+    db.prepare('DELETE FROM contacts').run();
+    db.prepare('DELETE FROM stats').run();
+    console.log('🧹 Cleared messages, contacts, and stats tables');
+  } catch (err) {
+    console.error('Failed to clear DB tables:', err?.message || err);
+  }
+
   // Delete entire auth directory (session files, creds, keys)
   if (fs.existsSync(AUTH_DIR)) {
     fs.rmSync(AUTH_DIR, { recursive: true, force: true });

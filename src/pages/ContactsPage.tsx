@@ -8,11 +8,25 @@ const ContactsPage = () => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchContacts = () => {
     api.getContacts().then(data => {
       setContacts(data);
       setLoading(false);
     }).catch(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchContacts();
+
+    // Auto-refresh when history syncs
+    let es: EventSource | null = null;
+    try {
+      es = api.createEventSource();
+      es.addEventListener('history_sync', () => fetchContacts());
+      es.onerror = () => {};
+    } catch {}
+
+    return () => { es?.close(); };
   }, []);
 
   const filtered = contacts.filter(c =>
