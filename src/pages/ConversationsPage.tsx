@@ -58,6 +58,11 @@ const ConversationsPage = () => {
         const current = selectedContactRef.current;
         if (current) refreshMessages(current.id);
       });
+      es.addEventListener('history_sync', () => {
+        refreshConversations();
+        const current = selectedContactRef.current;
+        if (current) refreshMessages(current.id);
+      });
       es.onerror = () => {};
     } catch {}
 
