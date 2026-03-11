@@ -346,9 +346,8 @@ async function startConnection(db) {
         }
       }
 
-      // Import history messages
       if (historyMsgs?.length) {
-        for (const { message: msg } of historyMsgs) {
+        for (const msg of historyMsgs) {
           try {
             if (!msg?.message) continue;
             const jid = msg.key?.remoteJid;
@@ -708,9 +707,14 @@ async function sendVoiceNote(jid, audioBuffer) {
 async function clearSession(db) {
   connectionStatus = 'disconnected';
   qrCode = null;
+  pairingCode = null;
+  pendingPairingPhone = null;
   reconnectAttempt = 0;
   badMacTimestamps = [];
   repairInProgress = false;
+  autoReplyCooldowns.clear();
+  messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
+  messageBatchBuffers.clear();
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 
   // Close socket without triggering reconnect

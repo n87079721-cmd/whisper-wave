@@ -104,6 +104,9 @@ export const api = {
   },
 
   createEventSource() {
+    if (!getApiUrl()) {
+      throw new Error('Backend URL not configured. Go to Settings → Backend URL to set it.');
+    }
     return new EventSource(toUrl('/api/events'));
   },
 
