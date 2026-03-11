@@ -346,9 +346,8 @@ async function startConnection(db) {
         }
       }
 
-      // Import history messages
       if (historyMsgs?.length) {
-        for (const { message: msg } of historyMsgs) {
+        for (const msg of historyMsgs) {
           try {
             if (!msg?.message) continue;
             const jid = msg.key?.remoteJid;
