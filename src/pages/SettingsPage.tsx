@@ -98,12 +98,37 @@ const SettingsPage = () => {
     catch { toast.error('Failed to save setting'); }
   };
 
+  const handleSaveBackendUrl = () => {
+    setStoredApiUrl(backendUrl);
+    setBackendSaved(!!backendUrl);
+    toast.success(backendUrl ? 'Backend URL saved — reload to connect' : 'Backend URL cleared');
+    setTimeout(() => window.location.reload(), 600);
+  };
+
   return (
     <div className="space-y-4 md:space-y-6 max-w-2xl">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Settings</h1>
         <p className="text-sm text-muted-foreground mt-1">Manage API keys and bot configuration</p>
       </div>
+
+      {/* Backend URL */}
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center"><Globe className="w-5 h-5 text-primary" /></div>
+          <div>
+            <h3 className="font-semibold text-foreground text-sm">Backend URL</h3>
+            <p className="text-xs text-muted-foreground">Your VPS backend address (e.g. http://167.235.128.214:3002){backendSaved && <span className="text-primary ml-1">✓ Connected</span>}</p>
+          </div>
+        </div>
+        <input type="url" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)}
+          placeholder="http://your-vps-ip:3002"
+          className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50" />
+        <button onClick={handleSaveBackendUrl}
+          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2">
+          <Save className="w-4 h-4" /> Save Backend URL
+        </button>
+      </motion.div>
 
       {/* ElevenLabs API Key — input only, no reveal */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-6 space-y-4">
