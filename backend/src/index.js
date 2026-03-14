@@ -4,7 +4,6 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { initDatabase } from './db.js';
-import { initWhatsApp, getWhatsAppState } from './whatsapp.js';
 import { createApiRouter } from './api.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,16 +18,12 @@ app.use(express.json({ limit: '10mb' }));
 // Initialize database
 const db = initDatabase();
 
-// Initialize WhatsApp
-const wa = initWhatsApp(db);
-
-// API routes
-app.use('/api', createApiRouter(db, wa));
+// API routes (no longer needs wa — per-user instances created on demand)
+app.use('/api', createApiRouter(db));
 
 // Health check
 app.get('/health', (req, res) => {
-  const state = getWhatsAppState();
-  res.json({ status: 'ok', whatsapp: state.status });
+  res.json({ status: 'ok' });
 });
 
 // Serve built frontend (static files)
