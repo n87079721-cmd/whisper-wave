@@ -67,7 +67,7 @@ export function createApiRouter(db) {
     res.json({ qr: qrDataUrl, status: state.status });
   });
 
-  // SSE for real-time updates
+  // SSE for real-time updates (supports token via query param since EventSource doesn't support headers)
   router.get('/events', (req, res) => {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',

@@ -9,7 +9,9 @@ import {
   ChevronLeft,
   ChevronRight,
   MessageCircle,
+  LogOut,
 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings';
 
@@ -28,6 +30,7 @@ const navItems: { id: Page; label: string; icon: React.ElementType }[] = [
 
 const DashboardSidebar = ({ activePage, onPageChange }: DashboardSidebarProps) => {
   const [collapsed, setCollapsed] = useState(false);
+  const { user, logout } = useAuth();
 
   return (
     <motion.aside
@@ -65,6 +68,22 @@ const DashboardSidebar = ({ activePage, onPageChange }: DashboardSidebarProps) =
           );
         })}
       </nav>
+
+      {/* User info + logout */}
+      <div className="px-2 pb-2 space-y-1">
+        {!collapsed && user && (
+          <div className="px-3 py-2 text-xs text-muted-foreground truncate">
+            {user.displayName || user.username}
+          </div>
+        )}
+        <button
+          onClick={logout}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-sidebar-foreground hover:bg-destructive/15 hover:text-destructive transition-colors"
+        >
+          <LogOut className="w-[18px] h-[18px] flex-shrink-0" />
+          {!collapsed && <span>Sign Out</span>}
+        </button>
+      </div>
 
       <button
         onClick={() => setCollapsed(!collapsed)}
