@@ -13,42 +13,19 @@ import { v4 as uuid } from 'uuid';
 import NodeCache from 'node-cache';
 import { generateReply, shouldReact, shouldAlsoReplyAfterReaction } from './ai.js';
 
-const msgRetryCounterCache = new NodeCache({ stdTTL: 600, checkperiod: 120 });
-const autoReplyCooldowns = new Map(); // jid -> last reply timestamp
-const messageBatchBuffers = new Map(); // jid -> { messages: [], timer, contactId, phone, contactName }
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const AUTH_DIR = path.join(__dirname, '..', 'data', 'auth');
+const DATA_DIR = path.join(__dirname, '..', 'data');
 const logger = pino({ level: 'silent' });
+
+// Per-user instance store
+const userInstances = new Map(); // userId -> instance object
+
+function getUserAuthDir(userId) {
+  return path.join(DATA_DIR, 'auth', userId);
+}
 
 function resolveName(obj) {
   return obj?.name || obj?.verifiedName || obj?.notify || obj?.pushName || null;
-}
-
-let sock = null;
-let qrCode = null;
-let pairingCode = null;
-let pendingPairingPhone = null;
-let connectionStatus = 'disconnected';
-let eventListeners = [];
-let reconnectTimer = null;
-let isConnecting = false;
-let reconnectAttempt = 0;
-let processGuardsInstalled = false;
-let badMacTimestamps = [];
-let repairInProgress = false;
-
-export function getWhatsAppState() {
-  return { status: connectionStatus, qr: qrCode, pairingCode };
-}
-
-export function onWhatsAppEvent(listener) {
-  eventListeners.push(listener);
-  return () => { eventListeners = eventListeners.filter(l => l !== listener); };
-}
-
-function emit(event, data) {
-  eventListeners.forEach(l => l(event, data));
 }
 
 function isSignalSessionError(err) {
@@ -62,171 +39,191 @@ function isSignalSessionError(err) {
   );
 }
 
-function purgeCorruptedSignalSessions() {
-  if (!fs.existsSync(AUTH_DIR)) return 0;
-  const files = fs.readdirSync(AUTH_DIR);
-  const targets = files.filter((name) => /^session-.*\.json$/i.test(name) || /^sender-key-.*\.json$/i.test(name));
-
-  for (const file of targets) {
-    try {
-      fs.rmSync(path.join(AUTH_DIR, file), { force: true });
-    } catch {}
+function getInstance(userId) {
+  if (!userInstances.has(userId)) {
+    userInstances.set(userId, {
+      sock: null,
+      qrCode: null,
+      pairingCode: null,
+      pendingPairingPhone: null,
+      connectionStatus: 'disconnected',
+      eventListeners: [],
+      reconnectTimer: null,
+      isConnecting: false,
+      reconnectAttempt: 0,
+      badMacTimestamps: [],
+      repairInProgress: false,
+      msgRetryCounterCache: new NodeCache({ stdTTL: 600, checkperiod: 120 }),
+      autoReplyCooldowns: new Map(),
+      messageBatchBuffers: new Map(),
+    });
   }
+  return userInstances.get(userId);
+}
 
+export function getWhatsAppState(userId) {
+  const inst = getInstance(userId);
+  return { status: inst.connectionStatus, qr: inst.qrCode, pairingCode: inst.pairingCode };
+}
+
+export function onWhatsAppEvent(userId, listener) {
+  const inst = getInstance(userId);
+  inst.eventListeners.push(listener);
+  return () => { inst.eventListeners = inst.eventListeners.filter(l => l !== listener); };
+}
+
+function emit(userId, event, data) {
+  const inst = getInstance(userId);
+  inst.eventListeners.forEach(l => l(event, data));
+}
+
+function purgeCorruptedSignalSessions(userId) {
+  const authDir = getUserAuthDir(userId);
+  if (!fs.existsSync(authDir)) return 0;
+  const files = fs.readdirSync(authDir);
+  const targets = files.filter((name) => /^session-.*\.json$/i.test(name) || /^sender-key-.*\.json$/i.test(name));
+  for (const file of targets) {
+    try { fs.rmSync(path.join(authDir, file), { force: true }); } catch {}
+  }
   return targets.length;
 }
 
-function triggerSignalSessionRepair(db, sourceError) {
+function triggerSignalSessionRepair(userId, db, sourceError) {
+  const inst = getInstance(userId);
   const now = Date.now();
-  badMacTimestamps.push(now);
-  badMacTimestamps = badMacTimestamps.filter((ts) => now - ts < 60000);
+  inst.badMacTimestamps.push(now);
+  inst.badMacTimestamps = inst.badMacTimestamps.filter((ts) => now - ts < 60000);
+  if (inst.badMacTimestamps.length < 3 || inst.repairInProgress) return;
 
-  // Repair only if we see repeated decryption failures in a short window.
-  if (badMacTimestamps.length < 3 || repairInProgress) return;
-
-  repairInProgress = true;
-  console.warn(`⚠️ Detected repeated Signal decrypt failures. Starting auto-repair (${sourceError?.message || 'Bad MAC'})`);
+  inst.repairInProgress = true;
+  console.warn(`⚠️ [${userId}] Signal decrypt failures. Auto-repairing...`);
 
   setTimeout(async () => {
     try {
-      connectionStatus = 'reconnecting';
-      emit('status', { status: 'reconnecting' });
-
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-
-      const removed = purgeCorruptedSignalSessions();
-      console.log(`🛠️ Cleared ${removed} Signal session file(s). Reconnecting...`);
-
-      await startConnection(db);
+      inst.connectionStatus = 'reconnecting';
+      emit(userId, 'status', { status: 'reconnecting' });
+      if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
+      const removed = purgeCorruptedSignalSessions(userId);
+      console.log(`🛠️ [${userId}] Cleared ${removed} Signal session file(s). Reconnecting...`);
+      await startConnection(userId, db);
     } catch (err) {
-      console.error('Signal session auto-repair failed:', err?.message || err);
+      console.error(`Signal repair failed [${userId}]:`, err?.message || err);
     } finally {
-      repairInProgress = false;
-      badMacTimestamps = [];
+      inst.repairInProgress = false;
+      inst.badMacTimestamps = [];
     }
   }, 200);
 }
 
-function installProcessGuards(db) {
-  if (processGuardsInstalled) return;
-  processGuardsInstalled = true;
-
-  process.on('uncaughtException', (err) => {
-    if (isSignalSessionError(err)) {
-      console.warn('⚠️ Suppressed uncaught Signal session error:', err?.message || err);
-      triggerSignalSessionRepair(db, err);
-      return;
-    }
-    console.error('Uncaught exception:', err);
-    process.exit(1);
-  });
-
-  process.on('unhandledRejection', (reason) => {
-    if (isSignalSessionError(reason)) {
-      console.warn('⚠️ Suppressed unhandled Signal session rejection:', reason?.message || reason);
-      triggerSignalSessionRepair(db, reason);
-      return;
-    }
-    console.error('Unhandled rejection:', reason);
-  });
-}
-
-export async function requestPairingWithPhone(phoneNumber) {
-  if (!sock) throw new Error('WhatsApp socket not initialised');
-  if (connectionStatus === 'connected') throw new Error('Already connected');
-  // Baileys expects the number without + or spaces, e.g. "17052024615"
+export async function requestPairingWithPhone(userId, phoneNumber) {
+  const inst = getInstance(userId);
+  if (!inst.sock) throw new Error('WhatsApp socket not initialised');
+  if (inst.connectionStatus === 'connected') throw new Error('Already connected');
   const cleaned = phoneNumber.replace(/[^0-9]/g, '');
   if (cleaned.length < 8) throw new Error('Invalid phone number');
-  pendingPairingPhone = cleaned;
-  const code = await sock.requestPairingCode(cleaned);
-  pairingCode = code;
-  emit('pairing_code', { code });
+  inst.pendingPairingPhone = cleaned;
+  const code = await inst.sock.requestPairingCode(cleaned);
+  inst.pairingCode = code;
+  emit(userId, 'pairing_code', { code });
   return code;
 }
 
-export function initWhatsApp(db) {
-  installProcessGuards(db);
-  startConnection(db);
+export function initWhatsApp(userId, db) {
+  startConnection(userId, db);
   return {
-    getState: getWhatsAppState,
-    sendTextMessage,
-    sendVoiceNote,
-    reconnect: () => startConnection(db),
-    clearSession: () => clearSession(db),
-    getSocket: () => sock,
-    requestPairingCode: requestPairingWithPhone,
+    getState: () => getWhatsAppState(userId),
+    sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
+    sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
+    reconnect: () => startConnection(userId, db),
+    clearSession: () => clearSession(userId, db),
+    getSocket: () => getInstance(userId).sock,
+    requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
   };
 }
 
-async function startConnection(db) {
-  if (isConnecting) return;
-  isConnecting = true;
+// Get or create WA interface for a user
+export function getOrInitWhatsApp(userId, db) {
+  const inst = getInstance(userId);
+  // If never started or disconnected with no socket, start
+  if (!inst.sock && inst.connectionStatus === 'disconnected') {
+    return initWhatsApp(userId, db);
+  }
+  return {
+    getState: () => getWhatsAppState(userId),
+    sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
+    sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
+    reconnect: () => startConnection(userId, db),
+    clearSession: () => clearSession(userId, db),
+    getSocket: () => inst.sock,
+    requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
+  };
+}
 
-  // Clear any pending reconnect
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+async function startConnection(userId, db) {
+  const inst = getInstance(userId);
+  if (inst.isConnecting) return;
+  inst.isConnecting = true;
 
-  // Ensure a single active socket instance
-  if (sock) {
-    try { sock.ev.removeAllListeners('connection.update'); } catch {}
-    try { sock.ev.removeAllListeners('messages.upsert'); } catch {}
-    try { sock.ev.removeAllListeners('contacts.update'); } catch {}
-    try { sock.ev.removeAllListeners('creds.update'); } catch {}
-    try { sock.end?.(undefined); } catch {}
-    sock = null;
+  if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
+
+  if (inst.sock) {
+    try { inst.sock.ev.removeAllListeners('connection.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('messages.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('creds.update'); } catch {}
+    try { inst.sock.end?.(undefined); } catch {}
+    inst.sock = null;
   }
 
   try {
-    if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
+    const authDir = getUserAuthDir(userId);
+    if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
 
-    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
 
-    sock = makeWASocket({
+    inst.sock = makeWASocket({
       version,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
       logger,
-      printQRInTerminal: true,
+      printQRInTerminal: false,
       generateHighQualityLinkPreview: false,
       keepAliveIntervalMs: 30000,
       syncFullHistory: true,
       markOnlineOnConnect: false,
-      msgRetryCounterCache,
+      msgRetryCounterCache: inst.msgRetryCounterCache,
       getMessage: async (key) => {
-        // Baileys calls this to retry decryption of messages with Bad MAC errors
         try {
-          const row = db.prepare('SELECT content FROM messages WHERE id = ?').get(key.id);
+          const row = db.prepare('SELECT content FROM messages WHERE id = ? AND user_id = ?').get(key.id, userId);
           if (row?.content) return { conversation: row.content };
         } catch {}
         return undefined;
       },
     });
 
-    sock.ev.on('creds.update', saveCreds);
+    inst.sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
+    inst.sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
       if (qr) {
-        qrCode = qr;
-        connectionStatus = 'qr_waiting';
-        emit('qr', qr);
+        inst.qrCode = qr;
+        inst.connectionStatus = 'qr_waiting';
+        emit(userId, 'qr', qr);
       }
 
       if (connection === 'open') {
-        qrCode = null;
-        pairingCode = null;
-        pendingPairingPhone = null;
-        connectionStatus = 'connected';
-        reconnectAttempt = 0;
-        badMacTimestamps = [];
-        repairInProgress = false;
-        emit('connected', null);
-        console.log('✅ WhatsApp connected');
-        syncContacts(db);
+        inst.qrCode = null;
+        inst.pairingCode = null;
+        inst.pendingPairingPhone = null;
+        inst.connectionStatus = 'connected';
+        inst.reconnectAttempt = 0;
+        inst.badMacTimestamps = [];
+        inst.repairInProgress = false;
+        emit(userId, 'connected', null);
+        console.log(`✅ [${userId}] WhatsApp connected`);
+        syncContacts(userId, db);
       }
 
       if (connection === 'close') {
@@ -234,24 +231,21 @@ async function startConnection(db) {
         const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.badSession;
 
         if (isLoggedOut) {
-          connectionStatus = 'disconnected';
-          reconnectAttempt = 0;
-          emit('status', { status: 'disconnected' });
-          console.log('❌ Logged out. Clear session to reconnect.');
+          inst.connectionStatus = 'disconnected';
+          inst.reconnectAttempt = 0;
+          emit(userId, 'status', { status: 'disconnected' });
         } else {
-          connectionStatus = 'reconnecting';
-          emit('status', { status: 'reconnecting' });
+          inst.connectionStatus = 'reconnecting';
+          emit(userId, 'status', { status: 'reconnecting' });
           const delays = [3000, 5000, 10000];
-          const delay = delays[Math.min(reconnectAttempt, delays.length - 1)];
-          reconnectAttempt++;
-          console.log(`🔄 Connection closed (${statusCode ?? 'unknown'}), reconnecting in ${delay / 1000}s (attempt ${reconnectAttempt})...`);
-          reconnectTimer = setTimeout(() => startConnection(db), delay);
+          const delay = delays[Math.min(inst.reconnectAttempt, delays.length - 1)];
+          inst.reconnectAttempt++;
+          inst.reconnectTimer = setTimeout(() => startConnection(userId, db), delay);
         }
       }
     });
 
-    // Listen for incoming messages (both real-time 'notify' and history 'append')
-    sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
+    inst.sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
       for (const msg of msgs) {
         try {
           if (!msg.message) continue;
@@ -264,7 +258,7 @@ async function startConnection(db) {
           const pushName = msg.pushName || null;
           const isGroup = jid.endsWith('@g.us');
 
-          const contactId = getOrCreateContact(db, jid, phone, pushName, isGroup);
+          const contactId = getOrCreateContact(db, userId, jid, phone, pushName, isGroup);
 
           const content = msg.message.conversation
             || msg.message.extendedTextMessage?.text
@@ -286,31 +280,28 @@ async function startConnection(db) {
           const msgId = msg.key.id || uuid();
 
           db.prepare(`
-            INSERT OR IGNORE INTO messages (id, contact_id, jid, content, type, direction, timestamp, status, duration)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
-            msgId, contactId, jid, content, msgType, direction,
+            msgId, userId, contactId, jid, content, msgType, direction,
             toIsoTimestamp(msg.messageTimestamp),
             isFromMe ? 'sent' : 'delivered',
             msg.message.audioMessage?.seconds || null
           );
 
-          // Only track stats for real-time notifications
           if (type === 'notify' && !isFromMe) {
-            db.prepare(`INSERT INTO stats (event, data) VALUES ('message_received', ?)`).run(JSON.stringify({ contactId }));
-            emit('message', { contactId, msgId });
+            db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'message_received', ?)`).run(userId, JSON.stringify({ contactId }));
+            emit(userId, 'message', { contactId, msgId });
 
-            // AI Auto-Reply (only for non-group, real-time messages)
             if (!isGroup) {
-              handleAutoReply(db, contactId, jid, phone, pushName, msg.key).catch(err => {
+              handleAutoReply(userId, db, contactId, jid, phone, pushName, msg.key).catch(err => {
                 console.error('Auto-reply error:', err?.message || err);
               });
             }
           }
         } catch (err) {
           if (isSignalSessionError(err)) {
-            console.warn('⚠️ Suppressed message decrypt error in upsert handler:', err?.message || err);
-            triggerSignalSessionRepair(db, err);
+            triggerSignalSessionRepair(userId, db, err);
             continue;
           }
           console.error('messages.upsert handler error:', err?.message || err);
@@ -318,11 +309,9 @@ async function startConnection(db) {
       }
     });
 
-    // Handle history sync (existing chats loaded on connect)
-    sock.ev.on('messaging-history.set', ({ chats, contacts: syncedContacts, messages: historyMsgs }) => {
-      console.log(`📜 History sync: ${chats?.length || 0} chats, ${syncedContacts?.length || 0} contacts, ${historyMsgs?.length || 0} messages`);
+    inst.sock.ev.on('messaging-history.set', ({ chats, contacts: syncedContacts, messages: historyMsgs }) => {
+      console.log(`📜 [${userId}] History sync: ${chats?.length || 0} chats, ${syncedContacts?.length || 0} contacts, ${historyMsgs?.length || 0} messages`);
 
-      // Import contacts from history
       if (syncedContacts?.length) {
         for (const c of syncedContacts) {
           try {
@@ -331,12 +320,11 @@ async function startConnection(db) {
             const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
             const phone = '+' + rawNumber;
             const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, jid, phone, resolveName(c), isGroup);
+            getOrCreateContact(db, userId, jid, phone, resolveName(c), isGroup);
           } catch {}
         }
       }
 
-      // Import chats as contacts (in case contacts list is sparse)
       if (chats?.length) {
         for (const chat of chats) {
           try {
@@ -345,7 +333,7 @@ async function startConnection(db) {
             const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
             const phone = '+' + rawNumber;
             const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, jid, phone, resolveName(chat), isGroup);
+            getOrCreateContact(db, userId, jid, phone, resolveName(chat), isGroup);
           } catch {}
         }
       }
@@ -362,7 +350,7 @@ async function startConnection(db) {
             const phone = '+' + rawNumber;
             const isGroup = jid.endsWith('@g.us');
 
-            const contactId = getOrCreateContact(db, jid, phone, resolveName(msg) || msg.pushName || null, isGroup);
+            const contactId = getOrCreateContact(db, userId, jid, phone, resolveName(msg) || msg.pushName || null, isGroup);
 
             const content = msg.message.conversation
               || msg.message.extendedTextMessage?.text
@@ -379,10 +367,10 @@ async function startConnection(db) {
 
             const msgId = msg.key.id || uuid();
             db.prepare(`
-              INSERT OR IGNORE INTO messages (id, contact_id, jid, content, type, direction, timestamp, status, duration)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
-              msgId, contactId, jid, content, msgType,
+              msgId, userId, contactId, jid, content, msgType,
               isFromMe ? 'sent' : 'received',
               toIsoTimestamp(msg.messageTimestamp),
               isFromMe ? 'sent' : 'delivered',
@@ -392,17 +380,16 @@ async function startConnection(db) {
         }
       }
 
-      emit('history_sync', { chats: chats?.length || 0, messages: historyMsgs?.length || 0 });
+      emit(userId, 'history_sync', { chats: chats?.length || 0, messages: historyMsgs?.length || 0 });
     });
 
-    // Sync contacts when they update (push names)
-    sock.ev.on('contacts.update', (updates) => {
+    inst.sock.ev.on('contacts.update', (updates) => {
       for (const update of updates) {
         const resolvedName = resolveName(update);
         if (update.id && resolvedName) {
           const rawNumber = update.id.replace('@s.whatsapp.net', '').replace('@g.us', '');
           const phone = '+' + rawNumber;
-          const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ?').get(update.id);
+          const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ? AND user_id = ?').get(update.id, userId);
           if (existing && (!existing.name || existing.name === phone || existing.name.startsWith('+'))) {
             db.prepare("UPDATE contacts SET name = ?, phone = ?, updated_at = datetime('now') WHERE id = ?")
               .run(resolvedName, phone, existing.id);
@@ -411,8 +398,7 @@ async function startConnection(db) {
       }
     });
 
-    // Also handle contacts.upsert for initial contact sync
-    sock.ev.on('contacts.upsert', (contacts) => {
+    inst.sock.ev.on('contacts.upsert', (contacts) => {
       for (const c of contacts) {
         try {
           const jid = c.id;
@@ -420,22 +406,21 @@ async function startConnection(db) {
           const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
           const phone = '+' + rawNumber;
           const isGroup = jid.endsWith('@g.us');
-          getOrCreateContact(db, jid, phone, resolveName(c), isGroup);
+          getOrCreateContact(db, userId, jid, phone, resolveName(c), isGroup);
         } catch {}
       }
     });
   } catch (err) {
     if (isSignalSessionError(err)) {
-      console.warn('⚠️ startConnection hit Signal session error:', err?.message || err);
-      triggerSignalSessionRepair(db, err);
+      triggerSignalSessionRepair(userId, db, err);
       return;
     }
-    console.error('startConnection error:', err?.message || err);
-    connectionStatus = 'reconnecting';
-    emit('status', { status: 'reconnecting' });
-    reconnectTimer = setTimeout(() => startConnection(db), 3000);
+    console.error(`startConnection error [${userId}]:`, err?.message || err);
+    inst.connectionStatus = 'reconnecting';
+    emit(userId, 'status', { status: 'reconnecting' });
+    inst.reconnectTimer = setTimeout(() => startConnection(userId, db), 3000);
   } finally {
-    isConnecting = false;
+    inst.isConnecting = false;
   }
 }
 
@@ -444,31 +429,22 @@ function extractDisconnectStatusCode(error) {
     if (!error) return null;
     if (error?.output?.statusCode) return error.output.statusCode;
     return new Boom(error)?.output?.statusCode ?? null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function toIsoTimestamp(value) {
   if (typeof value === 'bigint') return new Date(Number(value) * 1000).toISOString();
   if (typeof value === 'number') return new Date(value * 1000).toISOString();
-
   if (value && typeof value === 'object') {
-    if (typeof value.toNumber === 'function') {
-      return new Date(value.toNumber() * 1000).toISOString();
-    }
-    if (typeof value.low === 'number') {
-      return new Date(value.low * 1000).toISOString();
-    }
+    if (typeof value.toNumber === 'function') return new Date(value.toNumber() * 1000).toISOString();
+    if (typeof value.low === 'number') return new Date(value.low * 1000).toISOString();
   }
-
   return new Date().toISOString();
 }
 
-function getOrCreateContact(db, jid, phone, pushName, isGroup = false) {
-  const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ?').get(jid);
+function getOrCreateContact(db, userId, jid, phone, pushName, isGroup = false) {
+  const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
   if (existing) {
-    // Update push name and phone if we have better data
     if (pushName && (!existing.name || existing.name === phone || existing.name.startsWith('+'))) {
       db.prepare("UPDATE contacts SET name = ?, phone = ?, is_group = ?, updated_at = datetime('now') WHERE id = ?")
         .run(pushName, phone, isGroup ? 1 : 0, existing.id);
@@ -481,46 +457,36 @@ function getOrCreateContact(db, jid, phone, pushName, isGroup = false) {
 
   const id = uuid();
   db.prepare(`
-    INSERT INTO contacts (id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?)
-  `).run(id, jid, pushName || phone, phone, isGroup ? 1 : 0);
+    INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, userId, jid, pushName || phone, phone, isGroup ? 1 : 0);
   return id;
 }
 
-async function syncContacts(db) {
-  try {
-    console.log('📇 Contact sync initiated — waiting for history events from Baileys');
-    // Actual sync happens via messaging-history.set, contacts.upsert, and contacts.update events
-  } catch (err) {
-    console.error('Contact sync error:', err.message);
-  }
+async function syncContacts(userId, db) {
+  console.log(`📇 [${userId}] Contact sync initiated`);
 }
 
 // ─── Human-like timing helpers ───
 
-function getConfigValue(db, key, fallback) {
-  const row = db.prepare("SELECT value FROM config WHERE key = ?").get(key);
+function getConfigValue(db, userId, key, fallback) {
+  const row = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = ?").get(userId, key);
   return row?.value ?? fallback;
 }
 
-function isWithinActiveHours(db) {
-  const start = getConfigValue(db, 'ai_active_hours_start', '10:00');
-  const end = getConfigValue(db, 'ai_active_hours_end', '23:00');
+function isWithinActiveHours(db, userId) {
+  const start = getConfigValue(db, userId, 'ai_active_hours_start', '10:00');
+  const end = getConfigValue(db, userId, 'ai_active_hours_end', '23:00');
   const now = new Date();
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const [sh, sm] = start.split(':').map(Number);
   const [eh, em] = end.split(':').map(Number);
   const startMin = sh * 60 + sm;
   const endMin = eh * 60 + em;
-  
-  if (startMin <= endMin) {
-    return currentMinutes >= startMin && currentMinutes <= endMin;
-  }
-  // Overnight range (e.g. 22:00 - 06:00)
+  if (startMin <= endMin) return currentMinutes >= startMin && currentMinutes <= endMin;
   return currentMinutes >= startMin || currentMinutes <= endMin;
 }
 
 function calculateDelay(messageLength, speed) {
-  // Returns delay in milliseconds
   const ranges = {
     fast:   { short: [3000, 12000],  medium: [8000, 25000],  long: [12000, 40000] },
     normal: { short: [5000, 25000],  medium: [15000, 60000], long: [30000, 90000] },
@@ -531,152 +497,107 @@ function calculateDelay(messageLength, speed) {
   if (messageLength < 20) range = r.short;
   else if (messageLength < 100) range = r.medium;
   else range = r.long;
-  
   return Math.floor(Math.random() * (range[1] - range[0])) + range[0];
 }
 
-async function sendReaction(jid, messageKey, emoji) {
-  if (!sock || connectionStatus !== 'connected') return;
+async function sendReaction(userId, jid, messageKey, emoji) {
+  const inst = getInstance(userId);
+  if (!inst.sock || inst.connectionStatus !== 'connected') return;
   try {
-    await sock.sendMessage(jid, {
-      react: { text: emoji, key: messageKey }
-    });
-    console.log(`😎 Reacted with ${emoji} to message in ${jid}`);
+    await inst.sock.sendMessage(jid, { react: { text: emoji, key: messageKey } });
   } catch (err) {
     console.error('Failed to send reaction:', err?.message);
   }
 }
 
-async function handleAutoReply(db, contactId, jid, phone, contactName, messageKey) {
-  // Check if automation is enabled
-  const autoConfig = db.prepare("SELECT value FROM config WHERE key = 'automation_enabled'").get();
+async function handleAutoReply(userId, db, contactId, jid, phone, contactName, messageKey) {
+  const autoConfig = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'automation_enabled'").get(userId);
   if (!autoConfig || autoConfig.value !== 'true') return;
 
-  // Active hours check
-  if (!isWithinActiveHours(db)) {
-    console.log(`🌙 Auto-reply skipped: outside active hours for ${jid}`);
-    return;
-  }
+  if (!isWithinActiveHours(db, userId)) return;
 
-  // Reply chance check (default 70%)
-  const replyChance = parseInt(getConfigValue(db, 'ai_reply_chance', '70'), 10);
+  const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
   if (Math.random() * 100 > replyChance) {
-    console.log(`🎲 Auto-reply skipped: rolled outside ${replyChance}% reply chance for ${jid}`);
-    // Even when skipping the reply, maybe still react
     const reactionEmoji = shouldReact();
     if (reactionEmoji && messageKey) {
       const reactDelay = Math.floor(Math.random() * 5000) + 2000;
-      setTimeout(() => sendReaction(jid, messageKey, reactionEmoji), reactDelay);
+      setTimeout(() => sendReaction(userId, jid, messageKey, reactionEmoji), reactDelay);
     }
     return;
   }
 
-  // Message batching: wait for rapid follow-up messages before replying
-  const existing = messageBatchBuffers.get(jid);
-  if (existing) {
-    clearTimeout(existing.timer);
-  }
-  
+  const inst = getInstance(userId);
+  const existing = inst.messageBatchBuffers.get(jid);
+  if (existing) clearTimeout(existing.timer);
+
   const batchEntry = existing || { messages: [], contactId, phone, contactName, messageKey };
-  batchEntry.messageKey = messageKey; // always use the latest message key for reactions
-  
+  batchEntry.messageKey = messageKey;
+
   batchEntry.timer = setTimeout(() => {
-    messageBatchBuffers.delete(jid);
-    executeAutoReply(db, contactId, jid, phone, contactName, messageKey).catch(err => {
+    inst.messageBatchBuffers.delete(jid);
+    executeAutoReply(userId, db, contactId, jid, phone, contactName, messageKey).catch(err => {
       console.error('Batched auto-reply error:', err?.message || err);
     });
-  }, 8000); // Wait 8 seconds for follow-up messages
-  
-  messageBatchBuffers.set(jid, batchEntry);
+  }, 8000);
+
+  inst.messageBatchBuffers.set(jid, batchEntry);
 }
 
-async function executeAutoReply(db, contactId, jid, phone, contactName, messageKey) {
-  // Cooldown check (30 seconds per contact — longer to feel natural)
+async function executeAutoReply(userId, db, contactId, jid, phone, contactName, messageKey) {
+  const inst = getInstance(userId);
   const now = Date.now();
-  const lastReply = autoReplyCooldowns.get(jid) || 0;
-  if (now - lastReply < 30000) {
-    console.log(`⏳ Auto-reply cooldown active for ${jid}`);
-    return;
-  }
+  const lastReply = inst.autoReplyCooldowns.get(jid) || 0;
+  if (now - lastReply < 30000) return;
 
-  // Get OpenAI key
-  const keyRow = db.prepare("SELECT value FROM config WHERE key = 'openai_api_key'").get();
-  if (!keyRow?.value) {
-    console.log('⚠️ Auto-reply skipped: no OpenAI API key configured');
-    return;
-  }
+  const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
+  if (!keyRow?.value) return;
 
-  // Get system prompt
-  const promptRow = db.prepare("SELECT value FROM config WHERE key = 'ai_system_prompt'").get();
+  const promptRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
   const systemPrompt = promptRow?.value || '';
 
-  // Load last 50 messages for context
   const messages = db.prepare(`
     SELECT content, direction, type FROM messages 
-    WHERE contact_id = ? AND type = 'text' AND content IS NOT NULL AND content != ''
+    WHERE contact_id = ? AND user_id = ? AND type = 'text' AND content IS NOT NULL AND content != ''
     ORDER BY timestamp DESC LIMIT 50
-  `).all(contactId).reverse();
+  `).all(contactId, userId).reverse();
 
   if (messages.length === 0) return;
 
   const lastMsgContent = messages[messages.length - 1]?.content || '';
-  const speed = getConfigValue(db, 'ai_response_speed', 'normal');
+  const speed = getConfigValue(db, userId, 'ai_response_speed', 'normal');
 
-  // Maybe react with an emoji first
   const reactionEmoji = shouldReact();
   if (reactionEmoji && messageKey) {
     const reactDelay = Math.floor(Math.random() * 3000) + 1000;
-    setTimeout(() => sendReaction(jid, messageKey, reactionEmoji), reactDelay);
-    
-    // Sometimes just react, no text reply
+    setTimeout(() => sendReaction(userId, jid, messageKey, reactionEmoji), reactDelay);
     if (!shouldAlsoReplyAfterReaction()) {
-      console.log(`😎 Only reacted (no text reply) for ${contactName || phone}`);
-      autoReplyCooldowns.set(jid, Date.now());
+      inst.autoReplyCooldowns.set(jid, Date.now());
       return;
     }
   }
 
-  console.log(`🤖 Generating auto-reply for ${contactName || phone} (${messages.length} messages context)`);
-
   const replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
-
-  // Calculate human-like delay
   const delay = calculateDelay(lastMsgContent.length, speed);
-  console.log(`⏱️ Waiting ${Math.round(delay / 1000)}s before replying to ${contactName || phone}`);
 
-  // Send typing indicator, then reply after delay
   setTimeout(async () => {
     try {
-      // Show "typing..." indicator 2-4 seconds before sending
-      if (sock && connectionStatus === 'connected') {
-        await sock.sendPresenceUpdate('composing', jid);
+      if (inst.sock && inst.connectionStatus === 'connected') {
+        await inst.sock.sendPresenceUpdate('composing', jid);
       }
-
-      const typingDuration = Math.floor(Math.random() * 2000) + 2000; // 2-4 seconds of typing
-      
+      const typingDuration = Math.floor(Math.random() * 2000) + 2000;
       setTimeout(async () => {
         try {
-          // Send the reply
-          const sent = await sendTextMessage(jid, replyText);
+          const sent = await sendTextMessage(userId, jid, replyText);
           const replyId = sent?.key?.id || uuid();
-
-          // Stop typing indicator
-          if (sock && connectionStatus === 'connected') {
-            await sock.sendPresenceUpdate('paused', jid);
+          if (inst.sock && inst.connectionStatus === 'connected') {
+            await inst.sock.sendPresenceUpdate('paused', jid);
           }
-
-          // Save to DB
           db.prepare(`
-            INSERT OR IGNORE INTO messages (id, contact_id, jid, content, type, direction, timestamp, status)
-            VALUES (?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent')
-          `).run(replyId, contactId, jid, replyText);
-
-          db.prepare(`INSERT INTO stats (event, data) VALUES ('auto_reply_sent', ?)`).run(JSON.stringify({ contactId }));
-
-          // Set cooldown
-          autoReplyCooldowns.set(jid, Date.now());
-
-          console.log(`✅ Auto-reply sent to ${contactName || phone}: "${replyText.substring(0, 50)}..."`);
+            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
+            VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent')
+          `).run(replyId, userId, contactId, jid, replyText);
+          db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'auto_reply_sent', ?)`).run(userId, JSON.stringify({ contactId }));
+          inst.autoReplyCooldowns.set(jid, Date.now());
         } catch (err) {
           console.error('Failed to send auto-reply:', err?.message || err);
         }
@@ -684,75 +605,72 @@ async function executeAutoReply(db, contactId, jid, phone, contactName, messageK
     } catch (err) {
       console.error('Typing indicator error:', err?.message || err);
     }
-  }, delay - 3000); // Start the sequence (delay minus typing time)
+  }, delay - 3000);
 }
 
-async function sendTextMessage(jid, text) {
-  if (!sock || connectionStatus !== 'connected') {
+async function sendTextMessage(userId, jid, text) {
+  const inst = getInstance(userId);
+  if (!inst.sock || inst.connectionStatus !== 'connected') {
     throw new Error('WhatsApp not connected');
   }
-  const sent = await sock.sendMessage(jid, { text });
-  return sent;
+  return await inst.sock.sendMessage(jid, { text });
 }
 
-async function sendVoiceNote(jid, audioBuffer) {
-  if (!sock || connectionStatus !== 'connected') {
+async function sendVoiceNote(userId, jid, audioBuffer) {
+  const inst = getInstance(userId);
+  if (!inst.sock || inst.connectionStatus !== 'connected') {
     throw new Error('WhatsApp not connected');
   }
-  // Send as PTT with proper mimetype — NO caption, just audio
-  // This ensures WhatsApp shows it as a native voice note with waveform
-  const sent = await sock.sendMessage(jid, {
+  return await inst.sock.sendMessage(jid, {
     audio: audioBuffer,
     mimetype: 'audio/ogg; codecs=opus',
     ptt: true,
   });
-  return sent;
 }
 
-async function clearSession(db) {
-  connectionStatus = 'disconnected';
-  qrCode = null;
-  pairingCode = null;
-  pendingPairingPhone = null;
-  reconnectAttempt = 0;
-  badMacTimestamps = [];
-  repairInProgress = false;
-  autoReplyCooldowns.clear();
-  messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
-  messageBatchBuffers.clear();
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+async function clearSession(userId, db) {
+  const inst = getInstance(userId);
+  inst.connectionStatus = 'disconnected';
+  inst.qrCode = null;
+  inst.pairingCode = null;
+  inst.pendingPairingPhone = null;
+  inst.reconnectAttempt = 0;
+  inst.badMacTimestamps = [];
+  inst.repairInProgress = false;
+  inst.autoReplyCooldowns.clear();
+  inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
+  inst.messageBatchBuffers.clear();
+  if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
 
-  // Close socket without triggering reconnect
-  if (sock) {
-    try { sock.ev.removeAllListeners('connection.update'); } catch {}
-    try { sock.ev.removeAllListeners('messages.upsert'); } catch {}
-    try { sock.ev.removeAllListeners('contacts.update'); } catch {}
-    try { sock.ev.removeAllListeners('contacts.upsert'); } catch {}
-    try { sock.ev.removeAllListeners('messaging-history.set'); } catch {}
-    try { sock.ev.removeAllListeners('creds.update'); } catch {}
-    try { await sock.logout(); } catch {}
-    try { sock.end?.(undefined); } catch {}
-    sock = null;
+  if (inst.sock) {
+    try { inst.sock.ev.removeAllListeners('connection.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('messages.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('contacts.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('messaging-history.set'); } catch {}
+    try { inst.sock.ev.removeAllListeners('creds.update'); } catch {}
+    try { await inst.sock.logout(); } catch {}
+    try { inst.sock.end?.(undefined); } catch {}
+    inst.sock = null;
   }
 
-  // Wipe all data so next account starts fresh
+  // Wipe user data
   try {
-    db.prepare('DELETE FROM messages').run();
-    db.prepare('DELETE FROM contacts').run();
-    db.prepare('DELETE FROM stats').run();
-    console.log('🧹 Cleared messages, contacts, and stats tables');
+    db.prepare('DELETE FROM messages WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM contacts WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM stats WHERE user_id = ?').run(userId);
   } catch (err) {
     console.error('Failed to clear DB tables:', err?.message || err);
   }
 
-  // Delete entire auth directory (session files, creds, keys)
-  if (fs.existsSync(AUTH_DIR)) {
-    fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+  // Delete user auth directory
+  const authDir = getUserAuthDir(userId);
+  if (fs.existsSync(authDir)) {
+    fs.rmSync(authDir, { recursive: true, force: true });
   }
-  // Recreate empty auth dir for next scan
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
+  fs.mkdirSync(authDir, { recursive: true });
 
-  isConnecting = false;
-  emit('status', { status: 'disconnected' });
-  console.log('🗑️ Session fully cleared. Scan QR to reconnect.');
+  inst.isConnecting = false;
+  emit(userId, 'status', { status: 'disconnected' });
+  console.log(`🗑️ [${userId}] Session fully cleared.`);
 }
