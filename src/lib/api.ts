@@ -9,11 +9,18 @@ function getApiUrl(): string {
   const envUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim() || '';
   if (envUrl) return envUrl.replace(/\/$/, '');
 
-  // 3. localhost fallback when running locally
-  const isLocalDev =
-    typeof window !== 'undefined' &&
-    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-  if (isLocalDev) return 'http://localhost:3002';
+  // 3. Same-origin (merged deployment — frontend served by backend)
+  if (typeof window !== 'undefined') {
+    const loc = window.location;
+    // If we're NOT on Lovable preview, assume same-origin backend
+    if (!loc.hostname.includes('lovable.app') && !loc.hostname.includes('lovableproject.com')) {
+      return loc.origin;
+    }
+    // Localhost fallback
+    if (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1') {
+      return 'http://localhost:3002';
+    }
+  }
 
   return '';
 }
