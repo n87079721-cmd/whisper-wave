@@ -1,4 +1,15 @@
 const STORAGE_KEY = 'wa_api_url';
+const TOKEN_KEY = 'wa_auth_token';
+
+function getAuthToken(): string | null {
+  return typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  if (token) return { 'Authorization': `Bearer ${token}` };
+  return {};
+}
 
 function getApiUrl(): string {
   // 1. localStorage (runtime config from Settings)
@@ -12,11 +23,9 @@ function getApiUrl(): string {
   // 3. Same-origin (merged deployment — frontend served by backend)
   if (typeof window !== 'undefined') {
     const loc = window.location;
-    // If we're NOT on Lovable preview, assume same-origin backend
     if (!loc.hostname.includes('lovable.app') && !loc.hostname.includes('lovableproject.com')) {
       return loc.origin;
     }
-    // Localhost fallback
     if (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1') {
       return 'http://localhost:3002';
     }
@@ -50,12 +59,26 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   if (!getApiUrl()) {
     throw new Error('Backend URL not configured. Go to Settings → Backend URL to set it.');
   }
-  const res = await fetch(toUrl(path), init);
-  const ct = res.headers.get('content-type') || '';
   
-  // Detect HTML response (means we hit the Vite server, not the backend)
+  const headers = {
+    ...authHeaders(),
+    ...(init?.headers || {}),
+  };
+  
+  const res = await fetch(toUrl(path), { ...init, headers });
+  const ct = res.headers.get('content-type') || '';
+
   if (ct.includes('text/html')) {
     throw new Error('Backend unreachable — got HTML instead of JSON. Check your Backend URL in Settings.');
+  }
+
+  // Handle auth errors
+  if (res.status === 401) {
+    // Token expired or invalid — clear auth
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem('wa_auth_user');
+    window.location.reload();
+    throw new Error('Session expired. Please log in again.');
   }
 
   const isJson = ct.includes('application/json');
@@ -76,10 +99,22 @@ async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
   if (!getApiUrl()) {
     throw new Error('Backend URL not configured. Go to Settings → Backend URL to set it.');
   }
-  const res = await fetch(toUrl(path), init);
+  
+  const headers = {
+    ...authHeaders(),
+    ...(init?.headers || {}),
+  };
+  
+  const res = await fetch(toUrl(path), { ...init, headers });
   const ct = res.headers.get('content-type') || '';
   if (ct.includes('text/html')) {
     throw new Error('Backend unreachable — got HTML instead of JSON. Check your Backend URL in Settings.');
+  }
+  if (res.status === 401) {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem('wa_auth_user');
+    window.location.reload();
+    throw new Error('Session expired. Please log in again.');
   }
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
@@ -114,7 +149,10 @@ export const api = {
     if (!getApiUrl()) {
       throw new Error('Backend URL not configured. Go to Settings → Backend URL to set it.');
     }
-    return new EventSource(toUrl('/api/events'));
+    const token = getAuthToken();
+    // EventSource doesn't support headers, pass token as query param
+    const url = toUrl('/api/events') + (token ? `?token=${encodeURIComponent(token)}` : '');
+    return new EventSource(url);
   },
 
   // Voices
@@ -165,7 +203,6 @@ export const api = {
     });
   },
 
-  // Enhance text with AI
   enhanceText(text: string) {
     return requestJson<{ enhanced: string }>('/api/enhance', {
       method: 'POST',
