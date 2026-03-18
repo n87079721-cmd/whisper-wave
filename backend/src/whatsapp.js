@@ -24,8 +24,18 @@ function getUserAuthDir(userId) {
   return path.join(DATA_DIR, 'auth', userId);
 }
 
+// Priority: saved contact name > notify (push name) > verifiedName > pushName
 function resolveName(obj) {
-  return obj?.name || obj?.verifiedName || obj?.notify || obj?.pushName || null;
+  return obj?.name || obj?.notify || obj?.verifiedName || obj?.pushName || null;
+}
+
+// Check if a name is "better" than an existing one (i.e. not a phone number)
+function isBetterName(newName, existingName, phone) {
+  if (!newName) return false;
+  if (!existingName) return true;
+  // If existing name is just a phone number, any real name is better
+  if (existingName === phone || existingName.startsWith('+') || /^\d{7,}$/.test(existingName)) return true;
+  return false;
 }
 
 function isSignalSessionError(err) {
@@ -389,11 +399,9 @@ async function startConnection(userId, db) {
         if (update.id && resolvedName) {
           const rawNumber = update.id.replace('@s.whatsapp.net', '').replace('@g.us', '');
           const phone = '+' + rawNumber;
-          const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ? AND user_id = ?').get(update.id, userId);
-          if (existing && (!existing.name || existing.name === phone || existing.name.startsWith('+'))) {
-            db.prepare("UPDATE contacts SET name = ?, phone = ?, updated_at = datetime('now') WHERE id = ?")
-              .run(resolvedName, phone, existing.id);
-          }
+          const isGroup = update.id.endsWith('@g.us');
+          // Always update with the resolved name (saved contact name takes priority)
+          getOrCreateContact(db, userId, update.id, phone, resolvedName, isGroup);
         }
       }
     });
@@ -445,10 +453,11 @@ function toIsoTimestamp(value) {
 function getOrCreateContact(db, userId, jid, phone, pushName, isGroup = false) {
   const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
   if (existing) {
-    if (pushName && (!existing.name || existing.name === phone || existing.name.startsWith('+'))) {
+    // Always update to a better name if available
+    if (isBetterName(pushName, existing.name, phone)) {
       db.prepare("UPDATE contacts SET name = ?, phone = ?, is_group = ?, updated_at = datetime('now') WHERE id = ?")
         .run(pushName, phone, isGroup ? 1 : 0, existing.id);
-    } else if (existing.name !== phone) {
+    } else {
       db.prepare("UPDATE contacts SET phone = ?, is_group = ?, updated_at = datetime('now') WHERE id = ?")
         .run(phone, isGroup ? 1 : 0, existing.id);
     }
@@ -463,7 +472,30 @@ function getOrCreateContact(db, userId, jid, phone, pushName, isGroup = false) {
 }
 
 async function syncContacts(userId, db) {
+  const inst = getInstance(userId);
+  if (!inst.sock) return;
   console.log(`📇 [${userId}] Contact sync initiated`);
+  
+  try {
+    // Fetch all contacts from the WhatsApp store
+    const store = inst.sock?.store;
+    if (store?.contacts) {
+      const contacts = Object.values(store.contacts);
+      console.log(`📇 [${userId}] Found ${contacts.length} contacts in store`);
+      for (const c of contacts) {
+        try {
+          const jid = c.id;
+          if (!jid || jid === 'status@broadcast') continue;
+          const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+          const phone = '+' + rawNumber;
+          const isGroup = jid.endsWith('@g.us');
+          getOrCreateContact(db, userId, jid, phone, resolveName(c), isGroup);
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.error(`Contact sync error [${userId}]:`, err?.message || err);
+  }
 }
 
 // ─── Human-like timing helpers ───
@@ -476,14 +508,31 @@ function getConfigValue(db, userId, key, fallback) {
 function isWithinActiveHours(db, userId) {
   const start = getConfigValue(db, userId, 'ai_active_hours_start', '10:00');
   const end = getConfigValue(db, userId, 'ai_active_hours_end', '23:00');
-  const now = new Date();
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const timezone = getConfigValue(db, userId, 'ai_timezone', 'Africa/Lagos');
+  
+  // Use the user's configured timezone
+  let now;
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: 'numeric', minute: 'numeric', hour12: false
+    });
+    const parts = formatter.formatToParts(new Date());
+    const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0');
+    const minute = parseInt(parts.find(p => p.type === 'minute')?.value || '0');
+    now = hour * 60 + minute;
+  } catch {
+    // Fallback to server time if timezone is invalid
+    const d = new Date();
+    now = d.getHours() * 60 + d.getMinutes();
+  }
+  
   const [sh, sm] = start.split(':').map(Number);
   const [eh, em] = end.split(':').map(Number);
   const startMin = sh * 60 + sm;
   const endMin = eh * 60 + em;
-  if (startMin <= endMin) return currentMinutes >= startMin && currentMinutes <= endMin;
-  return currentMinutes >= startMin || currentMinutes <= endMin;
+  if (startMin <= endMin) return now >= startMin && now <= endMin;
+  return now >= startMin || now <= endMin;
 }
 
 function calculateDelay(messageLength, speed) {
