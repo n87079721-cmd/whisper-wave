@@ -24,8 +24,18 @@ function getUserAuthDir(userId) {
   return path.join(DATA_DIR, 'auth', userId);
 }
 
+// Priority: saved contact name > notify (push name) > verifiedName > pushName
 function resolveName(obj) {
-  return obj?.name || obj?.verifiedName || obj?.notify || obj?.pushName || null;
+  return obj?.name || obj?.notify || obj?.verifiedName || obj?.pushName || null;
+}
+
+// Check if a name is "better" than an existing one (i.e. not a phone number)
+function isBetterName(newName, existingName, phone) {
+  if (!newName) return false;
+  if (!existingName) return true;
+  // If existing name is just a phone number, any real name is better
+  if (existingName === phone || existingName.startsWith('+') || /^\d{7,}$/.test(existingName)) return true;
+  return false;
 }
 
 function isSignalSessionError(err) {
