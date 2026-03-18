@@ -238,6 +238,31 @@ const SettingsPage = () => {
                 </div>
               </div>
 
+              {/* Timezone */}
+              <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
+                <div className="flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-primary" />
+                  <label className="text-sm font-medium text-foreground">Timezone</label>
+                </div>
+                <p className="text-xs text-muted-foreground">Set your timezone so active hours work correctly (especially if your VPS is in a different region).</p>
+                <select value={timezone}
+                  onChange={(e) => { setTimezone(e.target.value); saveAvailabilitySetting('ai_timezone', e.target.value); }}
+                  className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary/50">
+                  <option value="Africa/Lagos">Africa/Lagos (WAT)</option>
+                  <option value="Africa/Johannesburg">Africa/Johannesburg (SAST)</option>
+                  <option value="Africa/Nairobi">Africa/Nairobi (EAT)</option>
+                  <option value="Africa/Cairo">Africa/Cairo (EET)</option>
+                  <option value="America/New_York">America/New_York (EST)</option>
+                  <option value="America/Chicago">America/Chicago (CST)</option>
+                  <option value="America/Los_Angeles">America/Los_Angeles (PST)</option>
+                  <option value="Europe/London">Europe/London (GMT)</option>
+                  <option value="Europe/Berlin">Europe/Berlin (CET)</option>
+                  <option value="Asia/Dubai">Asia/Dubai (GST)</option>
+                  <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                  <option value="Asia/Tokyo">Asia/Tokyo (JST)</option>
+                </select>
+              </div>
+
               {/* Reply Chance */}
               <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
                 <div className="flex items-center justify-between">
