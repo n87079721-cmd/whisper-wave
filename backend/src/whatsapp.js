@@ -399,11 +399,9 @@ async function startConnection(userId, db) {
         if (update.id && resolvedName) {
           const rawNumber = update.id.replace('@s.whatsapp.net', '').replace('@g.us', '');
           const phone = '+' + rawNumber;
-          const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ? AND user_id = ?').get(update.id, userId);
-          if (existing && (!existing.name || existing.name === phone || existing.name.startsWith('+'))) {
-            db.prepare("UPDATE contacts SET name = ?, phone = ?, updated_at = datetime('now') WHERE id = ?")
-              .run(resolvedName, phone, existing.id);
-          }
+          const isGroup = update.id.endsWith('@g.us');
+          // Always update with the resolved name (saved contact name takes priority)
+          getOrCreateContact(db, userId, update.id, phone, resolvedName, isGroup);
         }
       }
     });
