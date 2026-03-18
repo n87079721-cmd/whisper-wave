@@ -508,14 +508,31 @@ function getConfigValue(db, userId, key, fallback) {
 function isWithinActiveHours(db, userId) {
   const start = getConfigValue(db, userId, 'ai_active_hours_start', '10:00');
   const end = getConfigValue(db, userId, 'ai_active_hours_end', '23:00');
-  const now = new Date();
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const timezone = getConfigValue(db, userId, 'ai_timezone', 'Africa/Lagos');
+  
+  // Use the user's configured timezone
+  let now;
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: 'numeric', minute: 'numeric', hour12: false
+    });
+    const parts = formatter.formatToParts(new Date());
+    const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0');
+    const minute = parseInt(parts.find(p => p.type === 'minute')?.value || '0');
+    now = hour * 60 + minute;
+  } catch {
+    // Fallback to server time if timezone is invalid
+    const d = new Date();
+    now = d.getHours() * 60 + d.getMinutes();
+  }
+  
   const [sh, sm] = start.split(':').map(Number);
   const [eh, em] = end.split(':').map(Number);
   const startMin = sh * 60 + sm;
   const endMin = eh * 60 + em;
-  if (startMin <= endMin) return currentMinutes >= startMin && currentMinutes <= endMin;
-  return currentMinutes >= startMin || currentMinutes <= endMin;
+  if (startMin <= endMin) return now >= startMin && now <= endMin;
+  return now >= startMin || now <= endMin;
 }
 
 function calculateDelay(messageLength, speed) {
