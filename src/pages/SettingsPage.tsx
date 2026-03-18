@@ -52,6 +52,9 @@ const SettingsPage = () => {
     api.getConfig('ai_response_speed').then(data => {
       if (data.exists) setResponseSpeed(data.value || 'normal');
     }).catch(() => {});
+    api.getConfig('ai_timezone').then(data => {
+      if (data.exists) setTimezone(data.value || 'Africa/Lagos');
+    }).catch(() => {});
   }, []);
 
   const handleSaveKey = async () => {
