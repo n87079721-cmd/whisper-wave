@@ -474,7 +474,30 @@ function getOrCreateContact(db, userId, jid, phone, pushName, isGroup = false) {
 }
 
 async function syncContacts(userId, db) {
+  const inst = getInstance(userId);
+  if (!inst.sock) return;
   console.log(`📇 [${userId}] Contact sync initiated`);
+  
+  try {
+    // Fetch all contacts from the WhatsApp store
+    const store = inst.sock?.store;
+    if (store?.contacts) {
+      const contacts = Object.values(store.contacts);
+      console.log(`📇 [${userId}] Found ${contacts.length} contacts in store`);
+      for (const c of contacts) {
+        try {
+          const jid = c.id;
+          if (!jid || jid === 'status@broadcast') continue;
+          const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+          const phone = '+' + rawNumber;
+          const isGroup = jid.endsWith('@g.us');
+          getOrCreateContact(db, userId, jid, phone, resolveName(c), isGroup);
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.error(`Contact sync error [${userId}]:`, err?.message || err);
+  }
 }
 
 // ─── Human-like timing helpers ───
