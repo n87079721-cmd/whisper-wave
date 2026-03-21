@@ -81,8 +81,9 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
                   <p className="text-xs text-muted-foreground">{contact.phone}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <span className="text-xs text-muted-foreground mr-2">{contact.message_count || 0} msgs</span>
+              <div className="flex items-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                <span className="text-xs text-muted-foreground">{contact.message_count || 0} msgs</span>
+                <MessageSquare className="w-4 h-4 text-primary" />
               </div>
             </motion.div>
           ))}

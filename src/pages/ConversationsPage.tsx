@@ -53,6 +53,26 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
     api.getVoices().then(setVoices).catch(() => {});
   }, [refreshConversations]);
 
+  // Auto-select contact when navigating from ContactsPage
+  useEffect(() => {
+    if (!initialContactId) return;
+    const trySelect = async () => {
+      const data = await api.getConversations();
+      setConversations(data);
+      const match = data.find((c: Contact) => c.id === initialContactId);
+      if (match) {
+        setSelectedContact(match);
+      } else {
+        // Contact exists but has no conversations yet - create a minimal entry
+        const contacts = await api.getContacts();
+        const contactMatch = contacts.find((c: Contact) => c.id === initialContactId);
+        if (contactMatch) setSelectedContact(contactMatch);
+      }
+      onContactOpened?.();
+    };
+    trySelect();
+  }, [initialContactId, onContactOpened]);
+
   // Real-time: SSE for new messages + poll every 10s as fallback
   useEffect(() => {
     let es: EventSource | null = null;
