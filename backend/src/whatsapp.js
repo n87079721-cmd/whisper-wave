@@ -746,6 +746,7 @@ async function startConnection(userId, db, options = {}) {
             );
 
             const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
+            if (!contactId) continue; // Skip unresolved @lid contacts
 
             const content = msg.message.conversation
               || msg.message.extendedTextMessage?.text
