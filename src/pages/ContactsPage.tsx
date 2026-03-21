@@ -4,7 +4,7 @@ import { Search, Phone, MessageSquare } from 'lucide-react';
 import { api, type Contact } from '@/lib/api';
 
 interface ContactsPageProps {
-  onOpenChat?: (contactId: string) => void;
+  onOpenChat?: (contact: Contact) => void;
 }
 
 const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
