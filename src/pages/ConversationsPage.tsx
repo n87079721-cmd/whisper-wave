@@ -108,9 +108,11 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
     refreshMessages(selectedContact.id);
   }, [selectedContact, refreshMessages]);
 
+  const cleanPhone = (p: string) => p?.replace(/@.*$/, '') || '';
+
   const filtered = conversations.filter(c =>
     (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.phone || '').includes(search)
+    cleanPhone(c.phone || '').includes(search)
   );
 
   const formatTime = (ts: string) => {
