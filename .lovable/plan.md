@@ -1,57 +1,46 @@
 
 
-## Plan: Fix Contacts Names, Chat Navigation, and Sync Issues
+## Fix: LID JIDs Are Not Phone Numbers — Need Proper Resolution
 
-There are multiple interrelated problems visible in the screenshots and code:
+**Problem**: `@lid` JIDs (e.g., `77481361039542@lid`) contain WhatsApp's internal "Linked Identity" numbers, NOT real phone numbers. The current code strips `@lid` and prepends `+`, producing fake phone numbers like `+77481361039542`. This is why contacts show meaningless numbers with no names.
 
-### Problems Identified
+**Root Cause**: Unlike `@s.whatsapp.net` JIDs (which contain the actual phone number), `@lid` JIDs use arbitrary internal identifiers. The contact store often has BOTH formats for the same person — the `@lid` JID and the corresponding `@s.whatsapp.net` JID — but the code doesn't cross-reference them.
 
-1. **Contacts show JIDs instead of names** — Contacts display raw identifiers like `+77481361039542@lid` because the backend doesn't strip the `@lid` suffix (a newer Baileys JID format). The phone extraction only handles `@s.whatsapp.net` and `@g.us`.
-
-2. **Clicking contacts doesn't open chat** — The `ContactsPage` passes `contact.id` to `onOpenChat`, and `Index.tsx` does wire it to `ConversationsPage`. However, the `onOpenChat` prop type expects a `string` but `ContactsPage` calls `onOpenChat?.(contact.id)` correctly. The issue is likely that the page switch happens but no conversation exists for contacts with 0 messages, so nothing loads visibly.
-
-3. **Chats don't sync / load** — The `@lid` JID format means messages arriving from those JIDs create contacts with broken phone numbers like `+77481361039542@lid` and names that are just the raw JID.
-
-4. **Messages not up to date** — The history sync stores messages with `INSERT OR IGNORE`, which is correct. But if the contact cache (`inst.store.contacts`) is empty at connection time (since we removed `makeInMemoryStore`), the `syncContacts` function finds 0 contacts to sync initially.
-
-### Solution
+### Solution: 3-Layer LID-to-Phone Resolution
 
 #### Backend: `backend/src/whatsapp.js`
 
-1. **Handle `@lid` JID format everywhere** — Add `@lid` to all JID-stripping patterns. The `@lid` suffix is a newer WhatsApp identifier format. Update all instances of `.replace('@s.whatsapp.net', '').replace('@g.us', '')` to also strip `@lid`:
-   ```js
-   jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '')
+1. **Add a LID-to-phone mapping** on the instance (`inst.lidMap = new Map()`). When contacts arrive, scan the store for contacts that have a `lidJid` property or where the same contact appears under both `@lid` and `@s.whatsapp.net` formats. Build the map: `lidJid → phoneNumber`.
+
+2. **Add a `resolveLidPhone()` helper function**:
    ```
-   This affects ~6 locations: `messages.upsert`, `messaging-history.set` (contacts, chats, messages sections), `contacts.update`, `contacts.upsert`, and `syncContacts`.
-
-2. **Improve contact name resolution for `@lid` JIDs** — When a JID uses `@lid`, the contact store may have the name under the equivalent `@s.whatsapp.net` JID. Add a fallback lookup:
-   ```js
-   const storeContact = inst.store?.contacts?.[jid] 
-     || inst.store?.contacts?.[rawNumber + '@s.whatsapp.net'];
-   ```
-
-3. **Don't skip contacts with no name in `contacts.update`** — Line 503 has `if (!candidate.name) continue;` which skips contacts that only have a phone number, preventing them from being created/updated at all. Remove this guard.
-
-#### Frontend: `src/pages/ContactsPage.tsx`
-
-4. **Display phone cleanly** — Strip `@lid` suffix from displayed phone numbers in case the backend stored them with it:
-   ```tsx
-   const cleanPhone = (p: string) => p?.replace(/@.*$/, '') || '';
+   function resolveLidPhone(inst, jid):
+     - If jid ends with @s.whatsapp.net → extract phone directly
+     - If jid ends with @lid:
+       Layer 1: Check inst.lidMap for a cached mapping
+       Layer 2: Scan inst.store.contacts for any contact whose
+                .lid property matches this jid, and extract its
+                @s.whatsapp.net equivalent
+       Layer 3: Fallback — use the raw LID number (last resort)
+     - Return { phone, resolvedJid }
    ```
 
-#### Frontend: `src/pages/ConversationsPage.tsx`  
+3. **Build LID map from contact events**: In `contacts.update`, `contacts.upsert`, and `messaging-history.set`, when a contact has both a `lid` property and an `id` ending in `@s.whatsapp.net`, add the mapping. Also scan inversely.
 
-5. **When navigating from contacts with no chat history** — The auto-select logic already handles this (lines 62-79), fetching from contacts API as fallback. Verify it shows the empty chat view with the reply box so users can start a conversation.
+4. **Replace all JID-to-phone conversions** to use `resolveLidPhone()` instead of the naive regex strip. This affects ~7 locations (messages.upsert, history sync contacts/chats/messages, contacts.update, contacts.upsert, syncContacts).
 
-### Technical Details
+5. **Fix existing bad data**: Add a one-time cleanup query on startup that updates contacts where phone looks like a LID (very long number not matching real phone patterns) once proper mappings are available.
 
-- The `@lid` JID format is a LinkedIn-derived identifier format that newer Baileys versions expose
-- All 6 JID-parsing locations in `whatsapp.js` need the same regex fix
-- The contact store fallback lookup ensures names resolve even when the cache key format differs from the incoming JID format
-- No database schema changes needed
+#### Frontend: `src/pages/ContactsPage.tsx` and `src/pages/ConversationsPage.tsx`
+
+6. **Already has `cleanPhone` stripping `@` suffixes** — this is fine as a safety net, but the real fix is backend-side so proper phones are stored.
 
 ### Files Changed
-- `backend/src/whatsapp.js` — Fix JID parsing, improve name resolution, remove skip guard
-- `src/pages/ContactsPage.tsx` — Clean phone display
-- `src/pages/ConversationsPage.tsx` — Minor: ensure empty chat state works for contacts navigation
+- `backend/src/whatsapp.js` — Add LID resolution logic, update all JID-to-phone conversions, add LID map building in contact events
+
+### After Deploy
+```bash
+cd /root/wass && git pull && sudo supervisorctl restart wa-controller
+```
+The LID map builds as contacts sync in. Existing `@lid` contacts will be updated with real phone numbers and names as the mapping resolves.
 
