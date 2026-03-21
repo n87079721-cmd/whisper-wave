@@ -134,11 +134,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
           : await api.sendText(selectedContact.id, replyText);
         if (res.error) throw new Error(res.error);
         toast.success('Message sent');
-        // If was temp, refresh and find the real contact
-        if (isTemp) {
+        // If was temp, refresh and find the real contact using returned contactId
+        if (isTemp && res.contactId) {
           const data = await api.getConversations();
           setConversations(data);
-          const real = data.find(c => c.jid === selectedContact.jid);
+          const real = data.find(c => c.id === res.contactId);
           if (real) setSelectedContact(real);
         }
       } else {
@@ -153,8 +153,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       }
       setReplyText('');
       setPreviewUrl(null);
-      const msgs = await api.getMessages(selectedContact.id);
-      setMessages(msgs);
+      if (!selectedContact.id.startsWith('temp-')) {
+        const msgs = await api.getMessages(selectedContact.id);
+        setMessages(msgs);
+      }
+      await refreshConversations();
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     } catch (err: any) {
       toast.error(err.message || 'Failed to send');
