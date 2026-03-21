@@ -109,9 +109,85 @@ function getInstance(userId) {
       msgRetryCounterCache: new NodeCache({ stdTTL: 600, checkperiod: 120 }),
       autoReplyCooldowns: new Map(),
       messageBatchBuffers: new Map(),
+      lidMap: new Map(), // Maps LID JID -> phone number (e.g. "77481361039542@lid" -> "2348012345678")
     });
   }
   return userInstances.get(userId);
+}
+
+// Build LID-to-phone mappings from a contact object
+// Baileys contacts with id "1234@s.whatsapp.net" often have a "lid" property like "77481361039542@lid"
+function buildLidMapping(inst, contact) {
+  if (!contact) return;
+  const id = contact.id;
+  if (!id) return;
+
+  // Case 1: Contact has id=xxx@s.whatsapp.net and lid=yyy@lid
+  if (id.endsWith('@s.whatsapp.net') && contact.lid) {
+    const lidJid = typeof contact.lid === 'string' ? contact.lid : contact.lid?.toString?.();
+    if (lidJid) {
+      const phone = id.replace('@s.whatsapp.net', '');
+      inst.lidMap.set(lidJid, phone);
+      // Also map without suffix
+      const lidRaw = lidJid.replace('@lid', '');
+      inst.lidMap.set(lidRaw + '@lid', phone);
+    }
+  }
+
+  // Case 2: Contact has id=xxx@lid and lid property pointing elsewhere
+  if (id.endsWith('@lid') && contact.lid && contact.lid !== id) {
+    // The lid property might contain the s.whatsapp.net version
+    const otherJid = typeof contact.lid === 'string' ? contact.lid : null;
+    if (otherJid?.endsWith('@s.whatsapp.net')) {
+      const phone = otherJid.replace('@s.whatsapp.net', '');
+      inst.lidMap.set(id, phone);
+    }
+  }
+}
+
+// Resolve a JID to a real phone number
+// Returns { phone, jid } where phone is the clean number and jid is the best JID to use
+function resolveLidPhone(inst, jid) {
+  if (!jid) return { phone: '', jid: jid };
+
+  // Normal @s.whatsapp.net — phone is directly in the JID
+  if (jid.endsWith('@s.whatsapp.net')) {
+    return { phone: jid.replace('@s.whatsapp.net', ''), jid };
+  }
+
+  // Group JIDs — not a phone number
+  if (jid.endsWith('@g.us')) {
+    return { phone: jid.replace('@g.us', ''), jid };
+  }
+
+  // @lid JID — need to resolve
+  if (jid.endsWith('@lid')) {
+    // Layer 1: Check cached lidMap
+    const mapped = inst.lidMap.get(jid);
+    if (mapped) {
+      return { phone: mapped, jid: mapped + '@s.whatsapp.net' };
+    }
+
+    // Layer 2: Scan store contacts for any contact whose .lid matches this JID
+    if (inst.store?.contacts) {
+      for (const [cid, contact] of Object.entries(inst.store.contacts)) {
+        if (!cid.endsWith('@s.whatsapp.net')) continue;
+        const contactLid = contact.lid;
+        if (contactLid === jid || contactLid === jid.replace('@lid', '')) {
+          const phone = cid.replace('@s.whatsapp.net', '');
+          inst.lidMap.set(jid, phone); // cache for future
+          return { phone, jid: cid };
+        }
+      }
+    }
+
+    // Layer 3: Fallback — use raw LID number (will show as unknown number)
+    const rawLid = jid.replace('@lid', '');
+    return { phone: rawLid, jid };
+  }
+
+  // Unknown format fallback
+  return { phone: jid.replace(/@.*$/, ''), jid };
 }
 
 export function getWhatsAppState(userId) {
@@ -270,15 +346,21 @@ async function startConnection(userId, db, options = {}) {
       inst.store = { contacts: {} };
     }
 
-    // Populate contact cache from socket events
+    // Populate contact cache from socket events and build LID mappings
     inst.sock.ev.on('contacts.update', (updates) => {
       for (const u of updates) {
-        if (u.id) inst.store.contacts[u.id] = { ...inst.store.contacts[u.id], ...u };
+        if (u.id) {
+          inst.store.contacts[u.id] = { ...inst.store.contacts[u.id], ...u };
+          buildLidMapping(inst, inst.store.contacts[u.id]);
+        }
       }
     });
     inst.sock.ev.on('contacts.upsert', (contacts) => {
       for (const c of contacts) {
-        if (c.id) inst.store.contacts[c.id] = { ...inst.store.contacts[c.id], ...c };
+        if (c.id) {
+          inst.store.contacts[c.id] = { ...inst.store.contacts[c.id], ...c };
+          buildLidMapping(inst, inst.store.contacts[c.id]);
+        }
       }
     });
 
@@ -343,17 +425,18 @@ async function startConnection(userId, db, options = {}) {
           if (!jid || jid === 'status@broadcast') continue;
 
           const isFromMe = msg.key.fromMe;
-          const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
-          const phone = '+' + rawNumber;
+          const resolved = resolveLidPhone(inst, jid);
+          const phone = '+' + resolved.phone;
+          const resolvedJid = resolved.jid;
           const isGroup = jid.endsWith('@g.us');
           const contactCandidate = getNameCandidate(
             inst.store?.contacts?.[jid],
-            inst.store?.contacts?.[rawNumber + '@s.whatsapp.net'],
+            inst.store?.contacts?.[resolvedJid],
             msg,
             { pushName: msg.pushName || null }
           );
 
-          const contactId = getOrCreateContact(db, userId, jid, phone, contactCandidate, isGroup);
+          const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
 
           const content = msg.message.conversation
             || msg.message.extendedTextMessage?.text
@@ -410,15 +493,22 @@ async function startConnection(userId, db, options = {}) {
 
       let contactChanges = 0;
 
+      // First pass: build LID mappings from synced contacts
+      if (syncedContacts?.length) {
+        for (const c of syncedContacts) {
+          buildLidMapping(inst, c);
+        }
+      }
+
       if (syncedContacts?.length) {
         for (const c of syncedContacts) {
           try {
             const jid = c.id;
             if (!jid || jid === 'status@broadcast') continue;
-            const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
-            const phone = '+' + rawNumber;
+            const resolved = resolveLidPhone(inst, jid);
+            const phone = '+' + resolved.phone;
             const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, userId, jid, phone, getNameCandidate(c), isGroup);
+            getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(c), isGroup);
             contactChanges++;
           } catch {}
         }
@@ -429,10 +519,11 @@ async function startConnection(userId, db, options = {}) {
           try {
             const jid = chat.id;
             if (!jid || jid === 'status@broadcast') continue;
-            const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
-            const phone = '+' + rawNumber;
+            buildLidMapping(inst, chat);
+            const resolved = resolveLidPhone(inst, jid);
+            const phone = '+' + resolved.phone;
             const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, userId, jid, phone, getNameCandidate(chat), isGroup);
+            getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup);
             contactChanges++;
           } catch {}
         }
@@ -446,17 +537,18 @@ async function startConnection(userId, db, options = {}) {
             if (!jid || jid === 'status@broadcast') continue;
 
             const isFromMe = msg.key.fromMe;
-            const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
-            const phone = '+' + rawNumber;
+            const resolved = resolveLidPhone(inst, jid);
+            const phone = '+' + resolved.phone;
+            const resolvedJid = resolved.jid;
             const isGroup = jid.endsWith('@g.us');
             const contactCandidate = getNameCandidate(
               inst.store?.contacts?.[jid],
-              inst.store?.contacts?.[rawNumber + '@s.whatsapp.net'],
+              inst.store?.contacts?.[resolvedJid],
               msg,
               { pushName: msg.pushName || null }
             );
 
-            const contactId = getOrCreateContact(db, userId, jid, phone, contactCandidate, isGroup);
+            const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
 
             const content = msg.message.conversation
               || msg.message.extendedTextMessage?.text
@@ -498,11 +590,12 @@ async function startConnection(userId, db, options = {}) {
         try {
           const jid = update.id;
           if (!jid || jid === 'status@broadcast') continue;
-          const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
-          const phone = '+' + rawNumber;
+          buildLidMapping(inst, update);
+          const resolved = resolveLidPhone(inst, jid);
+          const phone = '+' + resolved.phone;
           const isGroup = jid.endsWith('@g.us');
-          const candidate = getNameCandidate(inst.store?.contacts?.[jid], inst.store?.contacts?.[rawNumber + '@s.whatsapp.net'], update);
-          getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
+          const candidate = getNameCandidate(inst.store?.contacts?.[jid], inst.store?.contacts?.[resolved.jid], update);
+          getOrCreateContact(db, userId, resolved.jid, phone, candidate, isGroup);
           changed++;
         } catch {}
       }
@@ -515,10 +608,11 @@ async function startConnection(userId, db, options = {}) {
         try {
           const jid = c.id;
           if (!jid || jid === 'status@broadcast') continue;
-          const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
-          const phone = '+' + rawNumber;
+          buildLidMapping(inst, c);
+          const resolved = resolveLidPhone(inst, jid);
+          const phone = '+' + resolved.phone;
           const isGroup = jid.endsWith('@g.us');
-          getOrCreateContact(db, userId, jid, phone, getNameCandidate(inst.store?.contacts?.[jid], inst.store?.contacts?.[rawNumber + '@s.whatsapp.net'], c), isGroup);
+          getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(inst.store?.contacts?.[jid], inst.store?.contacts?.[resolved.jid], c), isGroup);
           changed++;
         } catch {}
       }
@@ -586,16 +680,22 @@ async function syncContacts(userId, db) {
   try {
     const contacts = Object.values(inst.store.contacts);
     console.log(`📇 [${userId}] Found ${contacts.length} contacts in store`);
-    let syncedCount = 0;
 
+    // First pass: build all LID mappings
+    for (const c of contacts) {
+      buildLidMapping(inst, c);
+    }
+    console.log(`📇 [${userId}] Built ${inst.lidMap.size} LID mappings`);
+
+    let syncedCount = 0;
     for (const c of contacts) {
       try {
         const jid = c.id;
         if (!jid || jid === 'status@broadcast') continue;
-        const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
-        const phone = '+' + rawNumber;
+        const resolved = resolveLidPhone(inst, jid);
+        const phone = '+' + resolved.phone;
         const isGroup = jid.endsWith('@g.us');
-        getOrCreateContact(db, userId, jid, phone, getNameCandidate(c, inst.store?.contacts?.[rawNumber + '@s.whatsapp.net']), isGroup);
+        getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(c, inst.store?.contacts?.[resolved.jid]), isGroup);
         syncedCount++;
       } catch {}
     }
