@@ -520,10 +520,19 @@ async function startConnection(userId, db, options = {}) {
           const jid = msg.key.remoteJid;
           if (!jid || jid === 'status@broadcast') continue;
 
+          // Extract LID→PN mappings from alt fields
+          extractAltMappings(inst, msg);
+
           const isFromMe = msg.key.fromMe;
           const resolved = resolveLidPhone(inst, jid);
           const phone = '+' + resolved.phone;
           const resolvedJid = resolved.jid;
+
+          // If we just resolved a LID, reconcile existing DB entries
+          if (jid.endsWith('@lid') && resolvedJid !== jid) {
+            reconcileLidContacts(db, userId, jid, resolved.phone);
+          }
+
           const isGroup = jid.endsWith('@g.us');
           const contactCandidate = getNameCandidate(
             inst.store?.contacts?.[jid],
@@ -557,7 +566,7 @@ async function startConnection(userId, db, options = {}) {
             INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
-            msgId, userId, contactId, jid, content, msgType, direction,
+            msgId, userId, contactId, resolvedJid, content, msgType, direction,
             toIsoTimestamp(msg.messageTimestamp),
             isFromMe ? 'sent' : 'delivered',
             msg.message.audioMessage?.seconds || null
