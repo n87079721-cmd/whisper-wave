@@ -10,7 +10,8 @@ import { toast } from 'sonner';
 
 const DashboardPage = () => {
   const backendReady = isBackendConfigured();
-  const { status, qr, stats } = useWhatsAppStatus();
+  const { status, qr, stats, refresh } = useWhatsAppStatus();
+  const [connecting, setConnecting] = useState(false);
   const [pairingMode, setPairingMode] = useState<'qr' | 'phone'>('qr');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
@@ -28,7 +29,16 @@ const DashboardPage = () => {
   ];
 
   const handleConnect = async () => {
-    try { await api.reconnect(); } catch (err) { console.error('Reconnect error:', err); }
+    setConnecting(true);
+    try {
+      await api.reconnect();
+      toast.success('Connecting to WhatsApp...');
+      refresh();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to connect');
+    } finally {
+      setConnecting(false);
+    }
   };
 
   const handleDisconnect = async () => {
@@ -133,10 +143,15 @@ const DashboardPage = () => {
           </div>
           <button
             onClick={isConnected ? handleDisconnect : handleConnect}
-            disabled={isReconnecting}
-            className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-60"
+            disabled={isReconnecting || connecting}
+            className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-60 flex items-center gap-1.5"
           >
-            {isConnected ? 'Disconnect' : isReconnecting ? 'Reconnecting...' : 'Connect'}
+            {connecting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Connecting...
+              </>
+            ) : isConnected ? 'Disconnect' : isReconnecting ? 'Reconnecting...' : 'Connect'}
           </button>
         </div>
 
