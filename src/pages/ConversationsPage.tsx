@@ -5,11 +5,11 @@ import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 
 interface ConversationsPageProps {
-  initialContactId?: string | null;
+  initialContact?: Contact | null;
   onContactOpened?: () => void;
 }
 
-const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsPageProps) => {
+const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPageProps) => {
   const [conversations, setConversations] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
