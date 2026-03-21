@@ -77,7 +77,7 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
               initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.03 }}
-              onClick={() => onOpenChat?.(contact.id)}
+              onClick={() => onOpenChat?.(contact)}
               className="flex items-center justify-between p-3 rounded-lg hover:bg-secondary/80 transition-colors group cursor-pointer"
             >
               <div className="flex items-center gap-3">
