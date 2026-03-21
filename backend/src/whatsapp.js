@@ -431,12 +431,12 @@ async function startConnection(userId, db, options = {}) {
           const isGroup = jid.endsWith('@g.us');
           const contactCandidate = getNameCandidate(
             inst.store?.contacts?.[jid],
-            inst.store?.contacts?.[rawNumber + '@s.whatsapp.net'],
+            inst.store?.contacts?.[resolvedJid],
             msg,
             { pushName: msg.pushName || null }
           );
 
-          const contactId = getOrCreateContact(db, userId, jid, phone, contactCandidate, isGroup);
+          const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
 
           const content = msg.message.conversation
             || msg.message.extendedTextMessage?.text
