@@ -4,7 +4,12 @@ import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, A
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 
-const ConversationsPage = () => {
+interface ConversationsPageProps {
+  initialContactId?: string | null;
+  onContactOpened?: () => void;
+}
+
+const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsPageProps) => {
   const [conversations, setConversations] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
