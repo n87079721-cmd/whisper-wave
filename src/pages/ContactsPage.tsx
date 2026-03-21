@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Search, Phone, MessageSquare } from 'lucide-react';
+import { Search, MessageSquare } from 'lucide-react';
 import { api, type Contact } from '@/lib/api';
 
 interface ContactsPageProps {
@@ -40,6 +40,32 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
   }, []);
 
   const cleanPhone = (p: string) => p?.replace(/@.*$/, '') || '';
+
+  const hasRealName = (contact: Contact) => {
+    const value = contact.name?.trim();
+    return !!value && !value.includes('@') && !/^\+?\d{7,}$/.test(value.replace(/\s+/g, ''));
+  };
+
+  const getDisplayName = (contact: Contact) => {
+    const cleaned = cleanPhone(contact.phone || '');
+    if (hasRealName(contact)) return contact.name as string;
+    if (cleaned) return cleaned;
+    return contact.jid.endsWith('@lid') ? 'WhatsApp contact' : 'Unknown contact';
+  };
+
+  const getDisplayMeta = (contact: Contact) => {
+    const cleaned = cleanPhone(contact.phone || '');
+    if (cleaned) return cleaned;
+    return contact.jid.endsWith('@lid') ? 'Waiting for sync' : '';
+  };
+
+  const getInitials = (contact: Contact) =>
+    getDisplayName(contact)
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
 
   const filtered = contacts.filter(c =>
     (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -82,11 +108,11 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
             >
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground">
-                  {(contact.name || contact.phone || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+                  {getInitials(contact)}
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-foreground">{contact.name || cleanPhone(contact.phone)}</p>
-                  <p className="text-xs text-muted-foreground">{cleanPhone(contact.phone)}</p>
+                  <p className="text-sm font-medium text-foreground">{getDisplayName(contact)}</p>
+                  <p className="text-xs text-muted-foreground">{getDisplayMeta(contact)}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">

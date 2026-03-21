@@ -48,6 +48,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     } catch {}
   }, []);
 
+  const refreshAllContacts = useCallback(async () => {
+    try {
+      const data = await api.getContacts();
+      setAllContacts(data);
+    } catch {}
+  }, []);
+
   const refreshConversations = useCallback(async () => {
     try {
       const data = await api.getConversations();
@@ -63,8 +70,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   useEffect(() => {
     refreshConversations().then(() => setLoading(false));
     api.getVoices().then(setVoices).catch(() => {});
-    api.getContacts().then(setAllContacts).catch(() => {});
-  }, [refreshConversations]);
+    refreshAllContacts();
+  }, [refreshConversations, refreshAllContacts]);
 
   // Auto-select contact when navigating from ContactsPage
   useEffect(() => {
@@ -78,6 +85,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   useEffect(() => {
     const refreshActiveConversation = () => {
       refreshConversations();
+      refreshAllContacts();
       const current = selectedContactRef.current;
       if (current) refreshMessages(current.id);
     };
@@ -97,7 +105,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       es?.close();
       clearInterval(interval);
     };
-  }, [refreshConversations, refreshMessages]);
+  }, [refreshAllContacts, refreshConversations, refreshMessages]);
 
   useEffect(() => {
     if (!selectedContact) return;
@@ -105,6 +113,32 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [selectedContact, refreshMessages]);
 
   const cleanPhone = (p: string) => p?.replace(/@.*$/, '') || '';
+
+  const hasRealName = (contact: Contact) => {
+    const value = contact.name?.trim();
+    return !!value && !value.includes('@') && !/^\+?\d{7,}$/.test(value.replace(/\s+/g, ''));
+  };
+
+  const getDisplayName = (contact: Contact) => {
+    const cleaned = cleanPhone(contact.phone || '');
+    if (hasRealName(contact)) return contact.name as string;
+    if (cleaned) return cleaned;
+    return contact.jid.endsWith('@lid') ? 'WhatsApp contact' : 'Unknown contact';
+  };
+
+  const getDisplayMeta = (contact: Contact) => {
+    const cleaned = cleanPhone(contact.phone || '');
+    if (cleaned) return cleaned;
+    return contact.jid.endsWith('@lid') ? 'Waiting for sync' : '';
+  };
+
+  const getInitials = (contact: Contact) =>
+    getDisplayName(contact)
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
 
   const filtered = conversations.filter(c =>
     (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -298,11 +332,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     }`}
                   >
                     <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground flex-shrink-0">
-                      {(contact.name && !contact.name.includes('@') ? contact.name : cleanPhone(contact.phone) || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+                       {getInitials(contact)}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex justify-between items-baseline">
-                        <p className="text-sm font-medium text-foreground truncate">{contact.name && !contact.name.includes('@') ? contact.name : cleanPhone(contact.phone)}</p>
+                         <p className="text-sm font-medium text-foreground truncate">{getDisplayName(contact)}</p>
                         <span className="text-[10px] text-muted-foreground flex-shrink-0 ml-2">
                           {contact.last_timestamp ? formatTime(contact.last_timestamp) : ''}
                         </span>
@@ -310,7 +344,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
                         {contact.last_type === 'voice' ? '🎤 Voice note' : contact.last_message}
                       </p>
-                      <p className="text-[10px] text-muted-foreground/60">{cleanPhone(contact.phone)}</p>
+                       <p className="text-[10px] text-muted-foreground/60">{getDisplayMeta(contact)}</p>
                     </div>
                   </button>
                 );
@@ -332,11 +366,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   <ArrowLeft className="w-5 h-5" />
                 </button>
                 <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground">
-                  {(selectedContact.name && !selectedContact.name.includes('@') ? selectedContact.name : cleanPhone(selectedContact.phone) || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+                  {getInitials(selectedContact)}
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-foreground">{selectedContact.name && !selectedContact.name.includes('@') ? selectedContact.name : cleanPhone(selectedContact.phone)}</p>
-                  <p className="text-xs text-muted-foreground">{cleanPhone(selectedContact.phone)}</p>
+                  <p className="text-sm font-medium text-foreground">{getDisplayName(selectedContact)}</p>
+                  <p className="text-xs text-muted-foreground">{getDisplayMeta(selectedContact)}</p>
                 </div>
               </div>
 
@@ -526,11 +560,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     className="w-full flex items-center gap-3 p-3 text-left hover:bg-secondary/50 transition-colors"
                   >
                     <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground flex-shrink-0">
-                      {(contact.name && !contact.name.includes('@') ? contact.name : cleanPhone(contact.phone) || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+                      {getInitials(contact)}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{contact.name && !contact.name.includes('@') ? contact.name : cleanPhone(contact.phone)}</p>
-                      <p className="text-xs text-muted-foreground">{cleanPhone(contact.phone)}</p>
+                      <p className="text-sm font-medium text-foreground truncate">{getDisplayName(contact)}</p>
+                      <p className="text-xs text-muted-foreground">{getDisplayMeta(contact)}</p>
                     </div>
                   </button>
                 ))}

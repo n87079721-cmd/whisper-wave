@@ -848,26 +848,28 @@ function toIsoTimestamp(value) {
   return new Date().toISOString();
 }
 
-function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false) {
-  // Don't create contacts with unresolved @lid JIDs — they corrupt identity data
-  if (jid.endsWith('@lid')) {
-    // Check if we already have a contact for this @lid (from before this fix)
-    const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
-    if (existing) return existing.id;
-    // Don't create new @lid contacts — skip until resolved
-    return null;
-  }
+function formatUnresolvedContactName(jid, candidateName) {
+  if (candidateName) return candidateName;
+  const suffix = jid.replace('@lid', '').slice(-4);
+  return suffix ? `WhatsApp contact • ${suffix}` : 'WhatsApp contact';
+}
 
-  const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
-  const resolvedName = candidate?.name || phone;
+function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false) {
+  const isUnresolvedLid = jid.endsWith('@lid');
+  const safePhone = !isUnresolvedLid && phone && phone !== '+' ? phone : null;
+  const existing = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+  const resolvedName = isUnresolvedLid
+    ? formatUnresolvedContactName(jid, candidate?.name || null)
+    : (candidate?.name || phone);
 
   if (existing) {
-    if (shouldReplaceName(candidate, existing.name, phone)) {
-      db.prepare("UPDATE contacts SET name = ?, phone = ?, is_group = ?, updated_at = datetime('now') WHERE id = ?")
-        .run(resolvedName, phone, isGroup ? 1 : 0, existing.id);
+    const comparisonPhone = safePhone || existing.phone || '';
+    if (shouldReplaceName(candidate, existing.name, comparisonPhone) || (isUnresolvedLid && !existing.name)) {
+      db.prepare("UPDATE contacts SET name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(resolvedName, safePhone, isGroup ? 1 : 0, existing.id);
     } else {
-      db.prepare("UPDATE contacts SET phone = ?, is_group = ?, updated_at = datetime('now') WHERE id = ?")
-        .run(phone, isGroup ? 1 : 0, existing.id);
+      db.prepare("UPDATE contacts SET phone = COALESCE(?, phone), is_group = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(safePhone, isGroup ? 1 : 0, existing.id);
     }
     return existing.id;
   }
@@ -875,7 +877,7 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false) 
   const id = uuid();
   db.prepare(`
     INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, userId, jid, resolvedName, phone, isGroup ? 1 : 0);
+  `).run(id, userId, jid, resolvedName, safePhone, isGroup ? 1 : 0);
   return id;
 }
 
