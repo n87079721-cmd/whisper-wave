@@ -343,11 +343,12 @@ async function startConnection(userId, db, options = {}) {
           if (!jid || jid === 'status@broadcast') continue;
 
           const isFromMe = msg.key.fromMe;
-          const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+          const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
           const phone = '+' + rawNumber;
           const isGroup = jid.endsWith('@g.us');
           const contactCandidate = getNameCandidate(
             inst.store?.contacts?.[jid],
+            inst.store?.contacts?.[rawNumber + '@s.whatsapp.net'],
             msg,
             { pushName: msg.pushName || null }
           );
