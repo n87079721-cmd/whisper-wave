@@ -265,10 +265,22 @@ async function startConnection(userId, db, options = {}) {
       },
     });
 
+    // Local contact cache (replaces removed makeInMemoryStore)
     if (!inst.store) {
-      inst.store = makeInMemoryStore({ logger });
+      inst.store = { contacts: {} };
     }
-    inst.store.bind(inst.sock.ev);
+
+    // Populate contact cache from socket events
+    inst.sock.ev.on('contacts.update', (updates) => {
+      for (const u of updates) {
+        if (u.id) inst.store.contacts[u.id] = { ...inst.store.contacts[u.id], ...u };
+      }
+    });
+    inst.sock.ev.on('contacts.upsert', (contacts) => {
+      for (const c of contacts) {
+        if (c.id) inst.store.contacts[c.id] = { ...inst.store.contacts[c.id], ...c };
+      }
+    });
 
     inst.sock.ev.on('creds.update', saveCreds);
 
