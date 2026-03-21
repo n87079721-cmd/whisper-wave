@@ -600,6 +600,7 @@ async function startConnection(userId, db, options = {}) {
           );
 
           const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
+          if (!contactId) continue; // Skip unresolved @lid contacts
 
           const content = msg.message.conversation
             || msg.message.extendedTextMessage?.text
@@ -745,6 +746,7 @@ async function startConnection(userId, db, options = {}) {
             );
 
             const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
+            if (!contactId) continue; // Skip unresolved @lid contacts
 
             const content = msg.message.conversation
               || msg.message.extendedTextMessage?.text
@@ -847,6 +849,15 @@ function toIsoTimestamp(value) {
 }
 
 function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false) {
+  // Don't create contacts with unresolved @lid JIDs — they corrupt identity data
+  if (jid.endsWith('@lid')) {
+    // Check if we already have a contact for this @lid (from before this fix)
+    const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+    if (existing) return existing.id;
+    // Don't create new @lid contacts — skip until resolved
+    return null;
+  }
+
   const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
   const resolvedName = candidate?.name || phone;
 

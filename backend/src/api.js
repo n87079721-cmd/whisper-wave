@@ -214,16 +214,24 @@ export function createApiRouter(db) {
       await wa.sendTextMessage(targetJid, message);
 
       const msgId = uuid();
-      const contactRow = db.prepare('SELECT id FROM contacts WHERE jid = ? AND user_id = ?').get(targetJid, req.userId);
-      if (contactRow) {
+      // Upsert contact — create if doesn't exist
+      let contactRow = db.prepare('SELECT id FROM contacts WHERE jid = ? AND user_id = ?').get(targetJid, req.userId);
+      if (!contactRow) {
+        const newId = uuid();
+        const phone = '+' + targetJid.replace(/@.*$/, '');
         db.prepare(`
-          INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
-          VALUES (?, ?, ?, ?, ?, 'text', 'sent', ?, 'sent')
-        `).run(msgId, req.userId, contactRow.id, targetJid, message, new Date().toISOString());
-        db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
+          INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, 0)
+        `).run(newId, req.userId, targetJid, phone, phone);
+        contactRow = { id: newId };
       }
 
-      res.json({ success: true, messageId: msgId });
+      db.prepare(`
+        INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
+        VALUES (?, ?, ?, ?, ?, 'text', 'sent', ?, 'sent')
+      `).run(msgId, req.userId, contactRow.id, targetJid, message, new Date().toISOString());
+      db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
+
+      res.json({ success: true, messageId: msgId, contactId: contactRow.id });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

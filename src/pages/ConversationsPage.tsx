@@ -5,11 +5,11 @@ import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 
 interface ConversationsPageProps {
-  initialContactId?: string | null;
+  initialContact?: Contact | null;
   onContactOpened?: () => void;
 }
 
-const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsPageProps) => {
+const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPageProps) => {
   const [conversations, setConversations] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -68,23 +68,11 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
 
   // Auto-select contact when navigating from ContactsPage
   useEffect(() => {
-    if (!initialContactId) return;
-    const trySelect = async () => {
-      const data = await api.getConversations();
-      setConversations(data);
-      const match = data.find((c: Contact) => c.id === initialContactId);
-      if (match) {
-        setSelectedContact(match);
-      } else {
-        // Contact exists but has no conversations yet - create a minimal entry
-        const contacts = await api.getContacts();
-        const contactMatch = contacts.find((c: Contact) => c.id === initialContactId);
-        if (contactMatch) setSelectedContact(contactMatch);
-      }
-      onContactOpened?.();
-    };
-    trySelect();
-  }, [initialContactId, onContactOpened]);
+    if (!initialContact) return;
+    // Directly set the contact — no need to re-fetch and search
+    setSelectedContact(initialContact);
+    onContactOpened?.();
+  }, [initialContact, onContactOpened]);
 
   // Real-time: SSE for new messages + fast polling fallback
   useEffect(() => {
@@ -146,11 +134,11 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
           : await api.sendText(selectedContact.id, replyText);
         if (res.error) throw new Error(res.error);
         toast.success('Message sent');
-        // If was temp, refresh and find the real contact
-        if (isTemp) {
+        // If was temp, refresh and find the real contact using returned contactId
+        if (isTemp && res.contactId) {
           const data = await api.getConversations();
           setConversations(data);
-          const real = data.find(c => c.jid === selectedContact.jid);
+          const real = data.find(c => c.id === res.contactId);
           if (real) setSelectedContact(real);
         }
       } else {
@@ -165,8 +153,11 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
       }
       setReplyText('');
       setPreviewUrl(null);
-      const msgs = await api.getMessages(selectedContact.id);
-      setMessages(msgs);
+      if (!selectedContact.id.startsWith('temp-')) {
+        const msgs = await api.getMessages(selectedContact.id);
+        setMessages(msgs);
+      }
+      await refreshConversations();
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     } catch (err: any) {
       toast.error(err.message || 'Failed to send');
