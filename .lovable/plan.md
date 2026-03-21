@@ -1,19 +1,22 @@
 
 
-## Plan: Navigate to Chat from Contacts Page
+## Fix: Remove `makeInMemoryStore` import
 
-**Problem**: Tapping a contact on the Contacts page does nothing. Users expect to open that contact's conversation.
+**Problem**: Baileys v6.7.16 no longer exports `makeInMemoryStore`. This crashes the backend on startup.
 
-**Solution**: Pass the page navigation function into `ContactsPage`, so clicking a contact switches to the Conversations page with that contact pre-selected.
+**Solution**: Remove the import and all usage of `makeInMemoryStore`. The in-memory store is not essential — your app already uses SQLite for persistence.
 
-### Changes
+### Changes to `backend/src/whatsapp.js`
 
-1. **Index.tsx** — Add shared state for `selectedContactId`. Pass `onPageChange` and `setSelectedContactId` to `ContactsPage`, and pass `selectedContactId` to `ConversationsPage`.
+1. **Remove `makeInMemoryStore` from the import** on line 6.
 
-2. **ContactsPage.tsx** — Accept `onOpenChat` callback prop. On contact row click, call `onOpenChat(contact)` which sets the selected contact ID and navigates to conversations.
+2. **Remove store creation** around line 269-271 (`inst.store = makeInMemoryStore(...)`) and the `inst.store.bind(...)` call.
 
-3. **ConversationsPage.tsx** — Accept optional `initialContactId` prop. On mount (or when prop changes), if an `initialContactId` is provided, auto-select that contact by fetching conversations, finding the match, and setting it as `selectedContact`. Add a `MessageSquare` icon on each contact row to make the action visually clear.
+3. **Remove any other `inst.store` references** throughout the file (likely store reads for message history, etc.) — replace with direct DB queries where needed.
 
-### Flow
-- User taps contact → `ContactsPage` calls `onOpenChat(contact)` → Index stores `contactId`, switches to `conversations` page → `ConversationsPage` receives `initialContactId`, auto-selects that contact, loads their messages.
+After the fix, redeploy and restart:
+```bash
+cd /root/wass && git pull
+sudo supervisorctl restart wa-controller
+```
 
