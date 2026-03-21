@@ -641,6 +641,9 @@ async function startConnection(userId, db, options = {}) {
             const jid = msg.key?.remoteJid;
             if (!jid || jid === 'status@broadcast') continue;
 
+            // Extract alt mappings from history messages too
+            extractAltMappings(inst, msg);
+
             const isFromMe = msg.key.fromMe;
             const resolved = resolveLidPhone(inst, jid);
             const phone = '+' + resolved.phone;
@@ -673,7 +676,7 @@ async function startConnection(userId, db, options = {}) {
               INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
-              msgId, userId, contactId, jid, content, msgType,
+              msgId, userId, contactId, resolvedJid, content, msgType,
               isFromMe ? 'sent' : 'received',
               toIsoTimestamp(msg.messageTimestamp),
               isFromMe ? 'sent' : 'delivered',
