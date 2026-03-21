@@ -45,6 +45,11 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
     try {
       const data = await api.getConversations();
       setConversations(data);
+      const current = selectedContactRef.current;
+      if (current) {
+        const updatedCurrent = data.find(contact => contact.id === current.id);
+        if (updatedCurrent) setSelectedContact(updatedCurrent);
+      }
     } catch {}
   }, []);
 
