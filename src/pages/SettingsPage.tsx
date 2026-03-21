@@ -25,7 +25,7 @@ const SettingsPage = () => {
   const [activeHoursEnd, setActiveHoursEnd] = useState('23:00');
   const [replyChance, setReplyChance] = useState(70);
   const [responseSpeed, setResponseSpeed] = useState('normal');
-  const [timezone, setTimezone] = useState('Africa/Lagos');
+  const [timezone, setTimezone] = useState('America/New_York');
 
   useEffect(() => {
     api.getConfig('elevenlabs_api_key').then(data => {
