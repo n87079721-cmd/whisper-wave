@@ -515,10 +515,10 @@ async function startConnection(userId, db, options = {}) {
         try {
           const jid = c.id;
           if (!jid || jid === 'status@broadcast') continue;
-          const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+          const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
           const phone = '+' + rawNumber;
           const isGroup = jid.endsWith('@g.us');
-          getOrCreateContact(db, userId, jid, phone, getNameCandidate(inst.store?.contacts?.[jid], c), isGroup);
+          getOrCreateContact(db, userId, jid, phone, getNameCandidate(inst.store?.contacts?.[jid], inst.store?.contacts?.[rawNumber + '@s.whatsapp.net'], c), isGroup);
           changed++;
         } catch {}
       }
