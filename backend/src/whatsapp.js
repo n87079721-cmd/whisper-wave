@@ -590,11 +590,12 @@ async function startConnection(userId, db, options = {}) {
         try {
           const jid = update.id;
           if (!jid || jid === 'status@broadcast') continue;
-          const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
-          const phone = '+' + rawNumber;
+          buildLidMapping(inst, update);
+          const resolved = resolveLidPhone(inst, jid);
+          const phone = '+' + resolved.phone;
           const isGroup = jid.endsWith('@g.us');
-          const candidate = getNameCandidate(inst.store?.contacts?.[jid], inst.store?.contacts?.[rawNumber + '@s.whatsapp.net'], update);
-          getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
+          const candidate = getNameCandidate(inst.store?.contacts?.[jid], inst.store?.contacts?.[resolved.jid], update);
+          getOrCreateContact(db, userId, resolved.jid, phone, candidate, isGroup);
           changed++;
         } catch {}
       }
@@ -607,10 +608,11 @@ async function startConnection(userId, db, options = {}) {
         try {
           const jid = c.id;
           if (!jid || jid === 'status@broadcast') continue;
-          const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
-          const phone = '+' + rawNumber;
+          buildLidMapping(inst, c);
+          const resolved = resolveLidPhone(inst, jid);
+          const phone = '+' + resolved.phone;
           const isGroup = jid.endsWith('@g.us');
-          getOrCreateContact(db, userId, jid, phone, getNameCandidate(inst.store?.contacts?.[jid], inst.store?.contacts?.[rawNumber + '@s.whatsapp.net'], c), isGroup);
+          getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(inst.store?.contacts?.[jid], inst.store?.contacts?.[resolved.jid], c), isGroup);
           changed++;
         } catch {}
       }
