@@ -19,6 +19,7 @@ const SettingsPage = () => {
   const [keyExists, setKeyExists] = useState(false);
   const [openaiKeyExists, setOpenaiKeyExists] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [resyncing, setResyncing] = useState(false);
 
   // Availability settings
   const [activeHoursStart, setActiveHoursStart] = useState('10:00');
