@@ -9,17 +9,24 @@ import SettingsPage from '@/pages/SettingsPage';
 
 type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings';
 
-const pageComponents: Record<Page, React.FC> = {
-  dashboard: DashboardPage,
-  contacts: ContactsPage,
-  conversations: ConversationsPage,
-  voice: VoiceStudioPage,
-  settings: SettingsPage,
-};
-
 const Index = () => {
   const [activePage, setActivePage] = useState<Page>('dashboard');
-  const ActiveComponent = pageComponents[activePage];
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+
+  const handleOpenChat = (contactId: string) => {
+    setSelectedContactId(contactId);
+    setActivePage('conversations');
+  };
+
+  const renderPage = () => {
+    switch (activePage) {
+      case 'dashboard': return <DashboardPage />;
+      case 'contacts': return <ContactsPage onOpenChat={handleOpenChat} />;
+      case 'conversations': return <ConversationsPage initialContactId={selectedContactId} onContactOpened={() => setSelectedContactId(null)} />;
+      case 'voice': return <VoiceStudioPage />;
+      case 'settings': return <SettingsPage />;
+    }
+  };
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -27,7 +34,7 @@ const Index = () => {
         <DashboardSidebar activePage={activePage} onPageChange={setActivePage} />
       </div>
       <main className="flex-1 p-3 md:p-5 overflow-auto pb-20 md:pb-5">
-        <ActiveComponent />
+        {renderPage()}
       </main>
       <MobileBottomNav activePage={activePage} onPageChange={setActivePage} />
     </div>

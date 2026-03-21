@@ -3,7 +3,11 @@ import { motion } from 'framer-motion';
 import { Search, Phone, MessageSquare } from 'lucide-react';
 import { api, type Contact } from '@/lib/api';
 
-const ContactsPage = () => {
+interface ContactsPageProps {
+  onOpenChat?: (contactId: string) => void;
+}
+
+const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -65,6 +69,7 @@ const ContactsPage = () => {
               initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.03 }}
+              onClick={() => onOpenChat?.(contact.id)}
               className="flex items-center justify-between p-3 rounded-lg hover:bg-secondary/80 transition-colors group cursor-pointer"
             >
               <div className="flex items-center gap-3">
@@ -76,8 +81,9 @@ const ContactsPage = () => {
                   <p className="text-xs text-muted-foreground">{contact.phone}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <span className="text-xs text-muted-foreground mr-2">{contact.message_count || 0} msgs</span>
+              <div className="flex items-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                <span className="text-xs text-muted-foreground">{contact.message_count || 0} msgs</span>
+                <MessageSquare className="w-4 h-4 text-primary" />
               </div>
             </motion.div>
           ))}
