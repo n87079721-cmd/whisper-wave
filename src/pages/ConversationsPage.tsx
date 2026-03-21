@@ -139,11 +139,26 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
     if (!selectedContact || !replyText.trim()) return;
     setSending(true);
     try {
+      const isTemp = selectedContact.id.startsWith('temp-');
       if (replyMode === 'text') {
-        const res = await api.sendText(selectedContact.id, replyText);
+        const res = isTemp
+          ? await api.sendTextToPhone(selectedContact.phone || '', replyText)
+          : await api.sendText(selectedContact.id, replyText);
         if (res.error) throw new Error(res.error);
         toast.success('Message sent');
+        // If was temp, refresh and find the real contact
+        if (isTemp) {
+          const data = await api.getConversations();
+          setConversations(data);
+          const real = data.find(c => c.jid === selectedContact.jid);
+          if (real) setSelectedContact(real);
+        }
       } else {
+        if (isTemp) {
+          toast.error('Send a text message first to start this conversation');
+          setSending(false);
+          return;
+        }
         const res = await api.sendVoice(selectedContact.id, replyText, selectedVoice);
         if (res.error) throw new Error(res.error);
         toast.success('Voice note sent');
