@@ -462,6 +462,22 @@ async function startConnection(userId, db, options = {}) {
 
     inst.sock.ev.on('creds.update', saveCreds);
 
+    // Listen for LID mapping updates from Baileys
+    try {
+      inst.sock.ev.on('lid-mapping.update', (mappings) => {
+        if (!mappings || typeof mappings !== 'object') return;
+        for (const [lid, pn] of Object.entries(mappings)) {
+          const phone = typeof pn === 'string' ? pn.replace('@s.whatsapp.net', '') : '';
+          if (phone) {
+            inst.lidMap.set(lid, phone);
+            reconcileLidContacts(db, userId, lid, phone);
+          }
+        }
+        console.log(`🔗 [${userId}] LID mapping update: ${Object.keys(mappings).length} mappings`);
+        emit(userId, 'contacts_sync', { count: Object.keys(mappings).length });
+      });
+    } catch {}
+
     inst.sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
       if (generation !== inst.connectionGeneration) return;
 

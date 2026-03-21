@@ -249,11 +249,11 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
                   <ArrowLeft className="w-5 h-5" />
                 </button>
                 <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground">
-                  {(selectedContact.name || selectedContact.phone || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+                  {(selectedContact.name && !selectedContact.name.includes('@') ? selectedContact.name : cleanPhone(selectedContact.phone) || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-foreground">{selectedContact.name || selectedContact.phone}</p>
-                  <p className="text-xs text-muted-foreground">{selectedContact.phone}</p>
+                  <p className="text-sm font-medium text-foreground">{selectedContact.name && !selectedContact.name.includes('@') ? selectedContact.name : cleanPhone(selectedContact.phone)}</p>
+                  <p className="text-xs text-muted-foreground">{cleanPhone(selectedContact.phone)}</p>
                 </div>
               </div>
 
