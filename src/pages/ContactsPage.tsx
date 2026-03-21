@@ -85,8 +85,8 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
                   {(contact.name || contact.phone || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-foreground">{contact.name || contact.phone}</p>
-                  <p className="text-xs text-muted-foreground">{contact.phone}</p>
+                  <p className="text-sm font-medium text-foreground">{contact.name || cleanPhone(contact.phone)}</p>
+                  <p className="text-xs text-muted-foreground">{cleanPhone(contact.phone)}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
