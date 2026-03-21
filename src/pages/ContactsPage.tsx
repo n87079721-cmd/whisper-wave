@@ -3,7 +3,11 @@ import { motion } from 'framer-motion';
 import { Search, Phone, MessageSquare } from 'lucide-react';
 import { api, type Contact } from '@/lib/api';
 
-const ContactsPage = () => {
+interface ContactsPageProps {
+  onOpenChat?: (contactId: string) => void;
+}
+
+const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
