@@ -267,7 +267,7 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
     <div className="space-y-4">
       <h1 className="text-xl md:text-2xl font-bold text-foreground">Conversations</h1>
 
-      <div className="flex gap-4 h-[calc(100vh-180px)] md:h-[calc(100vh-180px)] h-[calc(100dvh-160px)]">
+      <div className="relative flex gap-4 h-[calc(100vh-180px)] md:h-[calc(100vh-180px)] h-[calc(100dvh-160px)]">
         {/* Contact list - hidden on mobile when chat is open */}
         <div className={`${showChatOnMobile ? 'hidden md:flex' : 'flex'} w-full md:w-72 flex-shrink-0 glass rounded-xl overflow-hidden flex-col`}>
           <div className="p-3 border-b border-border">
