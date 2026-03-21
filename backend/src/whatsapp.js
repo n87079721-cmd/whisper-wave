@@ -702,7 +702,9 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
     }
   }
 
-  const replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
+  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
+  // Strip em dashes and en dashes from AI output
+  replyText = replyText.replace(/[—–-]{2,}/g, ' ').replace(/—/g, ' ').replace(/–/g, ' ');
   const delay = calculateDelay(lastMsgContent.length, speed);
 
   setTimeout(async () => {
