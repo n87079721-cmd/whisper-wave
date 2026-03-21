@@ -244,6 +244,16 @@ function resolveLidPhone(inst, jid) {
       return { phone: mapped, jid: mapped + '@s.whatsapp.net' };
     }
 
+    // Layer 1.5: Try Baileys' internal signal repository mapping
+    try {
+      const pnJid = inst.sock?.signalRepository?.lidMapping?.getPNForLID?.(jid);
+      if (pnJid && pnJid.endsWith('@s.whatsapp.net')) {
+        const phone = pnJid.replace('@s.whatsapp.net', '');
+        inst.lidMap.set(jid, phone);
+        return { phone, jid: pnJid };
+      }
+    } catch {}
+
     // Layer 2: Scan store contacts for any contact whose .lid matches this JID
     if (inst.store?.contacts) {
       for (const [cid, contact] of Object.entries(inst.store.contacts)) {
@@ -251,9 +261,19 @@ function resolveLidPhone(inst, jid) {
         const contactLid = contact.lid;
         if (contactLid === jid || contactLid === jid.replace('@lid', '')) {
           const phone = cid.replace('@s.whatsapp.net', '');
-          inst.lidMap.set(jid, phone); // cache for future
+          inst.lidMap.set(jid, phone);
           return { phone, jid: cid };
         }
+      }
+    }
+
+    // Layer 2.5: Check if any store contact with @lid id has phoneNumber
+    const lidContact = inst.store?.contacts?.[jid];
+    if (lidContact?.phoneNumber) {
+      const phone = lidContact.phoneNumber.replace(/[^0-9]/g, '');
+      if (phone.length >= 7 && phone.length <= 15) {
+        inst.lidMap.set(jid, phone);
+        return { phone, jid: phone + '@s.whatsapp.net' };
       }
     }
 
