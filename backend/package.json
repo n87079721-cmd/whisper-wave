@@ -7,7 +7,7 @@
     "dev": "node --watch src/index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.16",
+    "@whiskeysockets/baileys": "^6.7.19",
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "node-cache": "^5.1.2",
