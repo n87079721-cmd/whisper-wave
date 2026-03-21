@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft } from 'lucide-react';
+import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -30,6 +30,13 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // New conversation state
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [newChatPhone, setNewChatPhone] = useState('');
+  const [newChatLoading, setNewChatLoading] = useState(false);
+  const [allContacts, setAllContacts] = useState<Contact[]>([]);
+  const [contactSearch, setContactSearch] = useState('');
+
   const selectedContactRef = useRef<Contact | null>(null);
   selectedContactRef.current = selectedContact;
 
@@ -56,6 +63,7 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
   useEffect(() => {
     refreshConversations().then(() => setLoading(false));
     api.getVoices().then(setVoices).catch(() => {});
+    api.getContacts().then(setAllContacts).catch(() => {});
   }, [refreshConversations]);
 
   // Auto-select contact when navigating from ContactsPage
@@ -131,11 +139,26 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
     if (!selectedContact || !replyText.trim()) return;
     setSending(true);
     try {
+      const isTemp = selectedContact.id.startsWith('temp-');
       if (replyMode === 'text') {
-        const res = await api.sendText(selectedContact.id, replyText);
+        const res = isTemp
+          ? await api.sendTextToPhone(selectedContact.phone || '', replyText)
+          : await api.sendText(selectedContact.id, replyText);
         if (res.error) throw new Error(res.error);
         toast.success('Message sent');
+        // If was temp, refresh and find the real contact
+        if (isTemp) {
+          const data = await api.getConversations();
+          setConversations(data);
+          const real = data.find(c => c.jid === selectedContact.jid);
+          if (real) setSelectedContact(real);
+        }
       } else {
+        if (isTemp) {
+          toast.error('Send a text message first to start this conversation');
+          setSending(false);
+          return;
+        }
         const res = await api.sendVoice(selectedContact.id, replyText, selectedVoice);
         if (res.error) throw new Error(res.error);
         toast.success('Voice note sent');
@@ -177,6 +200,66 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
     }
   };
 
+  const handleStartNewChat = async (contact?: Contact) => {
+    if (contact) {
+      setSelectedContact(contact);
+      setShowNewChat(false);
+      setNewChatPhone('');
+      setContactSearch('');
+      return;
+    }
+    
+    const phone = newChatPhone.replace(/[^0-9+]/g, '');
+    if (phone.length < 7) {
+      toast.error('Enter a valid phone number');
+      return;
+    }
+    
+    setNewChatLoading(true);
+    try {
+      const jid = phone.replace(/^\+/, '') + '@s.whatsapp.net';
+      
+      // Check if contact already exists
+      const existing = [...conversations, ...allContacts].find(
+        c => c.phone?.replace(/[^0-9]/g, '') === phone.replace(/[^0-9]/g, '') || c.jid === jid
+      );
+      
+      if (existing) {
+        setSelectedContact(existing);
+      } else {
+        // Create a temporary contact entry for display — message will create the real one
+        const tempContact: Contact = {
+          id: 'temp-' + Date.now(),
+          jid,
+          name: null,
+          phone: phone.startsWith('+') ? phone : '+' + phone,
+          avatar_url: null,
+          is_group: 0,
+          last_seen: null,
+          updated_at: new Date().toISOString(),
+        };
+        setSelectedContact(tempContact);
+      }
+      
+      setShowNewChat(false);
+      setNewChatPhone('');
+      setContactSearch('');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to start conversation');
+    } finally {
+      setNewChatLoading(false);
+    }
+  };
+
+  const filteredNewChatContacts = useMemo(() => {
+    if (!contactSearch.trim()) return allContacts.slice(0, 20);
+    const q = contactSearch.toLowerCase();
+    return allContacts.filter(c =>
+      (c.name || '').toLowerCase().includes(q) ||
+      cleanPhone(c.phone || '').includes(q)
+    ).slice(0, 20);
+  }, [allContacts, contactSearch]);
+
   // On mobile: show either list or chat
   const showChatOnMobile = !!selectedContact;
 
@@ -184,18 +267,27 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
     <div className="space-y-4">
       <h1 className="text-xl md:text-2xl font-bold text-foreground">Conversations</h1>
 
-      <div className="flex gap-4 h-[calc(100vh-180px)] md:h-[calc(100vh-180px)] h-[calc(100dvh-160px)]">
+      <div className="relative flex gap-4 h-[calc(100vh-180px)] md:h-[calc(100vh-180px)] h-[calc(100dvh-160px)]">
         {/* Contact list - hidden on mobile when chat is open */}
         <div className={`${showChatOnMobile ? 'hidden md:flex' : 'flex'} w-full md:w-72 flex-shrink-0 glass rounded-xl overflow-hidden flex-col`}>
           <div className="p-3 border-b border-border">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search..."
-                className="w-full pl-9 pr-3 py-2 rounded-lg bg-secondary border-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-              />
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search..."
+                  className="w-full pl-9 pr-3 py-2 rounded-lg bg-secondary border-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                />
+              </div>
+              <button
+                onClick={() => setShowNewChat(true)}
+                className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center text-primary-foreground hover:bg-primary/90 transition-colors flex-shrink-0"
+                title="New conversation"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
             </div>
           </div>
           <div className="flex-1 overflow-y-auto">
@@ -237,7 +329,7 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
         </div>
 
         {/* Chat view - full width on mobile */}
-        <div className={`${!showChatOnMobile ? 'hidden md:flex' : 'flex'} flex-1 glass rounded-xl overflow-hidden flex-col`}>
+        <div className={`${!showChatOnMobile && !showNewChat ? 'hidden md:flex' : showNewChat && !showChatOnMobile ? 'hidden md:flex' : 'flex'} flex-1 glass rounded-xl overflow-hidden flex-col`}>
           {selectedContact ? (
             <>
               <div className="px-3 md:px-4 py-3 border-b border-border flex items-center gap-3">
@@ -387,6 +479,77 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
             </div>
           )}
         </div>
+
+        {/* New conversation panel — replaces chat on mobile, overlay on desktop */}
+        {showNewChat && (
+          <div className={`${showChatOnMobile ? 'hidden' : 'flex'} md:absolute md:inset-0 md:z-50 md:bg-background/80 md:backdrop-blur-sm md:items-center md:justify-center flex-col w-full md:w-auto`}>
+            <div className="w-full md:w-96 md:max-h-[80vh] glass md:rounded-xl overflow-hidden flex flex-col md:border md:border-border">
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground">New Conversation</h3>
+                <button
+                  onClick={() => { setShowNewChat(false); setNewChatPhone(''); setContactSearch(''); }}
+                  className="p-1 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              
+              {/* Phone number input */}
+              <div className="p-3 border-b border-border space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    value={newChatPhone}
+                    onChange={(e) => setNewChatPhone(e.target.value)}
+                    placeholder="Enter phone number (e.g. +1234567890)"
+                    className="flex-1 px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleStartNewChat(); }}
+                  />
+                  <button
+                    onClick={() => handleStartNewChat()}
+                    disabled={newChatPhone.replace(/[^0-9]/g, '').length < 7 || newChatLoading}
+                    className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm hover:bg-primary/90 disabled:opacity-40 flex-shrink-0"
+                  >
+                    {newChatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Chat'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Or pick from contacts */}
+              <div className="p-3 border-b border-border">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    value={contactSearch}
+                    onChange={(e) => setContactSearch(e.target.value)}
+                    placeholder="Or search contacts..."
+                    className="w-full pl-9 pr-3 py-2 rounded-lg bg-secondary border-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto max-h-[50vh]">
+                {filteredNewChatContacts.map(contact => (
+                  <button
+                    key={contact.id}
+                    onClick={() => handleStartNewChat(contact)}
+                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-secondary/50 transition-colors"
+                  >
+                    <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground flex-shrink-0">
+                      {(contact.name && !contact.name.includes('@') ? contact.name : cleanPhone(contact.phone) || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{contact.name && !contact.name.includes('@') ? contact.name : cleanPhone(contact.phone)}</p>
+                      <p className="text-xs text-muted-foreground">{cleanPhone(contact.phone)}</p>
+                    </div>
+                  </button>
+                ))}
+                {filteredNewChatContacts.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-6">No contacts found</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
