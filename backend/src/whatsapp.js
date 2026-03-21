@@ -162,6 +162,14 @@ function extractAltMappings(inst, msg) {
   if (!msg?.key) return;
   const { remoteJid, remoteJidAlt, participant, participantAlt } = msg.key;
 
+  // senderPn is the most reliable source (contains real phone @s.whatsapp.net)
+  if (msg.key.senderPn && remoteJid?.endsWith('@lid')) {
+    const phone = msg.key.senderPn.replace('@s.whatsapp.net', '').replace(/@.*$/, '');
+    if (phone && /^\d{7,15}$/.test(phone)) {
+      inst.lidMap.set(remoteJid, phone);
+    }
+  }
+
   if (remoteJid?.endsWith('@lid') && remoteJidAlt?.endsWith('@s.whatsapp.net')) {
     const phone = remoteJidAlt.replace('@s.whatsapp.net', '');
     inst.lidMap.set(remoteJid, phone);
@@ -559,6 +567,20 @@ async function startConnection(userId, db, options = {}) {
           // Extract LID→PN mappings from alt fields
           extractAltMappings(inst, msg);
 
+          // DEBUG: Log raw message key fields for first few @lid messages
+          if (jid.endsWith('@lid')) {
+            console.log(`🔍 [DEBUG] msg.upsert @lid key:`, JSON.stringify({
+              remoteJid: msg.key.remoteJid,
+              senderPn: msg.key.senderPn,
+              remoteJidAlt: msg.key.remoteJidAlt,
+              participant: msg.key.participant,
+              participantAlt: msg.key.participantAlt,
+              fromMe: msg.key.fromMe,
+              pushName: msg.pushName,
+              allKeyFields: Object.keys(msg.key),
+            }));
+          }
+
           const isFromMe = msg.key.fromMe;
           const resolved = resolveLidPhone(inst, jid);
           const phone = '+' + resolved.phone;
@@ -694,9 +716,10 @@ async function startConnection(userId, db, options = {}) {
             const jid = msg.key?.remoteJid;
             if (!jid || jid === 'status@broadcast') continue;
 
-            if (msgDebugCount < 10 && jid.endsWith('@lid')) {
+            if (msgDebugCount < 20) {
               console.log(`🔍 [DEBUG] history msg with @lid:`, JSON.stringify({
                 remoteJid: msg.key.remoteJid,
+                senderPn: msg.key.senderPn,
                 remoteJidAlt: msg.key.remoteJidAlt,
                 participant: msg.key.participant,
                 participantAlt: msg.key.participantAlt,
