@@ -346,15 +346,21 @@ async function startConnection(userId, db, options = {}) {
       inst.store = { contacts: {} };
     }
 
-    // Populate contact cache from socket events
+    // Populate contact cache from socket events and build LID mappings
     inst.sock.ev.on('contacts.update', (updates) => {
       for (const u of updates) {
-        if (u.id) inst.store.contacts[u.id] = { ...inst.store.contacts[u.id], ...u };
+        if (u.id) {
+          inst.store.contacts[u.id] = { ...inst.store.contacts[u.id], ...u };
+          buildLidMapping(inst, inst.store.contacts[u.id]);
+        }
       }
     });
     inst.sock.ev.on('contacts.upsert', (contacts) => {
       for (const c of contacts) {
-        if (c.id) inst.store.contacts[c.id] = { ...inst.store.contacts[c.id], ...c };
+        if (c.id) {
+          inst.store.contacts[c.id] = { ...inst.store.contacts[c.id], ...c };
+          buildLidMapping(inst, inst.store.contacts[c.id]);
+        }
       }
     });
 
