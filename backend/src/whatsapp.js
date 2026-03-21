@@ -498,11 +498,10 @@ async function startConnection(userId, db, options = {}) {
         try {
           const jid = update.id;
           if (!jid || jid === 'status@broadcast') continue;
-          const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+          const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
           const phone = '+' + rawNumber;
           const isGroup = jid.endsWith('@g.us');
-          const candidate = getNameCandidate(inst.store?.contacts?.[jid], update);
-          if (!candidate.name) continue;
+          const candidate = getNameCandidate(inst.store?.contacts?.[jid], inst.store?.contacts?.[rawNumber + '@s.whatsapp.net'], update);
           getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
           changed++;
         } catch {}
