@@ -680,16 +680,22 @@ async function syncContacts(userId, db) {
   try {
     const contacts = Object.values(inst.store.contacts);
     console.log(`📇 [${userId}] Found ${contacts.length} contacts in store`);
-    let syncedCount = 0;
 
+    // First pass: build all LID mappings
+    for (const c of contacts) {
+      buildLidMapping(inst, c);
+    }
+    console.log(`📇 [${userId}] Built ${inst.lidMap.size} LID mappings`);
+
+    let syncedCount = 0;
     for (const c of contacts) {
       try {
         const jid = c.id;
         if (!jid || jid === 'status@broadcast') continue;
-        const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
-        const phone = '+' + rawNumber;
+        const resolved = resolveLidPhone(inst, jid);
+        const phone = '+' + resolved.phone;
         const isGroup = jid.endsWith('@g.us');
-        getOrCreateContact(db, userId, jid, phone, getNameCandidate(c, inst.store?.contacts?.[rawNumber + '@s.whatsapp.net']), isGroup);
+        getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(c, inst.store?.contacts?.[resolved.jid]), isGroup);
         syncedCount++;
       } catch {}
     }
