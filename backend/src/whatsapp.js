@@ -116,7 +116,6 @@ function getInstance(userId) {
 }
 
 // Build LID-to-phone mappings from a contact object
-// Baileys contacts with id "1234@s.whatsapp.net" often have a "lid" property like "77481361039542@lid"
 function buildLidMapping(inst, contact) {
   if (!contact) return;
   const id = contact.id;
@@ -128,20 +127,97 @@ function buildLidMapping(inst, contact) {
     if (lidJid) {
       const phone = id.replace('@s.whatsapp.net', '');
       inst.lidMap.set(lidJid, phone);
-      // Also map without suffix
-      const lidRaw = lidJid.replace('@lid', '');
-      inst.lidMap.set(lidRaw + '@lid', phone);
+      if (!lidJid.endsWith('@lid')) inst.lidMap.set(lidJid + '@lid', phone);
     }
   }
 
-  // Case 2: Contact has id=xxx@lid and lid property pointing elsewhere
+  // Case 2: Contact has id=xxx@lid and lid property pointing to @s.whatsapp.net
   if (id.endsWith('@lid') && contact.lid && contact.lid !== id) {
-    // The lid property might contain the s.whatsapp.net version
     const otherJid = typeof contact.lid === 'string' ? contact.lid : null;
     if (otherJid?.endsWith('@s.whatsapp.net')) {
       const phone = otherJid.replace('@s.whatsapp.net', '');
       inst.lidMap.set(id, phone);
     }
+  }
+
+  // Case 3: Contact with @lid id has a phoneNumber field (Baileys v6.7+)
+  if (id.endsWith('@lid') && contact.phoneNumber) {
+    const phone = contact.phoneNumber.replace(/[^0-9]/g, '');
+    if (phone.length >= 7 && phone.length <= 15) {
+      inst.lidMap.set(id, phone);
+    }
+  }
+
+  // Case 4: Contact with @lid id has a phone field
+  if (id.endsWith('@lid') && contact.phone) {
+    const phone = (typeof contact.phone === 'string' ? contact.phone : '').replace(/[^0-9]/g, '');
+    if (phone.length >= 7 && phone.length <= 15) {
+      inst.lidMap.set(id, phone);
+    }
+  }
+}
+
+// Extract LID mappings from message alt fields (Baileys 6.8+)
+function extractAltMappings(inst, msg) {
+  if (!msg?.key) return;
+  const { remoteJid, remoteJidAlt, participant, participantAlt } = msg.key;
+
+  if (remoteJid?.endsWith('@lid') && remoteJidAlt?.endsWith('@s.whatsapp.net')) {
+    const phone = remoteJidAlt.replace('@s.whatsapp.net', '');
+    inst.lidMap.set(remoteJid, phone);
+  }
+  if (participant?.endsWith('@lid') && participantAlt?.endsWith('@s.whatsapp.net')) {
+    const phone = participantAlt.replace('@s.whatsapp.net', '');
+    inst.lidMap.set(participant, phone);
+  }
+}
+
+// Reconcile @lid and @s.whatsapp.net duplicate contacts in DB
+function reconcileLidContacts(db, userId, lidJid, phone) {
+  try {
+    const lidPhone = '+' + lidJid.replace('@lid', '');
+    const realPhone = '+' + phone;
+    const realJid = phone + '@s.whatsapp.net';
+
+    // Find the @lid-based contact
+    const lidContact = db.prepare(
+      "SELECT id, name, phone FROM contacts WHERE user_id = ? AND (jid = ? OR phone = ?)"
+    ).get(userId, lidJid, lidPhone);
+
+    if (!lidContact) return;
+
+    // Find or create the real phone contact
+    const realContact = db.prepare(
+      "SELECT id, name FROM contacts WHERE user_id = ? AND jid = ?"
+    ).get(userId, realJid);
+
+    if (realContact) {
+      // Move messages from lid contact to real contact
+      db.prepare(
+        "UPDATE messages SET contact_id = ?, jid = ? WHERE contact_id = ? AND user_id = ?"
+      ).run(realContact.id, realJid, lidContact.id, userId);
+
+      // Update name if lid contact had a better one
+      if (lidContact.name && !isPhoneLikeName(lidContact.name, realPhone) &&
+          (!realContact.name || isPhoneLikeName(realContact.name, realPhone))) {
+        db.prepare("UPDATE contacts SET name = ? WHERE id = ?").run(lidContact.name, realContact.id);
+      }
+
+      // Delete the lid contact
+      db.prepare("DELETE FROM contacts WHERE id = ? AND user_id = ?").run(lidContact.id, userId);
+    } else {
+      // No real contact exists — update the lid contact to use real JID/phone
+      db.prepare(
+        "UPDATE contacts SET jid = ?, phone = ? WHERE id = ? AND user_id = ?"
+      ).run(realJid, realPhone, lidContact.id, userId);
+
+      // Also update messages
+      db.prepare(
+        "UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?"
+      ).run(realJid, lidContact.id, userId);
+    }
+  } catch (err) {
+    console.error('reconcileLidContacts error:', err?.message || err);
   }
 }
 
