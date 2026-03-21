@@ -109,9 +109,85 @@ function getInstance(userId) {
       msgRetryCounterCache: new NodeCache({ stdTTL: 600, checkperiod: 120 }),
       autoReplyCooldowns: new Map(),
       messageBatchBuffers: new Map(),
+      lidMap: new Map(), // Maps LID JID -> phone number (e.g. "77481361039542@lid" -> "2348012345678")
     });
   }
   return userInstances.get(userId);
+}
+
+// Build LID-to-phone mappings from a contact object
+// Baileys contacts with id "1234@s.whatsapp.net" often have a "lid" property like "77481361039542@lid"
+function buildLidMapping(inst, contact) {
+  if (!contact) return;
+  const id = contact.id;
+  if (!id) return;
+
+  // Case 1: Contact has id=xxx@s.whatsapp.net and lid=yyy@lid
+  if (id.endsWith('@s.whatsapp.net') && contact.lid) {
+    const lidJid = typeof contact.lid === 'string' ? contact.lid : contact.lid?.toString?.();
+    if (lidJid) {
+      const phone = id.replace('@s.whatsapp.net', '');
+      inst.lidMap.set(lidJid, phone);
+      // Also map without suffix
+      const lidRaw = lidJid.replace('@lid', '');
+      inst.lidMap.set(lidRaw + '@lid', phone);
+    }
+  }
+
+  // Case 2: Contact has id=xxx@lid and lid property pointing elsewhere
+  if (id.endsWith('@lid') && contact.lid && contact.lid !== id) {
+    // The lid property might contain the s.whatsapp.net version
+    const otherJid = typeof contact.lid === 'string' ? contact.lid : null;
+    if (otherJid?.endsWith('@s.whatsapp.net')) {
+      const phone = otherJid.replace('@s.whatsapp.net', '');
+      inst.lidMap.set(id, phone);
+    }
+  }
+}
+
+// Resolve a JID to a real phone number
+// Returns { phone, jid } where phone is the clean number and jid is the best JID to use
+function resolveLidPhone(inst, jid) {
+  if (!jid) return { phone: '', jid: jid };
+
+  // Normal @s.whatsapp.net — phone is directly in the JID
+  if (jid.endsWith('@s.whatsapp.net')) {
+    return { phone: jid.replace('@s.whatsapp.net', ''), jid };
+  }
+
+  // Group JIDs — not a phone number
+  if (jid.endsWith('@g.us')) {
+    return { phone: jid.replace('@g.us', ''), jid };
+  }
+
+  // @lid JID — need to resolve
+  if (jid.endsWith('@lid')) {
+    // Layer 1: Check cached lidMap
+    const mapped = inst.lidMap.get(jid);
+    if (mapped) {
+      return { phone: mapped, jid: mapped + '@s.whatsapp.net' };
+    }
+
+    // Layer 2: Scan store contacts for any contact whose .lid matches this JID
+    if (inst.store?.contacts) {
+      for (const [cid, contact] of Object.entries(inst.store.contacts)) {
+        if (!cid.endsWith('@s.whatsapp.net')) continue;
+        const contactLid = contact.lid;
+        if (contactLid === jid || contactLid === jid.replace('@lid', '')) {
+          const phone = cid.replace('@s.whatsapp.net', '');
+          inst.lidMap.set(jid, phone); // cache for future
+          return { phone, jid: cid };
+        }
+      }
+    }
+
+    // Layer 3: Fallback — use raw LID number (will show as unknown number)
+    const rawLid = jid.replace('@lid', '');
+    return { phone: rawLid, jid };
+  }
+
+  // Unknown format fallback
+  return { phone: jid.replace(/@.*$/, ''), jid };
 }
 
 export function getWhatsAppState(userId) {
