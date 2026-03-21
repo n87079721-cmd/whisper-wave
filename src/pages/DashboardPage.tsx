@@ -29,7 +29,16 @@ const DashboardPage = () => {
   ];
 
   const handleConnect = async () => {
-    try { await api.reconnect(); } catch (err) { console.error('Reconnect error:', err); }
+    setConnecting(true);
+    try {
+      await api.reconnect();
+      toast.success('Connecting to WhatsApp...');
+      refresh();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to connect');
+    } finally {
+      setConnecting(false);
+    }
   };
 
   const handleDisconnect = async () => {
