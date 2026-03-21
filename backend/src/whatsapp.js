@@ -425,8 +425,9 @@ async function startConnection(userId, db, options = {}) {
           if (!jid || jid === 'status@broadcast') continue;
 
           const isFromMe = msg.key.fromMe;
-          const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
-          const phone = '+' + rawNumber;
+          const resolved = resolveLidPhone(inst, jid);
+          const phone = '+' + resolved.phone;
+          const resolvedJid = resolved.jid;
           const isGroup = jid.endsWith('@g.us');
           const contactCandidate = getNameCandidate(
             inst.store?.contacts?.[jid],
