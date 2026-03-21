@@ -6,15 +6,16 @@ import ContactsPage from '@/pages/ContactsPage';
 import ConversationsPage from '@/pages/ConversationsPage';
 import VoiceStudioPage from '@/pages/VoiceStudioPage';
 import SettingsPage from '@/pages/SettingsPage';
+import { type Contact } from '@/lib/api';
 
 type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings';
 
 const Index = () => {
   const [activePage, setActivePage] = useState<Page>('dashboard');
-  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
 
-  const handleOpenChat = (contactId: string) => {
-    setSelectedContactId(contactId);
+  const handleOpenChat = (contact: Contact) => {
+    setSelectedContact(contact);
     setActivePage('conversations');
   };
 
@@ -22,7 +23,7 @@ const Index = () => {
     switch (activePage) {
       case 'dashboard': return <DashboardPage />;
       case 'contacts': return <ContactsPage onOpenChat={handleOpenChat} />;
-      case 'conversations': return <ConversationsPage initialContactId={selectedContactId} onContactOpened={() => setSelectedContactId(null)} />;
+      case 'conversations': return <ConversationsPage initialContact={selectedContact} onContactOpened={() => setSelectedContact(null)} />;
       case 'voice': return <VoiceStudioPage />;
       case 'settings': return <SettingsPage />;
     }
