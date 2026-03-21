@@ -143,10 +143,15 @@ const DashboardPage = () => {
           </div>
           <button
             onClick={isConnected ? handleDisconnect : handleConnect}
-            disabled={isReconnecting}
-            className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-60"
+            disabled={isReconnecting || connecting}
+            className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-60 flex items-center gap-1.5"
           >
-            {isConnected ? 'Disconnect' : isReconnecting ? 'Reconnecting...' : 'Connect'}
+            {connecting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Connecting...
+              </>
+            ) : isConnected ? 'Disconnect' : isReconnecting ? 'Reconnecting...' : 'Connect'}
           </button>
         </div>
 
