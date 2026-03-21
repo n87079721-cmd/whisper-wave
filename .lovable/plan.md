@@ -1,100 +1,83 @@
 
+Goal: stop chasing an unreliable “perfect sync” first, and make the app usable again even when WhatsApp history/name sync is incomplete.
 
-## Phase 1: Stabilize Contacts, Names, and Live Sync
+What I found
 
-There are three root causes for the broken state:
+1. Manual chat start is genuinely broken
+- `src/lib/api.ts` can send to a raw phone/JID.
+- But `backend/src/api.js` only saves the sent message if a contact row already exists.
+- So for a brand-new number, the message may send to WhatsApp but no local contact/message is created, which makes it look like nothing happened.
 
-### Problem Analysis
+2. Contact tap flow is fragile
+- `src/pages/ContactsPage.tsx` sends only `contact.id`.
+- `src/pages/ConversationsPage.tsx` then re-fetches conversations/contacts and tries to find that id again.
+- If sync is stale or the contact is not in the conversations query yet, the chat view stays empty.
 
-1. **LID-to-phone mapping fails silently** — The current `buildLidMapping()` relies on contacts having a `.lid` property alongside an `@s.whatsapp.net` id. In practice, most contacts arrive as `@lid`-only with no cross-reference. The real mapping sources are never used:
-   - `msg.key.remoteJidAlt` (PN when remoteJid is @lid) — available in Baileys 6.8+
-   - `msg.key.participantAlt` (PN when participant is @lid, for groups)
-   - `sock.signalRepository.lidMapping.getPNForLID()` — Baileys' internal mapping store
+3. Sync recovery is not reliable after data loss
+- In `backend/src/whatsapp.js`, full history comes from `messaging-history.set`.
+- Your logs already showed contact store = 0 and history sync only appearing during certain pairings.
+- That means once the DB is wiped or partially wrong, reconnecting alone may not repopulate everything. A clean re-pair is the only reliable way to ask WhatsApp/Baileys for the initial history burst again.
 
-2. **Duplicate contact entries** — Messages from the same person create two contacts: one with `@lid` JID, one with `@s.whatsapp.net` JID. The conversations page only shows contacts with messages, but they fragment across these duplicates.
+4. Existing bad contacts are legacy `@lid` rows
+- The DB output proves many contacts were already written as fake phone-like values from raw `@lid`.
+- Those names cannot be magically reconstructed from the current DB alone.
 
-3. **Frontend shows stale data** — The SSE + polling infrastructure works, but the data being polled is broken (wrong JIDs, no names), so it appears non-functional.
+Plan
 
-### Solution
+Phase 1: Make chats usable even without perfect sync
+1. Fix “start conversation” persistence in `backend/src/api.js`
+- When `/send/text` receives a raw `jid` and no contact exists:
+  - upsert/create a contact row immediately
+  - insert the outgoing message immediately
+  - return the created `contactId`
+- This makes new chats appear instantly after sending.
 
-#### Backend: `backend/src/whatsapp.js`
+2. Make Contacts → Chat open directly
+- Pass the full contact object from `ContactsPage` to `Index.tsx`, not just the id.
+- Let `ConversationsPage` accept either an initial contact object or id.
+- If the contact has no existing thread, open an empty composer immediately instead of waiting on another fetch.
 
-**1. Use `remoteJidAlt` and `participantAlt` for LID mapping**
+3. Keep the new-chat picker fresh
+- Refresh `allContacts` on SSE/polling the same way conversations refresh now.
+- That fixes “contacts aren’t showing” inside the new conversation flow.
 
-In `messages.upsert`, extract the alt JID fields from every message key:
+4. Add explicit sync-state UI
+- Show a clear banner in Conversations/Contacts when WhatsApp is connected but only partial history is present.
+- Example: “Only partial WhatsApp history is available. Re-pair to re-import older chats.”
+- This avoids the current “app looks broken” feeling.
 
-```text
-For each message:
-  - If msg.key.remoteJid ends with @lid AND msg.key.remoteJidAlt exists:
-    → Store mapping: remoteJid → phone from remoteJidAlt
-  - If msg.key.participant ends with @lid AND msg.key.participantAlt exists:
-    → Store mapping: participant → phone from participantAlt
-```
+Phase 2: Stop corrupting contact identity
+5. Tighten contact creation rules in `backend/src/whatsapp.js`
+- Do not treat unresolved `@lid` values as trustworthy phone numbers.
+- Store unresolved LID contacts as unresolved identities instead of fabricating a “+number”.
+- Only promote them to canonical `@s.whatsapp.net` phone contacts once a real mapping is known.
 
-Do the same in `messaging-history.set` for history messages.
+6. Preserve and reuse resolved mappings better
+- Reconcile LID contacts only when a trusted source exists (`senderPn`, alt jid, signal mapping).
+- Avoid creating duplicate contact rows early.
 
-**2. Use `sock.signalRepository.lidMapping` as fallback**
+Phase 3: Recovery flow for old chats
+7. Add a guided “Fresh Re-sync” action
+- UI action from Dashboard/Settings:
+  - explain that older chats/names need a clean re-pair
+  - clear local session/data
+  - guide user through QR/pair-code again
+  - show sync progress counts
+- This is the realistic path for restoring older conversations already lost from the local DB.
 
-Update `resolveLidPhone()` to add a Layer 1.5: call `inst.sock?.signalRepository?.lidMapping?.getPNForLID(jid)` before scanning the contact store. This is Baileys' authoritative mapping.
+Files to change
+- `backend/src/api.js`
+- `backend/src/whatsapp.js`
+- `src/pages/ContactsPage.tsx`
+- `src/pages/ConversationsPage.tsx`
+- `src/pages/Index.tsx`
+- optionally `src/pages/DashboardPage.tsx` or `src/pages/SettingsPage.tsx` for the guided re-sync action
 
-**3. Merge/deduplicate @lid and @s.whatsapp.net contacts**
-
-When a LID→PN mapping is discovered and both contacts exist in the DB:
-- Move all messages from the @lid contact to the @s.whatsapp.net contact
-- Delete the @lid contact entry
-- Update the @s.whatsapp.net contact's name if the @lid one had a better name
-
-Add a `reconcileLidContacts(db, userId, lidJid, phone)` function called whenever a new mapping is discovered.
-
-**4. Always use resolved JID for storing messages**
-
-In `messages.upsert`, use `resolvedJid` (the @s.whatsapp.net version) for the `jid` column in the messages INSERT, not the raw `jid`. This prevents future fragmentation.
-
-**5. Use contact.phoneNumber field**
-
-Per Baileys v7 migration docs: contacts with `@lid` as their `id` have a `phoneNumber` field. Update `buildLidMapping` to check `contact.phoneNumber`:
-
-```javascript
-if (id.endsWith('@lid') && contact.phoneNumber) {
-  const phone = contact.phoneNumber.replace(/[^0-9]/g, '');
-  inst.lidMap.set(id, phone);
-}
-```
-
-**6. Listen for `lid-mapping.update` event**
-
-Add a new event listener:
-```javascript
-inst.sock.ev.on('lid-mapping.update', (mappings) => {
-  for (const [lid, pn] of Object.entries(mappings)) {
-    inst.lidMap.set(lid, pn.replace('@s.whatsapp.net', ''));
-    reconcileLidContacts(db, userId, lid, pn.replace('@s.whatsapp.net', ''));
-  }
-  emit(userId, 'contacts_sync', { count: Object.keys(mappings).length });
-});
-```
-
-#### Frontend: `src/pages/ConversationsPage.tsx`
-
-**7. Clean phone display in conversation list**
-
-The conversation list shows raw `@lid` suffixed values. Apply the same `cleanPhone` stripping as ContactsPage for the phone display and initials generation.
-
-#### Frontend: `src/pages/ContactsPage.tsx`
-
-**8. Already has cleanPhone** — No changes needed, already strips `@` suffixes.
-
-### Files Changed
-- `backend/src/whatsapp.js` — Add remoteJidAlt/participantAlt extraction, use signalRepository.lidMapping, add contact.phoneNumber check, add lid-mapping.update listener, add reconcileLidContacts, use resolvedJid in message inserts
-- `src/pages/ConversationsPage.tsx` — Clean phone display
-
-### After Deploy
-```bash
-cd /root/wass && git pull && sudo supervisorctl restart wa-controller
-```
-
-The LID mappings will populate from three new sources (remoteJidAlt, signalRepository, lid-mapping.update event). Existing @lid contacts will be automatically merged with their @s.whatsapp.net counterparts as mappings resolve. New messages will store under the correct JID immediately.
-
-### Phase 2 (Future)
-Migrate to LID-primary architecture as recommended by Baileys docs — store LID as the canonical identifier and PN as metadata. This is a larger refactor for later.
-
+Technical notes
+- The “can’t start chat” bug is not a WhatsApp problem; it is a local persistence bug in `/api/send/text`.
+- The “tap contact, nothing opens” issue is mostly a frontend state handoff problem.
+- The “missing older chats/names” issue is partly recoverable only through fresh pairing because Baileys full-history sync is typically initial-sync dependent.
+- So the right implementation is:
+  1) restore usability immediately
+  2) stop writing bad identity data
+  3) provide a deliberate re-sync path instead of pretending live reconnect will recover everything
