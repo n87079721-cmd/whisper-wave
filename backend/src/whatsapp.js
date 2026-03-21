@@ -158,7 +158,7 @@ function triggerSignalSessionRepair(userId, db, sourceError) {
       if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
       const removed = purgeCorruptedSignalSessions(userId);
       console.log(`🛠️ [${userId}] Cleared ${removed} Signal session file(s). Reconnecting...`);
-      await startConnection(userId, db);
+      await startConnection(userId, db, { force: true });
     } catch (err) {
       console.error(`Signal repair failed [${userId}]:`, err?.message || err);
     } finally {
@@ -187,7 +187,7 @@ export function initWhatsApp(userId, db) {
     getState: () => getWhatsAppState(userId),
     sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
-    reconnect: () => startConnection(userId, db),
+    reconnect: () => startConnection(userId, db, { force: true }),
     clearSession: () => clearSession(userId, db),
     getSocket: () => getInstance(userId).sock,
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
@@ -205,16 +205,19 @@ export function getOrInitWhatsApp(userId, db) {
     getState: () => getWhatsAppState(userId),
     sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
-    reconnect: () => startConnection(userId, db),
+    reconnect: () => startConnection(userId, db, { force: true }),
     clearSession: () => clearSession(userId, db),
     getSocket: () => inst.sock,
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
   };
 }
 
-async function startConnection(userId, db) {
+async function startConnection(userId, db, options = {}) {
   const inst = getInstance(userId);
+  const force = options.force === true;
+
   if (inst.isConnecting) return;
+  if (!force && inst.sock && inst.connectionStatus === 'connected') return;
   inst.isConnecting = true;
 
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
@@ -223,6 +226,8 @@ async function startConnection(userId, db) {
     try { inst.sock.ev.removeAllListeners('connection.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('messages.upsert'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('contacts.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('messaging-history.set'); } catch {}
     try { inst.sock.ev.removeAllListeners('creds.update'); } catch {}
     try { inst.sock.end?.(undefined); } catch {}
     inst.sock = null;
@@ -272,6 +277,7 @@ async function startConnection(userId, db) {
       }
 
       if (connection === 'open') {
+        if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
         inst.qrCode = null;
         inst.pairingCode = null;
         inst.pendingPairingPhone = null;
@@ -295,10 +301,14 @@ async function startConnection(userId, db) {
         } else {
           inst.connectionStatus = 'reconnecting';
           emit(userId, 'status', { status: 'reconnecting' });
+          if (inst.reconnectTimer) clearTimeout(inst.reconnectTimer);
           const delays = [3000, 5000, 10000];
           const delay = delays[Math.min(inst.reconnectAttempt, delays.length - 1)];
           inst.reconnectAttempt++;
-          inst.reconnectTimer = setTimeout(() => startConnection(userId, db), delay);
+          inst.reconnectTimer = setTimeout(() => {
+            inst.reconnectTimer = null;
+            startConnection(userId, db, { force: true });
+          }, delay);
         }
       }
     });
