@@ -585,7 +585,7 @@ function getConfigValue(db, userId, key, fallback) {
 function isWithinActiveHours(db, userId) {
   const start = getConfigValue(db, userId, 'ai_active_hours_start', '10:00');
   const end = getConfigValue(db, userId, 'ai_active_hours_end', '23:00');
-  const timezone = getConfigValue(db, userId, 'ai_timezone', 'Africa/Lagos');
+  const timezone = getConfigValue(db, userId, 'ai_timezone', 'America/New_York');
   
   // Use the user's configured timezone
   let now;
@@ -702,7 +702,9 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
     }
   }
 
-  const replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
+  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
+  // Strip em dashes and en dashes from AI output
+  replyText = replyText.replace(/[—–-]{2,}/g, ' ').replace(/—/g, ' ').replace(/–/g, ' ');
   const delay = calculateDelay(lastMsgContent.length, speed);
 
   setTimeout(async () => {
