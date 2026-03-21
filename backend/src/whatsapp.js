@@ -451,11 +451,31 @@ async function startConnection(userId, db, options = {}) {
         }
       }
     });
+
+    // DEBUG: Log first few raw contacts from events to diagnose LID issue
+    let contactDebugCount = 0;
+
     inst.sock.ev.on('contacts.upsert', (contacts) => {
       for (const c of contacts) {
         if (c.id) {
           inst.store.contacts[c.id] = { ...inst.store.contacts[c.id], ...c };
           buildLidMapping(inst, inst.store.contacts[c.id]);
+          if (contactDebugCount < 15) {
+            console.log(`🔍 [DEBUG] contacts.upsert raw:`, JSON.stringify({
+              id: c.id,
+              name: c.name,
+              notify: c.notify,
+              verifiedName: c.verifiedName,
+              pushName: c.pushName,
+              lid: c.lid,
+              lidJid: c.lidJid,
+              phoneNumber: c.phoneNumber,
+              phone: c.phone,
+              imgUrl: c.imgUrl ? '(has img)' : undefined,
+              allKeys: Object.keys(c),
+            }));
+            contactDebugCount++;
+          }
         }
       }
     });
@@ -613,11 +633,27 @@ async function startConnection(userId, db, options = {}) {
       console.log(`📜 [${userId}] History sync: ${chats?.length || 0} chats, ${syncedContacts?.length || 0} contacts, ${historyMsgs?.length || 0} messages`);
 
       let contactChanges = 0;
+      let historyDebugCount = 0;
 
       // First pass: build LID mappings from synced contacts
       if (syncedContacts?.length) {
         for (const c of syncedContacts) {
           buildLidMapping(inst, c);
+          if (historyDebugCount < 15) {
+            console.log(`🔍 [DEBUG] history contact raw:`, JSON.stringify({
+              id: c.id,
+              name: c.name,
+              notify: c.notify,
+              verifiedName: c.verifiedName,
+              pushName: c.pushName,
+              lid: c.lid,
+              lidJid: c.lidJid,
+              phoneNumber: c.phoneNumber,
+              phone: c.phone,
+              allKeys: Object.keys(c),
+            }));
+            historyDebugCount++;
+          }
         }
       }
 
@@ -651,11 +687,24 @@ async function startConnection(userId, db, options = {}) {
       }
 
       if (historyMsgs?.length) {
+        let msgDebugCount = 0;
         for (const msg of historyMsgs) {
           try {
             if (!msg?.message) continue;
             const jid = msg.key?.remoteJid;
             if (!jid || jid === 'status@broadcast') continue;
+
+            if (msgDebugCount < 10 && jid.endsWith('@lid')) {
+              console.log(`🔍 [DEBUG] history msg with @lid:`, JSON.stringify({
+                remoteJid: msg.key.remoteJid,
+                remoteJidAlt: msg.key.remoteJidAlt,
+                participant: msg.key.participant,
+                participantAlt: msg.key.participantAlt,
+                pushName: msg.pushName,
+                allKeyFields: Object.keys(msg.key),
+              }));
+              msgDebugCount++;
+            }
 
             // Extract alt mappings from history messages too
             extractAltMappings(inst, msg);
