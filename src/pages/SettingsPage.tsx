@@ -189,6 +189,40 @@ const SettingsPage = () => {
         </div>
       </motion.div>
 
+      {/* Fresh Re-sync */}
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.07 }} className="glass rounded-xl p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center"><RefreshCw className="w-5 h-5 text-primary" /></div>
+          <div>
+            <h3 className="font-semibold text-foreground text-sm">Fresh Re-sync</h3>
+            <p className="text-xs text-muted-foreground">If contacts/chats are missing, this clears your session and re-imports everything from WhatsApp.</p>
+          </div>
+        </div>
+        <div className="p-3 rounded-lg bg-muted/50 border border-border">
+          <p className="text-xs text-muted-foreground">
+            This will disconnect your WhatsApp, clear local data, and ask you to scan a new QR code. 
+            When you re-pair, WhatsApp will send your full chat history again with proper contact names.
+          </p>
+        </div>
+        <button 
+          onClick={async () => {
+            if (!confirm('This will clear all local data and require you to re-scan the QR code. Your WhatsApp messages on your phone are NOT affected. Continue?')) return;
+            setResyncing(true);
+            try {
+              await api.clearSession();
+              toast.success('Session cleared — scan the QR code on the Dashboard to re-sync');
+              setTimeout(() => window.location.reload(), 1500);
+            } catch { toast.error('Failed to clear session'); }
+            finally { setResyncing(false); }
+          }}
+          disabled={resyncing}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40"
+        >
+          {resyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          {resyncing ? 'Clearing...' : 'Clear & Re-sync'}
+        </button>
+      </motion.div>
+
       {/* Automation Toggle + Settings */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass rounded-xl p-6">
         <div className="flex items-center justify-between">
