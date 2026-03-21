@@ -180,10 +180,19 @@ export const api = {
 
   // Send
   sendText(contactId: string, message: string) {
-    return requestJson<{ success?: boolean; messageId?: string; error?: string }>('/api/send/text', {
+    return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/text', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contactId, message }),
+    });
+  },
+
+  sendTextToPhone(phone: string, message: string) {
+    const jid = phone.replace(/^\+/, '') + '@s.whatsapp.net';
+    return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jid, message }),
     });
   },
 
