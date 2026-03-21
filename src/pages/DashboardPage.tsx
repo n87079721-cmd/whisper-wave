@@ -10,7 +10,8 @@ import { toast } from 'sonner';
 
 const DashboardPage = () => {
   const backendReady = isBackendConfigured();
-  const { status, qr, stats } = useWhatsAppStatus();
+  const { status, qr, stats, refresh } = useWhatsAppStatus();
+  const [connecting, setConnecting] = useState(false);
   const [pairingMode, setPairingMode] = useState<'qr' | 'phone'>('qr');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
