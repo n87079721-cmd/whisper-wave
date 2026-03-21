@@ -116,7 +116,6 @@ function getInstance(userId) {
 }
 
 // Build LID-to-phone mappings from a contact object
-// Baileys contacts with id "1234@s.whatsapp.net" often have a "lid" property like "77481361039542@lid"
 function buildLidMapping(inst, contact) {
   if (!contact) return;
   const id = contact.id;
@@ -128,20 +127,97 @@ function buildLidMapping(inst, contact) {
     if (lidJid) {
       const phone = id.replace('@s.whatsapp.net', '');
       inst.lidMap.set(lidJid, phone);
-      // Also map without suffix
-      const lidRaw = lidJid.replace('@lid', '');
-      inst.lidMap.set(lidRaw + '@lid', phone);
+      if (!lidJid.endsWith('@lid')) inst.lidMap.set(lidJid + '@lid', phone);
     }
   }
 
-  // Case 2: Contact has id=xxx@lid and lid property pointing elsewhere
+  // Case 2: Contact has id=xxx@lid and lid property pointing to @s.whatsapp.net
   if (id.endsWith('@lid') && contact.lid && contact.lid !== id) {
-    // The lid property might contain the s.whatsapp.net version
     const otherJid = typeof contact.lid === 'string' ? contact.lid : null;
     if (otherJid?.endsWith('@s.whatsapp.net')) {
       const phone = otherJid.replace('@s.whatsapp.net', '');
       inst.lidMap.set(id, phone);
     }
+  }
+
+  // Case 3: Contact with @lid id has a phoneNumber field (Baileys v6.7+)
+  if (id.endsWith('@lid') && contact.phoneNumber) {
+    const phone = contact.phoneNumber.replace(/[^0-9]/g, '');
+    if (phone.length >= 7 && phone.length <= 15) {
+      inst.lidMap.set(id, phone);
+    }
+  }
+
+  // Case 4: Contact with @lid id has a phone field
+  if (id.endsWith('@lid') && contact.phone) {
+    const phone = (typeof contact.phone === 'string' ? contact.phone : '').replace(/[^0-9]/g, '');
+    if (phone.length >= 7 && phone.length <= 15) {
+      inst.lidMap.set(id, phone);
+    }
+  }
+}
+
+// Extract LID mappings from message alt fields (Baileys 6.8+)
+function extractAltMappings(inst, msg) {
+  if (!msg?.key) return;
+  const { remoteJid, remoteJidAlt, participant, participantAlt } = msg.key;
+
+  if (remoteJid?.endsWith('@lid') && remoteJidAlt?.endsWith('@s.whatsapp.net')) {
+    const phone = remoteJidAlt.replace('@s.whatsapp.net', '');
+    inst.lidMap.set(remoteJid, phone);
+  }
+  if (participant?.endsWith('@lid') && participantAlt?.endsWith('@s.whatsapp.net')) {
+    const phone = participantAlt.replace('@s.whatsapp.net', '');
+    inst.lidMap.set(participant, phone);
+  }
+}
+
+// Reconcile @lid and @s.whatsapp.net duplicate contacts in DB
+function reconcileLidContacts(db, userId, lidJid, phone) {
+  try {
+    const lidPhone = '+' + lidJid.replace('@lid', '');
+    const realPhone = '+' + phone;
+    const realJid = phone + '@s.whatsapp.net';
+
+    // Find the @lid-based contact
+    const lidContact = db.prepare(
+      "SELECT id, name, phone FROM contacts WHERE user_id = ? AND (jid = ? OR phone = ?)"
+    ).get(userId, lidJid, lidPhone);
+
+    if (!lidContact) return;
+
+    // Find or create the real phone contact
+    const realContact = db.prepare(
+      "SELECT id, name FROM contacts WHERE user_id = ? AND jid = ?"
+    ).get(userId, realJid);
+
+    if (realContact) {
+      // Move messages from lid contact to real contact
+      db.prepare(
+        "UPDATE messages SET contact_id = ?, jid = ? WHERE contact_id = ? AND user_id = ?"
+      ).run(realContact.id, realJid, lidContact.id, userId);
+
+      // Update name if lid contact had a better one
+      if (lidContact.name && !isPhoneLikeName(lidContact.name, realPhone) &&
+          (!realContact.name || isPhoneLikeName(realContact.name, realPhone))) {
+        db.prepare("UPDATE contacts SET name = ? WHERE id = ?").run(lidContact.name, realContact.id);
+      }
+
+      // Delete the lid contact
+      db.prepare("DELETE FROM contacts WHERE id = ? AND user_id = ?").run(lidContact.id, userId);
+    } else {
+      // No real contact exists — update the lid contact to use real JID/phone
+      db.prepare(
+        "UPDATE contacts SET jid = ?, phone = ? WHERE id = ? AND user_id = ?"
+      ).run(realJid, realPhone, lidContact.id, userId);
+
+      // Also update messages
+      db.prepare(
+        "UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?"
+      ).run(realJid, lidContact.id, userId);
+    }
+  } catch (err) {
+    console.error('reconcileLidContacts error:', err?.message || err);
   }
 }
 
@@ -168,6 +244,16 @@ function resolveLidPhone(inst, jid) {
       return { phone: mapped, jid: mapped + '@s.whatsapp.net' };
     }
 
+    // Layer 1.5: Try Baileys' internal signal repository mapping
+    try {
+      const pnJid = inst.sock?.signalRepository?.lidMapping?.getPNForLID?.(jid);
+      if (pnJid && pnJid.endsWith('@s.whatsapp.net')) {
+        const phone = pnJid.replace('@s.whatsapp.net', '');
+        inst.lidMap.set(jid, phone);
+        return { phone, jid: pnJid };
+      }
+    } catch {}
+
     // Layer 2: Scan store contacts for any contact whose .lid matches this JID
     if (inst.store?.contacts) {
       for (const [cid, contact] of Object.entries(inst.store.contacts)) {
@@ -175,9 +261,19 @@ function resolveLidPhone(inst, jid) {
         const contactLid = contact.lid;
         if (contactLid === jid || contactLid === jid.replace('@lid', '')) {
           const phone = cid.replace('@s.whatsapp.net', '');
-          inst.lidMap.set(jid, phone); // cache for future
+          inst.lidMap.set(jid, phone);
           return { phone, jid: cid };
         }
+      }
+    }
+
+    // Layer 2.5: Check if any store contact with @lid id has phoneNumber
+    const lidContact = inst.store?.contacts?.[jid];
+    if (lidContact?.phoneNumber) {
+      const phone = lidContact.phoneNumber.replace(/[^0-9]/g, '');
+      if (phone.length >= 7 && phone.length <= 15) {
+        inst.lidMap.set(jid, phone);
+        return { phone, jid: phone + '@s.whatsapp.net' };
       }
     }
 
@@ -366,6 +462,22 @@ async function startConnection(userId, db, options = {}) {
 
     inst.sock.ev.on('creds.update', saveCreds);
 
+    // Listen for LID mapping updates from Baileys
+    try {
+      inst.sock.ev.on('lid-mapping.update', (mappings) => {
+        if (!mappings || typeof mappings !== 'object') return;
+        for (const [lid, pn] of Object.entries(mappings)) {
+          const phone = typeof pn === 'string' ? pn.replace('@s.whatsapp.net', '') : '';
+          if (phone) {
+            inst.lidMap.set(lid, phone);
+            reconcileLidContacts(db, userId, lid, phone);
+          }
+        }
+        console.log(`🔗 [${userId}] LID mapping update: ${Object.keys(mappings).length} mappings`);
+        emit(userId, 'contacts_sync', { count: Object.keys(mappings).length });
+      });
+    } catch {}
+
     inst.sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
       if (generation !== inst.connectionGeneration) return;
 
@@ -424,10 +536,19 @@ async function startConnection(userId, db, options = {}) {
           const jid = msg.key.remoteJid;
           if (!jid || jid === 'status@broadcast') continue;
 
+          // Extract LID→PN mappings from alt fields
+          extractAltMappings(inst, msg);
+
           const isFromMe = msg.key.fromMe;
           const resolved = resolveLidPhone(inst, jid);
           const phone = '+' + resolved.phone;
           const resolvedJid = resolved.jid;
+
+          // If we just resolved a LID, reconcile existing DB entries
+          if (jid.endsWith('@lid') && resolvedJid !== jid) {
+            reconcileLidContacts(db, userId, jid, resolved.phone);
+          }
+
           const isGroup = jid.endsWith('@g.us');
           const contactCandidate = getNameCandidate(
             inst.store?.contacts?.[jid],
@@ -461,7 +582,7 @@ async function startConnection(userId, db, options = {}) {
             INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
-            msgId, userId, contactId, jid, content, msgType, direction,
+            msgId, userId, contactId, resolvedJid, content, msgType, direction,
             toIsoTimestamp(msg.messageTimestamp),
             isFromMe ? 'sent' : 'delivered',
             msg.message.audioMessage?.seconds || null
@@ -536,6 +657,9 @@ async function startConnection(userId, db, options = {}) {
             const jid = msg.key?.remoteJid;
             if (!jid || jid === 'status@broadcast') continue;
 
+            // Extract alt mappings from history messages too
+            extractAltMappings(inst, msg);
+
             const isFromMe = msg.key.fromMe;
             const resolved = resolveLidPhone(inst, jid);
             const phone = '+' + resolved.phone;
@@ -568,7 +692,7 @@ async function startConnection(userId, db, options = {}) {
               INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
-              msgId, userId, contactId, jid, content, msgType,
+              msgId, userId, contactId, resolvedJid, content, msgType,
               isFromMe ? 'sent' : 'received',
               toIsoTimestamp(msg.messageTimestamp),
               isFromMe ? 'sent' : 'delivered',
