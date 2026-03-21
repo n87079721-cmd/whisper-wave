@@ -22,15 +22,21 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
   useEffect(() => {
     fetchContacts();
 
-    // Auto-refresh when history syncs
     let es: EventSource | null = null;
+    const interval = window.setInterval(fetchContacts, 5000);
+
     try {
       es = api.createEventSource();
       es.addEventListener('history_sync', () => fetchContacts());
+      es.addEventListener('message', () => fetchContacts());
+      es.addEventListener('contacts_sync', () => fetchContacts());
       es.onerror = () => {};
     } catch {}
 
-    return () => { es?.close(); };
+    return () => {
+      es?.close();
+      window.clearInterval(interval);
+    };
   }, []);
 
   const filtered = contacts.filter(c =>
