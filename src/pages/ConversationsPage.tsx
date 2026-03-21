@@ -202,7 +202,6 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
     
     setNewChatLoading(true);
     try {
-      // Send a blank-ish message to create the contact, or just find existing
       const jid = phone.replace(/^\+/, '') + '@s.whatsapp.net';
       
       // Check if contact already exists
@@ -213,11 +212,18 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
       if (existing) {
         setSelectedContact(existing);
       } else {
-        // Create by sending to this JID — backend will auto-create contact
-        const res = await api.sendText('', phone.replace(/^\+/, ''));
-        if (res.error) throw new Error(res.error);
-        toast.success('Chat started');
-        await refreshConversations();
+        // Create a temporary contact entry for display — message will create the real one
+        const tempContact: Contact = {
+          id: 'temp-' + Date.now(),
+          jid,
+          name: null,
+          phone: phone.startsWith('+') ? phone : '+' + phone,
+          avatar_url: null,
+          is_group: 0,
+          last_seen: null,
+          updated_at: new Date().toISOString(),
+        };
+        setSelectedContact(tempContact);
       }
       
       setShowNewChat(false);
