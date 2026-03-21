@@ -104,6 +104,7 @@ function getInstance(userId) {
       reconnectTimer: null,
       isConnecting: false,
       reconnectAttempt: 0,
+      connectionGeneration: 0,
       badMacTimestamps: [],
       repairInProgress: false,
       msgRetryCounterCache: new NodeCache({ stdTTL: 600, checkperiod: 120 }),
@@ -222,6 +223,9 @@ async function startConnection(userId, db, options = {}) {
 
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
 
+  const generation = inst.connectionGeneration + 1;
+  inst.connectionGeneration = generation;
+
   if (inst.sock) {
     try { inst.sock.ev.removeAllListeners('connection.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('messages.upsert'); } catch {}
@@ -270,6 +274,8 @@ async function startConnection(userId, db, options = {}) {
     inst.sock.ev.on('creds.update', saveCreds);
 
     inst.sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
+      if (generation !== inst.connectionGeneration) return;
+
       if (qr) {
         inst.qrCode = qr;
         inst.connectionStatus = 'qr_waiting';
@@ -277,6 +283,7 @@ async function startConnection(userId, db, options = {}) {
       }
 
       if (connection === 'open') {
+        if (inst.connectionStatus === 'connected') return;
         if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
         inst.qrCode = null;
         inst.pairingCode = null;
@@ -286,13 +293,16 @@ async function startConnection(userId, db, options = {}) {
         inst.badMacTimestamps = [];
         inst.repairInProgress = false;
         emit(userId, 'connected', null);
-        console.log(`✅ [${userId}] WhatsApp connected`);
+        console.log(`✅ [${userId}] WhatsApp connected (gen ${generation})`);
         syncContacts(userId, db);
       }
 
       if (connection === 'close') {
         const statusCode = extractDisconnectStatusCode(lastDisconnect?.error);
+        const disconnectMessage = lastDisconnect?.error?.message || lastDisconnect?.error?.toString?.() || 'unknown';
         const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.badSession;
+
+        console.warn(`⚠️ [${userId}] WhatsApp closed (gen ${generation}, code ${statusCode ?? 'unknown'}): ${disconnectMessage}`);
 
         if (isLoggedOut) {
           inst.connectionStatus = 'disconnected';
@@ -306,6 +316,7 @@ async function startConnection(userId, db, options = {}) {
           const delay = delays[Math.min(inst.reconnectAttempt, delays.length - 1)];
           inst.reconnectAttempt++;
           inst.reconnectTimer = setTimeout(() => {
+            if (generation !== inst.connectionGeneration) return;
             inst.reconnectTimer = null;
             startConnection(userId, db, { force: true });
           }, delay);
