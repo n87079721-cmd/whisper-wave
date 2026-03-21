@@ -53,7 +53,7 @@ const SettingsPage = () => {
       if (data.exists) setResponseSpeed(data.value || 'normal');
     }).catch(() => {});
     api.getConfig('ai_timezone').then(data => {
-      if (data.exists) setTimezone(data.value || 'Africa/Lagos');
+      if (data.exists) setTimezone(data.value || 'America/New_York');
     }).catch(() => {});
   }, []);
 
