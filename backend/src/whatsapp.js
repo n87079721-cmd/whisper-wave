@@ -592,10 +592,10 @@ async function syncContacts(userId, db) {
       try {
         const jid = c.id;
         if (!jid || jid === 'status@broadcast') continue;
-        const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+        const rawNumber = jid.replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '');
         const phone = '+' + rawNumber;
         const isGroup = jid.endsWith('@g.us');
-        getOrCreateContact(db, userId, jid, phone, getNameCandidate(c), isGroup);
+        getOrCreateContact(db, userId, jid, phone, getNameCandidate(c, inst.store?.contacts?.[rawNumber + '@s.whatsapp.net']), isGroup);
         syncedCount++;
       } catch {}
     }

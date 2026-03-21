@@ -39,9 +39,11 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
     };
   }, []);
 
+  const cleanPhone = (p: string) => p?.replace(/@.*$/, '') || '';
+
   const filtered = contacts.filter(c =>
     (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.phone || '').includes(search)
+    cleanPhone(c.phone || '').includes(search)
   );
 
   return (
