@@ -45,6 +45,11 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
     try {
       const data = await api.getConversations();
       setConversations(data);
+      const current = selectedContactRef.current;
+      if (current) {
+        const updatedCurrent = data.find(contact => contact.id === current.id);
+        if (updatedCurrent) setSelectedContact(updatedCurrent);
+      }
     } catch {}
   }, []);
 
@@ -73,29 +78,24 @@ const ConversationsPage = ({ initialContactId, onContactOpened }: ConversationsP
     trySelect();
   }, [initialContactId, onContactOpened]);
 
-  // Real-time: SSE for new messages + poll every 10s as fallback
+  // Real-time: SSE for new messages + fast polling fallback
   useEffect(() => {
-    let es: EventSource | null = null;
-    try {
-      es = api.createEventSource();
-      es.addEventListener('message', () => {
-        refreshConversations();
-        const current = selectedContactRef.current;
-        if (current) refreshMessages(current.id);
-      });
-      es.addEventListener('history_sync', () => {
-        refreshConversations();
-        const current = selectedContactRef.current;
-        if (current) refreshMessages(current.id);
-      });
-      es.onerror = () => {};
-    } catch {}
-
-    const interval = setInterval(() => {
+    const refreshActiveConversation = () => {
       refreshConversations();
       const current = selectedContactRef.current;
       if (current) refreshMessages(current.id);
-    }, 10000);
+    };
+
+    let es: EventSource | null = null;
+    try {
+      es = api.createEventSource();
+      es.addEventListener('message', refreshActiveConversation);
+      es.addEventListener('history_sync', refreshActiveConversation);
+      es.addEventListener('contacts_sync', refreshActiveConversation);
+      es.onerror = () => {};
+    } catch {}
+
+    const interval = setInterval(refreshActiveConversation, 3000);
 
     return () => {
       es?.close();

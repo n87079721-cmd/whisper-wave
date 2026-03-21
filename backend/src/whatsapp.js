@@ -3,6 +3,7 @@ import makeWASocket, {
   DisconnectReason,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
+  makeInMemoryStore,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
@@ -24,18 +25,59 @@ function getUserAuthDir(userId) {
   return path.join(DATA_DIR, 'auth', userId);
 }
 
-// Priority: saved contact name > notify (push name) > verifiedName > pushName
-function resolveName(obj) {
-  return obj?.name || obj?.notify || obj?.verifiedName || obj?.pushName || null;
+const NAME_PRIORITY = {
+  none: 0,
+  push: 1,
+  verified: 2,
+  notify: 3,
+  saved: 4,
+};
+
+function sanitizeName(value) {
+  const trimmed = value?.trim?.();
+  return trimmed ? trimmed : null;
 }
 
-// Check if a name is "better" than an existing one (i.e. not a phone number)
-function isBetterName(newName, existingName, phone) {
-  if (!newName) return false;
+function extractNameCandidate(source) {
+  const saved = sanitizeName(source?.name);
+  if (saved) return { name: saved, priority: NAME_PRIORITY.saved };
+
+  const notify = sanitizeName(source?.notify);
+  if (notify) return { name: notify, priority: NAME_PRIORITY.notify };
+
+  const verified = sanitizeName(source?.verifiedName);
+  if (verified) return { name: verified, priority: NAME_PRIORITY.verified };
+
+  const push = sanitizeName(source?.pushName);
+  if (push) return { name: push, priority: NAME_PRIORITY.push };
+
+  return { name: null, priority: NAME_PRIORITY.none };
+}
+
+function getNameCandidate(...sources) {
+  return sources.reduce((best, source) => {
+    const candidate = extractNameCandidate(source);
+    return candidate.priority > best.priority ? candidate : best;
+  }, { name: null, priority: NAME_PRIORITY.none });
+}
+
+function isPhoneLikeName(value, phone) {
+  if (!value) return true;
+  const normalizedValue = value.replace(/\s+/g, '');
+  const normalizedPhone = phone.replace(/\s+/g, '');
+  return (
+    normalizedValue === normalizedPhone ||
+    normalizedValue.replace(/^\+/, '') === normalizedPhone.replace(/^\+/, '') ||
+    /^\+?\d{7,}$/.test(normalizedValue)
+  );
+}
+
+function shouldReplaceName(candidate, existingName, phone) {
+  if (!candidate?.name) return false;
   if (!existingName) return true;
-  // If existing name is just a phone number, any real name is better
-  if (existingName === phone || existingName.startsWith('+') || /^\d{7,}$/.test(existingName)) return true;
-  return false;
+  if (candidate.name === existingName) return false;
+  if (isPhoneLikeName(existingName, phone)) return true;
+  return candidate.priority >= NAME_PRIORITY.saved;
 }
 
 function isSignalSessionError(err) {
@@ -53,6 +95,7 @@ function getInstance(userId) {
   if (!userInstances.has(userId)) {
     userInstances.set(userId, {
       sock: null,
+      store: null,
       qrCode: null,
       pairingCode: null,
       pendingPairingPhone: null,
@@ -214,6 +257,11 @@ async function startConnection(userId, db) {
       },
     });
 
+    if (!inst.store) {
+      inst.store = makeInMemoryStore({ logger });
+    }
+    inst.store.bind(inst.sock.ev);
+
     inst.sock.ev.on('creds.update', saveCreds);
 
     inst.sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
@@ -265,10 +313,14 @@ async function startConnection(userId, db) {
           const isFromMe = msg.key.fromMe;
           const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
           const phone = '+' + rawNumber;
-          const pushName = msg.pushName || null;
           const isGroup = jid.endsWith('@g.us');
+          const contactCandidate = getNameCandidate(
+            inst.store?.contacts?.[jid],
+            msg,
+            { pushName: msg.pushName || null }
+          );
 
-          const contactId = getOrCreateContact(db, userId, jid, phone, pushName, isGroup);
+          const contactId = getOrCreateContact(db, userId, jid, phone, contactCandidate, isGroup);
 
           const content = msg.message.conversation
             || msg.message.extendedTextMessage?.text
@@ -299,12 +351,13 @@ async function startConnection(userId, db) {
             msg.message.audioMessage?.seconds || null
           );
 
+          emit(userId, 'message', { contactId, msgId });
+
           if (type === 'notify' && !isFromMe) {
             db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'message_received', ?)`).run(userId, JSON.stringify({ contactId }));
-            emit(userId, 'message', { contactId, msgId });
 
             if (!isGroup) {
-              handleAutoReply(userId, db, contactId, jid, phone, pushName, msg.key).catch(err => {
+              handleAutoReply(userId, db, contactId, jid, phone, contactCandidate.name || msg.pushName || null, msg.key).catch(err => {
                 console.error('Auto-reply error:', err?.message || err);
               });
             }
@@ -322,6 +375,8 @@ async function startConnection(userId, db) {
     inst.sock.ev.on('messaging-history.set', ({ chats, contacts: syncedContacts, messages: historyMsgs }) => {
       console.log(`📜 [${userId}] History sync: ${chats?.length || 0} chats, ${syncedContacts?.length || 0} contacts, ${historyMsgs?.length || 0} messages`);
 
+      let contactChanges = 0;
+
       if (syncedContacts?.length) {
         for (const c of syncedContacts) {
           try {
@@ -330,7 +385,8 @@ async function startConnection(userId, db) {
             const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
             const phone = '+' + rawNumber;
             const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, userId, jid, phone, resolveName(c), isGroup);
+            getOrCreateContact(db, userId, jid, phone, getNameCandidate(c), isGroup);
+            contactChanges++;
           } catch {}
         }
       }
@@ -343,7 +399,8 @@ async function startConnection(userId, db) {
             const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
             const phone = '+' + rawNumber;
             const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, userId, jid, phone, resolveName(chat), isGroup);
+            getOrCreateContact(db, userId, jid, phone, getNameCandidate(chat), isGroup);
+            contactChanges++;
           } catch {}
         }
       }
@@ -359,8 +416,13 @@ async function startConnection(userId, db) {
             const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
             const phone = '+' + rawNumber;
             const isGroup = jid.endsWith('@g.us');
+            const contactCandidate = getNameCandidate(
+              inst.store?.contacts?.[jid],
+              msg,
+              { pushName: msg.pushName || null }
+            );
 
-            const contactId = getOrCreateContact(db, userId, jid, phone, resolveName(msg) || msg.pushName || null, isGroup);
+            const contactId = getOrCreateContact(db, userId, jid, phone, contactCandidate, isGroup);
 
             const content = msg.message.conversation
               || msg.message.extendedTextMessage?.text
@@ -390,23 +452,32 @@ async function startConnection(userId, db) {
         }
       }
 
+      if (contactChanges > 0) {
+        emit(userId, 'contacts_sync', { count: contactChanges });
+      }
       emit(userId, 'history_sync', { chats: chats?.length || 0, messages: historyMsgs?.length || 0 });
     });
 
     inst.sock.ev.on('contacts.update', (updates) => {
+      let changed = 0;
       for (const update of updates) {
-        const resolvedName = resolveName(update);
-        if (update.id && resolvedName) {
-          const rawNumber = update.id.replace('@s.whatsapp.net', '').replace('@g.us', '');
+        try {
+          const jid = update.id;
+          if (!jid || jid === 'status@broadcast') continue;
+          const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
           const phone = '+' + rawNumber;
-          const isGroup = update.id.endsWith('@g.us');
-          // Always update with the resolved name (saved contact name takes priority)
-          getOrCreateContact(db, userId, update.id, phone, resolvedName, isGroup);
-        }
+          const isGroup = jid.endsWith('@g.us');
+          const candidate = getNameCandidate(inst.store?.contacts?.[jid], update);
+          if (!candidate.name) continue;
+          getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
+          changed++;
+        } catch {}
       }
+      if (changed > 0) emit(userId, 'contacts_sync', { count: changed });
     });
 
     inst.sock.ev.on('contacts.upsert', (contacts) => {
+      let changed = 0;
       for (const c of contacts) {
         try {
           const jid = c.id;
@@ -414,9 +485,11 @@ async function startConnection(userId, db) {
           const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
           const phone = '+' + rawNumber;
           const isGroup = jid.endsWith('@g.us');
-          getOrCreateContact(db, userId, jid, phone, resolveName(c), isGroup);
+          getOrCreateContact(db, userId, jid, phone, getNameCandidate(inst.store?.contacts?.[jid], c), isGroup);
+          changed++;
         } catch {}
       }
+      if (changed > 0) emit(userId, 'contacts_sync', { count: changed });
     });
   } catch (err) {
     if (isSignalSessionError(err)) {
@@ -450,13 +523,14 @@ function toIsoTimestamp(value) {
   return new Date().toISOString();
 }
 
-function getOrCreateContact(db, userId, jid, phone, pushName, isGroup = false) {
+function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false) {
   const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+  const resolvedName = candidate?.name || phone;
+
   if (existing) {
-    // Always update to a better name if available
-    if (isBetterName(pushName, existing.name, phone)) {
+    if (shouldReplaceName(candidate, existing.name, phone)) {
       db.prepare("UPDATE contacts SET name = ?, phone = ?, is_group = ?, updated_at = datetime('now') WHERE id = ?")
-        .run(pushName, phone, isGroup ? 1 : 0, existing.id);
+        .run(resolvedName, phone, isGroup ? 1 : 0, existing.id);
     } else {
       db.prepare("UPDATE contacts SET phone = ?, is_group = ?, updated_at = datetime('now') WHERE id = ?")
         .run(phone, isGroup ? 1 : 0, existing.id);
@@ -467,31 +541,34 @@ function getOrCreateContact(db, userId, jid, phone, pushName, isGroup = false) {
   const id = uuid();
   db.prepare(`
     INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, userId, jid, pushName || phone, phone, isGroup ? 1 : 0);
+  `).run(id, userId, jid, resolvedName, phone, isGroup ? 1 : 0);
   return id;
 }
 
 async function syncContacts(userId, db) {
   const inst = getInstance(userId);
-  if (!inst.sock) return;
+  if (!inst.store?.contacts) return;
   console.log(`📇 [${userId}] Contact sync initiated`);
-  
+
   try {
-    // Fetch all contacts from the WhatsApp store
-    const store = inst.sock?.store;
-    if (store?.contacts) {
-      const contacts = Object.values(store.contacts);
-      console.log(`📇 [${userId}] Found ${contacts.length} contacts in store`);
-      for (const c of contacts) {
-        try {
-          const jid = c.id;
-          if (!jid || jid === 'status@broadcast') continue;
-          const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
-          const phone = '+' + rawNumber;
-          const isGroup = jid.endsWith('@g.us');
-          getOrCreateContact(db, userId, jid, phone, resolveName(c), isGroup);
-        } catch {}
-      }
+    const contacts = Object.values(inst.store.contacts);
+    console.log(`📇 [${userId}] Found ${contacts.length} contacts in store`);
+    let syncedCount = 0;
+
+    for (const c of contacts) {
+      try {
+        const jid = c.id;
+        if (!jid || jid === 'status@broadcast') continue;
+        const rawNumber = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+        const phone = '+' + rawNumber;
+        const isGroup = jid.endsWith('@g.us');
+        getOrCreateContact(db, userId, jid, phone, getNameCandidate(c), isGroup);
+        syncedCount++;
+      } catch {}
+    }
+
+    if (syncedCount > 0) {
+      emit(userId, 'contacts_sync', { count: syncedCount });
     }
   } catch (err) {
     console.error(`Contact sync error [${userId}]:`, err?.message || err);

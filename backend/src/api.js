@@ -71,13 +71,19 @@ export function createApiRouter(db) {
   router.get('/events', (req, res) => {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
     });
+    res.flushHeaders?.();
 
     const send = (event, data) => {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
+
+    const heartbeat = setInterval(() => {
+      send('ping', { ts: Date.now() });
+    }, 15000);
 
     const wa = getWA(req);
     const state = wa.getState();
@@ -98,10 +104,18 @@ export function createApiRouter(db) {
         send('status', data);
       } else if (event === 'history_sync') {
         send('history_sync', data);
+      } else if (event === 'contacts_sync') {
+        send('contacts_sync', data);
       }
     });
 
-    req.on('close', unsub);
+    const cleanup = () => {
+      clearInterval(heartbeat);
+      unsub();
+    };
+
+    req.on('close', cleanup);
+    req.on('end', cleanup);
   });
 
   // ── ElevenLabs ───────────────────────────────────────────
