@@ -1,22 +1,29 @@
 
 
-## Fix: Remove `makeInMemoryStore` import
+## Plan: Fix Connect Button Not Responding
 
-**Problem**: Baileys v6.7.16 no longer exports `makeInMemoryStore`. This crashes the backend on startup.
+**Problem**: Tapping "Connect" calls `api.reconnect()` silently — no loading indicator, no toast feedback, and errors are swallowed. The user sees no visual response.
 
-**Solution**: Remove the import and all usage of `makeInMemoryStore`. The in-memory store is not essential — your app already uses SQLite for persistence.
+**Solution**: Add loading state, user feedback (toasts), and trigger a status refresh after connecting.
 
-### Changes to `backend/src/whatsapp.js`
+### Changes to `src/pages/DashboardPage.tsx`
 
-1. **Remove `makeInMemoryStore` from the import** on line 6.
+1. **Add `connecting` state** — `useState(false)` to track when a connect attempt is in progress.
 
-2. **Remove store creation** around line 269-271 (`inst.store = makeInMemoryStore(...)`) and the `inst.store.bind(...)` call.
+2. **Update `handleConnect`**:
+   - Set `connecting = true` before the API call
+   - Show a toast on success ("Connecting to WhatsApp...")
+   - Show a toast on error with the error message
+   - Call `refresh()` from `useWhatsAppStatus` after the call
+   - Set `connecting = false` in finally block
 
-3. **Remove any other `inst.store` references** throughout the file (likely store reads for message history, etc.) — replace with direct DB queries where needed.
+3. **Update the Connect button**:
+   - Disable while `connecting` is true
+   - Show "Connecting..." text with a spinner icon while connecting
+   - Also disable during `isReconnecting` (existing behavior)
 
-After the fix, redeploy and restart:
-```bash
-cd /root/wass && git pull
-sudo supervisorctl restart wa-controller
-```
+4. **Destructure `refresh`** from `useWhatsAppStatus()` (already returned by the hook).
+
+### Expected Result
+User taps Connect → button shows "Connecting..." with spinner → toast confirms → QR code or connection appears.
 
