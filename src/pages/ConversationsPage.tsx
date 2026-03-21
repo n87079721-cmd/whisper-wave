@@ -68,23 +68,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
   // Auto-select contact when navigating from ContactsPage
   useEffect(() => {
-    if (!initialContactId) return;
-    const trySelect = async () => {
-      const data = await api.getConversations();
-      setConversations(data);
-      const match = data.find((c: Contact) => c.id === initialContactId);
-      if (match) {
-        setSelectedContact(match);
-      } else {
-        // Contact exists but has no conversations yet - create a minimal entry
-        const contacts = await api.getContacts();
-        const contactMatch = contacts.find((c: Contact) => c.id === initialContactId);
-        if (contactMatch) setSelectedContact(contactMatch);
-      }
-      onContactOpened?.();
-    };
-    trySelect();
-  }, [initialContactId, onContactOpened]);
+    if (!initialContact) return;
+    // Directly set the contact — no need to re-fetch and search
+    setSelectedContact(initialContact);
+    onContactOpened?.();
+  }, [initialContact, onContactOpened]);
 
   // Real-time: SSE for new messages + fast polling fallback
   useEffect(() => {
