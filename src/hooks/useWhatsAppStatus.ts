@@ -3,17 +3,44 @@ import { api, isBackendConfigured } from '@/lib/api';
 
 type ConnectionStatus = 'disconnected' | 'qr_waiting' | 'connected' | 'reconnecting';
 
+export interface SyncState {
+  phase: 'idle' | 'waiting_history' | 'importing' | 'partial' | 'ready';
+  connectedAt: string | null;
+  lastHistorySyncAt: string | null;
+  storeContacts: number;
+  historyChats: number;
+  historyContacts: number;
+  historyMessages: number;
+  unresolvedLids: number;
+  totalDbContacts: number;
+  totalDbMessages: number;
+}
+
+const defaultSyncState: SyncState = {
+  phase: 'idle',
+  connectedAt: null,
+  lastHistorySyncAt: null,
+  storeContacts: 0,
+  historyChats: 0,
+  historyContacts: 0,
+  historyMessages: 0,
+  unresolvedLids: 0,
+  totalDbContacts: 0,
+  totalDbMessages: 0,
+};
+
 export function useWhatsAppStatus() {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [qr, setQr] = useState<string | null>(null);
   const [stats, setStats] = useState({ messagesSent: 0, voiceSent: 0, messagesReceived: 0, activeContacts: 0 });
+  const [syncState, setSyncState] = useState<SyncState>(defaultSyncState);
 
   const refresh = useCallback(async () => {
     try {
       const data = await api.getStatus();
       setStatus(data.status);
       if (data.stats) setStats(data.stats);
-      // If QR waiting, also fetch the QR data URL
+      if (data.syncState) setSyncState(data.syncState);
       if (data.status === 'qr_waiting') {
         try {
           const qrData = await api.getQR();
@@ -42,7 +69,6 @@ export function useWhatsAppStatus() {
 
     refresh();
 
-    // SSE for real-time updates
     let es: EventSource | null = null;
     try {
       es = api.createEventSource();
@@ -57,10 +83,16 @@ export function useWhatsAppStatus() {
         setStatus('qr_waiting');
       });
       es.addEventListener('message', () => {
-        refresh(); // Refresh stats on new message
+        refresh();
       });
       es.addEventListener('history_sync', () => {
-        refresh(); // Refresh stats when history syncs
+        refresh();
+      });
+      es.addEventListener('sync_state', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          setSyncState(data);
+        } catch {}
       });
       es.onerror = () => {
         if (!isBackendConfigured()) {
@@ -69,7 +101,6 @@ export function useWhatsAppStatus() {
           return;
         }
         setStatus((prev) => (prev === 'qr_waiting' ? prev : 'reconnecting'));
-        // Reconnect after delay
         setTimeout(refresh, 5000);
       };
     } catch {}
@@ -91,5 +122,5 @@ export function useWhatsAppStatus() {
     return () => clearInterval(interval);
   }, [status]);
 
-  return { status, qr, stats, refresh };
+  return { status, qr, stats, syncState, refresh };
 }
