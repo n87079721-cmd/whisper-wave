@@ -1392,6 +1392,11 @@ async function clearSession(userId, db) {
     try { inst.sock.ev.removeAllListeners('messages.upsert'); } catch {}
     try { inst.sock.ev.removeAllListeners('messages.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('connection.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('messages.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('messages.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('call'); } catch {}
+    try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.upsert'); } catch {}
     try { inst.sock.ev.removeAllListeners('messaging-history.set'); } catch {}
     try { inst.sock.ev.removeAllListeners('creds.update'); } catch {}
@@ -1405,6 +1410,7 @@ async function clearSession(userId, db) {
     db.prepare('DELETE FROM messages WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM contacts WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM stats WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM call_logs WHERE user_id = ?').run(userId);
   } catch (err) {
     console.error('Failed to clear DB tables:', err?.message || err);
   }
