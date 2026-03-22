@@ -474,6 +474,17 @@ Rules:
     }
   });
 
+  router.post('/trigger-sync', async (req, res) => {
+    try {
+      const wa = getWA(req);
+      await wa.triggerSync();
+      const state = wa.getState();
+      res.json({ success: true, syncState: state.syncState || {} });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.post('/clear-session', async (req, res) => {
     try {
       const wa = getWA(req);
