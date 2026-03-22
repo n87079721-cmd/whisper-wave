@@ -854,13 +854,72 @@ function formatUnresolvedContactName(jid, candidateName) {
   return suffix ? `WhatsApp contact • ${suffix}` : 'WhatsApp contact';
 }
 
+function mergeContactRecords(db, userId, sourceContactId, targetContactId, targetJid) {
+  if (!sourceContactId || !targetContactId || sourceContactId === targetContactId) return;
+
+  db.prepare(
+    'UPDATE messages SET contact_id = ?, jid = ? WHERE contact_id = ? AND user_id = ?'
+  ).run(targetContactId, targetJid, sourceContactId, userId);
+
+  db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(sourceContactId, userId);
+}
+
 function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false) {
   const isUnresolvedLid = jid.endsWith('@lid');
   const safePhone = !isUnresolvedLid && phone && phone !== '+' ? phone : null;
-  const existing = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+  const existing = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+  const phoneMatch = !isUnresolvedLid && safePhone
+    ? db.prepare(`
+        SELECT id, jid, name, phone
+        FROM contacts
+        WHERE user_id = ? AND phone = ? AND is_group = ?
+        ORDER BY CASE
+          WHEN jid = ? THEN 0
+          WHEN jid LIKE '%@lid' THEN 1
+          ELSE 2
+        END,
+        updated_at DESC
+        LIMIT 1
+      `).get(userId, safePhone, isGroup ? 1 : 0, jid)
+    : null;
   const resolvedName = isUnresolvedLid
     ? formatUnresolvedContactName(jid, candidate?.name || null)
     : (candidate?.name || phone);
+
+  let target = existing;
+
+  if (existing && phoneMatch && phoneMatch.id !== existing.id) {
+    const existingComparisonPhone = safePhone || existing.phone || '';
+    const phoneMatchCandidate = phoneMatch.name
+      ? { name: phoneMatch.name, priority: NAME_PRIORITY.saved }
+      : null;
+
+    if (phoneMatchCandidate && shouldReplaceName(phoneMatchCandidate, existing.name, existingComparisonPhone)) {
+      db.prepare("UPDATE contacts SET name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(phoneMatch.name, safePhone, isGroup ? 1 : 0, existing.id);
+    }
+
+    mergeContactRecords(db, userId, phoneMatch.id, existing.id, jid);
+  } else if (!existing && phoneMatch) {
+    target = phoneMatch;
+  }
+
+  if (target) {
+    const comparisonPhone = safePhone || target.phone || '';
+    const shouldUpdateName = shouldReplaceName(candidate, target.name, comparisonPhone) || (isUnresolvedLid && !target.name);
+    const nextName = shouldUpdateName ? resolvedName : target.name;
+    const nextJid = isUnresolvedLid ? target.jid : jid;
+
+    db.prepare("UPDATE contacts SET jid = ?, name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(nextJid, nextName, safePhone, isGroup ? 1 : 0, target.id);
+
+    if (!isUnresolvedLid && target.jid !== nextJid) {
+      db.prepare('UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?')
+        .run(nextJid, target.id, userId);
+    }
+
+    return target.id;
+  }
 
   if (existing) {
     const comparisonPhone = safePhone || existing.phone || '';
