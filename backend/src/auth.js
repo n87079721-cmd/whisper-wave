@@ -5,6 +5,8 @@ const JWT_SECRET = process.env.AUTH_TOKEN || 'change-me-to-a-secure-random-strin
 const ITERATIONS = 100000;
 const KEYLEN = 64;
 const DIGEST = 'sha512';
+const LEGACY_USERNAME = '__legacy__';
+const LEGACY_PENDING_HASH = '__legacy_pending__';
 
 // Simple PBKDF2-based password hashing (no extra dependencies)
 export function hashPassword(password) {
@@ -70,10 +72,26 @@ export function authMiddleware(db) {
 export function registerUser(db, username, password, displayName) {
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   if (existing) throw new Error('Username already taken');
-  const id = uuid();
+
+  const legacyUser = db.prepare(
+    'SELECT id FROM users WHERE username = ? AND password_hash = ? LIMIT 1'
+  ).get(LEGACY_USERNAME, LEGACY_PENDING_HASH);
+
+  const nextDisplayName = displayName || username;
   const hash = hashPassword(password);
-  db.prepare('INSERT INTO users (id, username, password_hash, display_name) VALUES (?, ?, ?, ?)').run(id, username, hash, displayName || username);
-  return { id, username, displayName: displayName || username };
+
+  if (legacyUser) {
+    const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+    if (userCount === 1) {
+      db.prepare('UPDATE users SET username = ?, password_hash = ?, display_name = ? WHERE id = ?')
+        .run(username, hash, nextDisplayName, legacyUser.id);
+      return { id: legacyUser.id, username, displayName: nextDisplayName };
+    }
+  }
+
+  const id = uuid();
+  db.prepare('INSERT INTO users (id, username, password_hash, display_name) VALUES (?, ?, ?, ?)').run(id, username, hash, nextDisplayName);
+  return { id, username, displayName: nextDisplayName };
 }
 
 export function loginUser(db, username, password) {
