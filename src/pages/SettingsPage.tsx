@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Clock, Dice5, Gauge, RefreshCw, Globe } from 'lucide-react';
+import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Clock, Dice5, Gauge, RefreshCw, Globe, MessageSquare } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { Slider } from '@/components/ui/slider';
