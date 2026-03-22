@@ -505,6 +505,29 @@ RULES:
     }
   });
 
+  // ── Statuses (Stories) ──────────────────────────────────
+  router.get('/statuses', (req, res) => {
+    try {
+      const statuses = getStatuses(db, req.userId);
+      res.json(statuses);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/status-media/:filename', (req, res) => {
+    try {
+      const filePath = path.join(__dirname, '..', 'data', 'status-media', req.params.filename);
+      if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Not found' });
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeMap = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.mp4': 'video/mp4', '.webp': 'image/webp' };
+      res.set('Content-Type', mimeMap[ext] || 'application/octet-stream');
+      res.sendFile(filePath);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.post('/clear-session', async (req, res) => {
     try {
       const wa = getWA(req);
