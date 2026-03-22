@@ -438,7 +438,55 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
                   <p className="text-xs text-muted-foreground truncate">{getContactDisplayMeta(selectedContact)}</p>
                 </div>
+                <button
+                  onClick={() => { setChatSearchOpen(o => !o); setChatSearch(''); setTimeout(() => chatSearchInputRef.current?.focus(), 100); }}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
+                  title="Search in chat"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
               </div>
+
+              {/* In-chat search bar */}
+              {chatSearchOpen && (
+                <div className="px-3 py-2 border-b border-border bg-background flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <input
+                      ref={chatSearchInputRef}
+                      value={chatSearch}
+                      onChange={(e) => setChatSearch(e.target.value)}
+                      placeholder="Search messages..."
+                      className="w-full pl-8 pr-3 py-1.5 rounded-md bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                    />
+                  </div>
+                  {chatSearchMatches.length > 0 && (
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {chatSearchIndex + 1}/{chatSearchMatches.length}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setChatSearchIndex(i => (i > 0 ? i - 1 : chatSearchMatches.length - 1))}
+                    disabled={chatSearchMatches.length === 0}
+                    className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setChatSearchIndex(i => (i < chatSearchMatches.length - 1 ? i + 1 : 0))}
+                    disabled={chatSearchMatches.length === 0}
+                    className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => { setChatSearchOpen(false); setChatSearch(''); }}
+                    className="p-1 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
 
               {/* Messages area */}
               <div className="relative flex-1 min-h-0">
