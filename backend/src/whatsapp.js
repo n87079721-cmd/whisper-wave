@@ -909,6 +909,10 @@ async function startConnection(userId, db, options = {}) {
       }
       emit(userId, 'history_sync', { chats: chats?.length || 0, messages: historyMsgs?.length || 0 });
 
+      // Update sync state after processing
+      const phase = (inst.syncState.historyMessages > 10 && inst.syncState.historyContacts > 0) ? 'ready' : 'partial';
+      updateSyncState(userId, db, { phase });
+
       // Schedule a deferred LID sweep to catch any late-arriving mappings
       schedulelidSweep(userId, db, inst);
     });
