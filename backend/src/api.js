@@ -1,6 +1,6 @@
 import express from 'express';
 import { v4 as uuid } from 'uuid';
-import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone } from './whatsapp.js';
+import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
 import QRCode from 'qrcode';
