@@ -1063,7 +1063,7 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false) 
   return id;
 }
 
-async function syncContacts(userId, db) {
+function syncContacts(userId, db) {
   const inst = getInstance(userId);
   if (!inst.store?.contacts) return;
   console.log(`📇 [${userId}] Contact sync initiated`);
@@ -1071,6 +1071,7 @@ async function syncContacts(userId, db) {
   try {
     const contacts = Object.values(inst.store.contacts);
     console.log(`📇 [${userId}] Found ${contacts.length} contacts in store`);
+    updateSyncState(userId, db, { storeContacts: contacts.length });
 
     // First pass: build all LID mappings
     for (const c of contacts) {
