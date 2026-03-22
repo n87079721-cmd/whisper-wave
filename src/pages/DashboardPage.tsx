@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2, AlertTriangle, Settings, QrCode, Phone, ArrowRight, RefreshCw } from 'lucide-react';
+import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2, AlertTriangle, Settings, QrCode, Phone, ArrowRight } from 'lucide-react';
 import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
 import StatusBadge from '@/components/StatusBadge';
 import { api, isBackendConfigured } from '@/lib/api';
@@ -204,11 +204,6 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
         <button onClick={onNavigateSettings} className="px-4 py-2.5 rounded-lg bg-secondary text-foreground text-sm font-medium hover:bg-secondary/80 flex items-center gap-2">
           <Settings className="w-4 h-4" /> Settings
         </button>
-        {(syncState.phase === 'partial' || syncState.unresolvedLids > 0) && (
-          <button onClick={onNavigateSettings} className="px-4 py-2.5 rounded-lg bg-warning/15 text-warning text-sm font-medium hover:bg-warning/25 flex items-center gap-2">
-            <RefreshCw className="w-4 h-4" /> Recovery
-          </button>
-        )}
       </div>
     </div>
   );
