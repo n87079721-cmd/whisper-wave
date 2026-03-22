@@ -174,7 +174,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         className={`${sizeClasses} rounded-full flex items-center justify-center font-medium text-white flex-shrink-0`}
         style={{ backgroundColor: `hsl(${color})` }}
       >
-        {getInitials(contact)}
+        {getContactInitials(contact)}
       </div>
     );
   };
@@ -292,7 +292,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     if (!contactSearch.trim()) return allContacts.slice(0, 30);
     const q = contactSearch.toLowerCase();
     return allContacts.filter(c =>
-      (c.name || '').toLowerCase().includes(q) || cleanPhone(c.phone || '').includes(q)
+      getContactDisplayName(c).toLowerCase().includes(q) || cleanContactPhone(c.phone || '').includes(q)
     ).slice(0, 30);
   }, [allContacts, contactSearch]);
 
@@ -368,7 +368,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     <div className="min-w-0 flex-1">
                       <div className="flex justify-between items-baseline">
                         <p className={`text-[15px] truncate ${isActive ? 'text-foreground font-semibold' : 'text-foreground font-medium'}`}>
-                          {getDisplayName(contact)}
+                          {getContactDisplayName(contact)}
                         </p>
                         <span className={`text-[11px] flex-shrink-0 ml-2 ${
                           isActive ? 'text-foreground/70' : 'text-muted-foreground'
@@ -377,7 +377,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                         </span>
                       </div>
                       <p className="text-[13px] text-muted-foreground truncate mt-0.5">
-                        {contact.last_type === 'voice' ? '🎤 Voice note' : contact.last_message || getDisplayMeta(contact)}
+                        {contact.last_type === 'voice' ? '🎤 Voice note' : contact.last_message || getContactDisplayMeta(contact)}
                       </p>
                     </div>
                   </button>
@@ -401,8 +401,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 </button>
                 <Avatar contact={selectedContact} size="lg" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[15px] font-semibold text-foreground truncate">{getDisplayName(selectedContact)}</p>
-                  <p className="text-xs text-muted-foreground truncate">{getDisplayMeta(selectedContact)}</p>
+                  <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
+                  <p className="text-xs text-muted-foreground truncate">{getContactDisplayMeta(selectedContact)}</p>
                 </div>
               </div>
 
@@ -607,8 +607,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   >
                     <Avatar contact={contact} size="sm" />
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{getDisplayName(contact)}</p>
-                      <p className="text-xs text-muted-foreground">{getDisplayMeta(contact)}</p>
+                      <p className="text-sm font-medium text-foreground truncate">{getContactDisplayName(contact)}</p>
+                      <p className="text-xs text-muted-foreground">{getContactDisplayMeta(contact)}</p>
                     </div>
                   </button>
                 ))}
