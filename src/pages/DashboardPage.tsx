@@ -3,14 +3,15 @@ import { motion } from 'framer-motion';
 import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2, AlertTriangle, Settings, QrCode, Phone } from 'lucide-react';
 import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
 import StatusBadge from '@/components/StatusBadge';
+import SyncBanner from '@/components/SyncBanner';
 import { api, isBackendConfigured } from '@/lib/api';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 
 const DashboardPage = () => {
   const backendReady = isBackendConfigured();
-  const { status, qr, stats, refresh } = useWhatsAppStatus();
+  const { status, qr, stats, syncState, refresh } = useWhatsAppStatus();
   const [connecting, setConnecting] = useState(false);
   const [pairingMode, setPairingMode] = useState<'qr' | 'phone'>('qr');
   const [phoneNumber, setPhoneNumber] = useState('');
