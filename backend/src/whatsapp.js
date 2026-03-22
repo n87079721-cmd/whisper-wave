@@ -976,6 +976,42 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
+    // ── Call events (missed calls) ──────────────────────────
+    inst.sock.ev.on('call', (calls) => {
+      for (const call of calls) {
+        try {
+          // Only capture incoming calls (offer status)
+          if (call.status !== 'offer' && call.status !== 'timeout' && call.status !== 'reject') continue;
+          if (call.isGroup && call.status !== 'offer') continue;
+
+          const callerJid = call.from;
+          if (!callerJid || callerJid === 'status@broadcast') continue;
+
+          const resolved = resolveLidPhone(inst, callerJid);
+          const phone = '+' + resolved.phone;
+          const callerName = inst.store?.contacts?.[callerJid]?.name
+            || inst.store?.contacts?.[resolved.jid]?.name
+            || inst.store?.contacts?.[callerJid]?.notify
+            || null;
+
+          const callId = call.id || uuid();
+          const isVideo = !!call.isVideo;
+          const isGroup = !!call.isGroup;
+          const callStatus = call.status === 'offer' ? 'missed' : call.status;
+
+          db.prepare(`
+            INSERT OR REPLACE INTO call_logs (id, user_id, caller_jid, caller_phone, caller_name, is_video, is_group, status, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(callId, userId, resolved.jid, phone, callerName, isVideo ? 1 : 0, isGroup ? 1 : 0, callStatus, new Date().toISOString());
+
+          emit(userId, 'call', { callId, callerJid: resolved.jid, callerName, callerPhone: phone, isVideo, status: callStatus });
+          console.log(`📞 [${userId}] ${callStatus} ${isVideo ? 'video' : 'voice'} call from ${callerName || phone}`);
+        } catch (err) {
+          console.error('Call event error:', err?.message || err);
+        }
+      }
+    });
+
     inst.sock.ev.on('contacts.upsert', (contacts) => {
       let changed = 0;
       for (const c of contacts) {
