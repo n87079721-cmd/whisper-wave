@@ -263,6 +263,11 @@ export const api = {
     const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
     return toUrl(`/api/status-media/${encodeURIComponent(filename)}`) + suffix;
   },
+
+  // Call Logs
+  getCallLogs() {
+    return requestJson<CallLog[]>('/api/call-logs');
+  },
 };
 
 // Types
