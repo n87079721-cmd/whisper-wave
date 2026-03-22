@@ -252,6 +252,15 @@ export const api = {
   triggerSync() {
     return requestJson<{ success: boolean; syncState?: any }>('/api/trigger-sync', { method: 'POST' });
   },
+
+  // Statuses (Stories)
+  getStatuses() {
+    return requestJson<StatusGroup[]>('/api/statuses');
+  },
+
+  getStatusMediaUrl(filename: string) {
+    return toUrl(`/api/status-media/${filename}`);
+  },
 };
 
 // Types
@@ -295,4 +304,19 @@ export interface Stats {
   voiceSent: number;
   messagesReceived: number;
   activeContacts: number;
+}
+
+export interface StatusItem {
+  id: string;
+  content: string;
+  mediaType: 'text' | 'image' | 'video';
+  mediaPath: string | null;
+  timestamp: string;
+}
+
+export interface StatusGroup {
+  senderJid: string;
+  senderPhone: string;
+  senderName: string | null;
+  statuses: StatusItem[];
 }

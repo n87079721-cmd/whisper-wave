@@ -1,9 +1,14 @@
 import express from 'express';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
-import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone } from './whatsapp.js';
+import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
 import QRCode from 'qrcode';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createApiRouter(db) {
   const router = express.Router();
@@ -178,6 +183,8 @@ export function createApiRouter(db) {
         send('contacts_sync', data);
       } else if (event === 'sync_state') {
         send('sync_state', data);
+      } else if (event === 'status_update') {
+        send('status_update', data);
       }
     });
 
@@ -500,6 +507,29 @@ RULES:
       await wa.triggerSync();
       const state = wa.getState();
       res.json({ success: true, syncState: state.syncState || {} });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Statuses (Stories) ──────────────────────────────────
+  router.get('/statuses', (req, res) => {
+    try {
+      const statuses = getStatuses(db, req.userId);
+      res.json(statuses);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/status-media/:filename', (req, res) => {
+    try {
+      const filePath = path.join(__dirname, '..', 'data', 'status-media', req.params.filename);
+      if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Not found' });
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeMap = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.mp4': 'video/mp4', '.webp': 'image/webp' };
+      res.set('Content-Type', mimeMap[ext] || 'application/octet-stream');
+      res.sendFile(filePath);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

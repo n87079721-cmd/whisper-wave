@@ -3,6 +3,7 @@ import makeWASocket, {
   DisconnectReason,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
@@ -654,7 +655,15 @@ async function startConnection(userId, db, options = {}) {
         try {
           if (!msg.message) continue;
           const jid = msg.key.remoteJid;
-          if (!jid || jid === 'status@broadcast') continue;
+          if (!jid) continue;
+
+          // Capture status updates (stories)
+          if (jid === 'status@broadcast') {
+            captureStatusUpdate(userId, db, inst, msg).catch(err => {
+              console.error('Status capture error:', err?.message || err);
+            });
+            continue;
+          }
 
           // Extract LID→PN mappings from alt fields
           extractAltMappings(inst, msg);
@@ -1344,4 +1353,94 @@ async function clearSession(userId, db) {
   emit(userId, 'status', { status: 'disconnected' });
   emit(userId, 'sync_state', inst.syncState);
   console.log(`🗑️ [${userId}] Session fully cleared.`);
+}
+
+// ── Status (Stories) capture ──────────────────────────────
+const STATUS_MEDIA_DIR = path.join(DATA_DIR, 'status-media');
+
+async function captureStatusUpdate(userId, db, inst, msg) {
+  const senderJid = msg.key.participant || msg.key.remoteJid;
+  if (!senderJid || senderJid === 'status@broadcast') return;
+
+  const resolved = resolveLidPhone(inst, senderJid);
+  const phone = '+' + resolved.phone;
+  const senderName = msg.pushName || inst.store?.contacts?.[senderJid]?.name || inst.store?.contacts?.[resolved.jid]?.name || null;
+
+  const isImage = !!msg.message.imageMessage;
+  const isVideo = !!msg.message.videoMessage;
+  const isText = !isImage && !isVideo;
+
+  let mediaType = 'text';
+  let content = '';
+  let mediaPath = null;
+
+  if (isImage) {
+    mediaType = 'image';
+    content = msg.message.imageMessage?.caption || '';
+  } else if (isVideo) {
+    mediaType = 'video';
+    content = msg.message.videoMessage?.caption || '';
+  } else {
+    content = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+  }
+
+  // Download media if applicable
+  if (!isText && inst.sock) {
+    try {
+      if (!fs.existsSync(STATUS_MEDIA_DIR)) fs.mkdirSync(STATUS_MEDIA_DIR, { recursive: true });
+      const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: inst.sock.updateMediaMessage });
+      const ext = isImage ? 'jpg' : 'mp4';
+      const filename = `${uuid()}.${ext}`;
+      const filePath = path.join(STATUS_MEDIA_DIR, filename);
+      fs.writeFileSync(filePath, buffer);
+      mediaPath = filename;
+    } catch (err) {
+      console.error('Status media download failed:', err?.message || err);
+    }
+  }
+
+  const ts = toIsoTimestamp(msg.messageTimestamp);
+  const expiresAt = new Date(new Date(ts).getTime() + 24 * 60 * 60 * 1000).toISOString();
+  const statusId = msg.key.id || uuid();
+
+  db.prepare(`
+    INSERT OR IGNORE INTO statuses (id, user_id, sender_jid, sender_phone, sender_name, content, media_type, media_path, timestamp, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(statusId, userId, resolved.jid, phone, senderName, content, mediaType, mediaPath, ts, expiresAt);
+
+  emit(userId, 'status_update', { senderJid: resolved.jid, senderName, mediaType });
+}
+
+export function getStatuses(db, userId) {
+  // Cleanup expired
+  db.prepare("DELETE FROM statuses WHERE user_id = ? AND expires_at < datetime('now')").run(userId);
+
+  const rows = db.prepare(`
+    SELECT * FROM statuses WHERE user_id = ? ORDER BY timestamp ASC
+  `).all(userId);
+
+  // Group by sender
+  const grouped = {};
+  for (const row of rows) {
+    const key = row.sender_jid;
+    if (!grouped[key]) {
+      grouped[key] = {
+        senderJid: row.sender_jid,
+        senderPhone: row.sender_phone,
+        senderName: row.sender_name,
+        statuses: [],
+      };
+    }
+    // Update name if newer status has a name
+    if (row.sender_name) grouped[key].senderName = row.sender_name;
+    grouped[key].statuses.push({
+      id: row.id,
+      content: row.content,
+      mediaType: row.media_type,
+      mediaPath: row.media_path,
+      timestamp: row.timestamp,
+    });
+  }
+
+  return Object.values(grouped);
 }
