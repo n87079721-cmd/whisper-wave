@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown } from 'lucide-react';
+import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
@@ -38,6 +38,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const selectedContactRef = useRef<Contact | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [chatSearch, setChatSearch] = useState('');
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [chatSearchIndex, setChatSearchIndex] = useState(0);
+  const chatSearchInputRef = useRef<HTMLInputElement | null>(null);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -296,18 +300,50 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
   const showChatOnMobile = !!selectedContact;
 
+  // In-chat search matches
+  const chatSearchMatches = useMemo(() => {
+    if (!chatSearch.trim()) return [] as number[];
+    const q = chatSearch.toLowerCase();
+    return messages
+      .map((msg, idx) => ({ msg, idx }))
+      .filter(({ msg }) => msg.type !== 'voice' && msg.content?.toLowerCase().includes(q))
+      .map(({ idx }) => idx);
+  }, [messages, chatSearch]);
+
+  useEffect(() => {
+    if (chatSearchMatches.length > 0) setChatSearchIndex(0);
+  }, [chatSearchMatches.length, chatSearch]);
+
+  const scrollToChatSearchMatch = useCallback((matchIdx: number) => {
+    const viewport = messagesViewportRef.current;
+    if (!viewport) return;
+    const msgIdx = chatSearchMatches[matchIdx];
+    const el = viewport.querySelector(`[data-msg-idx="${msgIdx}"]`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [chatSearchMatches]);
+
+  useEffect(() => {
+    if (chatSearchMatches.length > 0) scrollToChatSearchMatch(chatSearchIndex);
+  }, [chatSearchIndex, chatSearchMatches, scrollToChatSearchMatch]);
+
+  const chatSearchMatchSet = useMemo(() => new Set(chatSearchMatches), [chatSearchMatches]);
+  const activeChatSearchIdx = chatSearchMatches[chatSearchIndex] ?? -1;
+
   // Group messages by date
   const groupedMessages = useMemo(() => {
-    const groups: { date: string; messages: Message[] }[] = [];
+    const groups: { date: string; messages: (Message & { _idx: number })[] }[] = [];
     let currentDate = '';
+    let idx = 0;
     for (const msg of messages) {
       const date = formatDate(msg.timestamp);
+      const tagged = { ...msg, _idx: idx };
       if (date !== currentDate) {
         currentDate = date;
-        groups.push({ date, messages: [msg] });
+        groups.push({ date, messages: [tagged] });
       } else {
-        groups[groups.length - 1].messages.push(msg);
+        groups[groups.length - 1].messages.push(tagged);
       }
+      idx++;
     }
     return groups;
   }, [messages]);
@@ -402,7 +438,55 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
                   <p className="text-xs text-muted-foreground truncate">{getContactDisplayMeta(selectedContact)}</p>
                 </div>
+                <button
+                  onClick={() => { setChatSearchOpen(o => !o); setChatSearch(''); setTimeout(() => chatSearchInputRef.current?.focus(), 100); }}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
+                  title="Search in chat"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
               </div>
+
+              {/* In-chat search bar */}
+              {chatSearchOpen && (
+                <div className="px-3 py-2 border-b border-border bg-background flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <input
+                      ref={chatSearchInputRef}
+                      value={chatSearch}
+                      onChange={(e) => setChatSearch(e.target.value)}
+                      placeholder="Search messages..."
+                      className="w-full pl-8 pr-3 py-1.5 rounded-md bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                    />
+                  </div>
+                  {chatSearchMatches.length > 0 && (
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {chatSearchIndex + 1}/{chatSearchMatches.length}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setChatSearchIndex(i => (i > 0 ? i - 1 : chatSearchMatches.length - 1))}
+                    disabled={chatSearchMatches.length === 0}
+                    className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setChatSearchIndex(i => (i < chatSearchMatches.length - 1 ? i + 1 : 0))}
+                    disabled={chatSearchMatches.length === 0}
+                    className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => { setChatSearchOpen(false); setChatSearch(''); }}
+                    className="p-1 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
 
               {/* Messages area */}
               <div className="relative flex-1 min-h-0">
@@ -421,9 +505,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       </div>
                       {/* Messages */}
                       <div className="space-y-1">
-                        {group.messages.map((msg) => (
+                        {group.messages.map((msg) => {
+                          const isMatch = chatSearchMatchSet.has(msg._idx);
+                          const isActive = msg._idx === activeChatSearchIdx;
+                          return (
                           <div
                             key={msg.id}
+                            data-msg-idx={msg._idx}
                             className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                           >
                             <div
@@ -431,7 +519,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                 msg.direction === 'sent'
                                   ? 'bg-wa-bubble-out text-foreground rounded-tr-none'
                                   : 'bg-wa-bubble-in text-foreground rounded-tl-none'
-                              }`}
+                              } ${isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''}`}
                             >
                               {msg.type === 'voice' ? (
                                 <div className="flex items-center gap-2">
@@ -454,7 +542,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                               </div>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
