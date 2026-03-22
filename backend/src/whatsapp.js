@@ -1396,8 +1396,15 @@ async function captureStatusUpdate(userId, db, inst, msg) {
   const phone = '+' + resolved.phone;
   const senderName = msg.pushName || inst.store?.contacts?.[senderJid]?.name || inst.store?.contacts?.[resolved.jid]?.name || null;
 
-  const isImage = !!msg.message.imageMessage;
-  const isVideo = !!msg.message.videoMessage;
+  // Unwrap viewOnceMessage / ephemeralMessage / documentWithCaptionMessage wrappers
+  let innerMsg = msg.message;
+  if (innerMsg?.viewOnceMessage?.message) innerMsg = innerMsg.viewOnceMessage.message;
+  if (innerMsg?.viewOnceMessageV2?.message) innerMsg = innerMsg.viewOnceMessageV2.message;
+  if (innerMsg?.ephemeralMessage?.message) innerMsg = innerMsg.ephemeralMessage.message;
+  if (innerMsg?.documentWithCaptionMessage?.message) innerMsg = innerMsg.documentWithCaptionMessage.message;
+
+  const isImage = !!innerMsg?.imageMessage;
+  const isVideo = !!innerMsg?.videoMessage;
   const isText = !isImage && !isVideo;
 
   let mediaType = 'text';
@@ -1406,13 +1413,20 @@ async function captureStatusUpdate(userId, db, inst, msg) {
 
   if (isImage) {
     mediaType = 'image';
-    content = msg.message.imageMessage?.caption || '';
+    content = innerMsg.imageMessage?.caption || '';
   } else if (isVideo) {
     mediaType = 'video';
-    content = msg.message.videoMessage?.caption || '';
+    content = innerMsg.videoMessage?.caption || '';
   } else {
-    content = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+    content = innerMsg?.conversation
+      || innerMsg?.extendedTextMessage?.text
+      || innerMsg?.editedMessage?.message?.protocolMessage?.editedMessage?.conversation
+      || innerMsg?.editedMessage?.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text
+      || '';
   }
+
+  console.log(`📸 [${userId}] Status from ${senderName || phone}: type=${mediaType}, content="${(content || '').slice(0, 50)}", msgKeys=${Object.keys(innerMsg || {}).join(',')}`);
+
 
   // Download media if applicable
   if (!isText && inst.sock) {
