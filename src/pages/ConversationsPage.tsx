@@ -121,10 +121,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [refreshAllContacts, refreshConversations, refreshMessages]);
 
   useEffect(() => {
-    if (!selectedContact) return;
+    if (!selectedContact?.id) return;
     shouldAutoScrollRef.current = true;
+    setShowScrollDown(false);
     refreshMessages(selectedContact.id, { forceScroll: true });
-  }, [selectedContact, refreshMessages]);
+  }, [selectedContact?.id, refreshMessages]);
 
   const cleanPhone = (p: string) => p?.replace(/@.*$/, '') || '';
   const normalizePhoneDigits = (value: string) => value.replace(/\D/g, '');
