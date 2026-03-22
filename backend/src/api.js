@@ -121,6 +121,12 @@ export function createApiRouter(db) {
     res.json({ ...state, stats });
   });
 
+  router.get('/sync-state', (req, res) => {
+    const wa = getWA(req);
+    const state = wa.getState();
+    res.json(state.syncState || {});
+  });
+
   router.get('/qr', async (req, res) => {
     const wa = getWA(req);
     const state = wa.getState();
