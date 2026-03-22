@@ -121,6 +121,12 @@ export function createApiRouter(db) {
     res.json({ ...state, stats });
   });
 
+  router.get('/sync-state', (req, res) => {
+    const wa = getWA(req);
+    const state = wa.getState();
+    res.json(state.syncState || {});
+  });
+
   router.get('/qr', async (req, res) => {
     const wa = getWA(req);
     const state = wa.getState();
@@ -170,6 +176,8 @@ export function createApiRouter(db) {
         send('history_sync', data);
       } else if (event === 'contacts_sync') {
         send('contacts_sync', data);
+      } else if (event === 'sync_state') {
+        send('sync_state', data);
       }
     });
 

@@ -2,12 +2,17 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Search, MessageSquare } from 'lucide-react';
 import { api, type Contact } from '@/lib/api';
+import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
+import SyncBanner from '@/components/SyncBanner';
 
 interface ContactsPageProps {
   onOpenChat?: (contact: Contact) => void;
+  onNavigateSettings?: () => void;
 }
 
-const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
+const ContactsPage = ({ onOpenChat, onNavigateSettings }: ContactsPageProps) => {
+  const { status, syncState } = useWhatsAppStatus();
+  const isConnected = status === 'connected';
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -80,6 +85,8 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
           {loading ? 'Loading...' : `${contacts.length} contacts synced`}
         </p>
       </div>
+
+      <SyncBanner syncState={syncState} isConnected={isConnected} onResync={onNavigateSettings} compact />
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

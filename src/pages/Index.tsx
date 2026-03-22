@@ -22,8 +22,8 @@ const Index = () => {
   const renderPage = () => {
     switch (activePage) {
       case 'dashboard': return <DashboardPage />;
-      case 'contacts': return <ContactsPage onOpenChat={handleOpenChat} />;
-      case 'conversations': return <ConversationsPage initialContact={selectedContact} onContactOpened={() => setSelectedContact(null)} />;
+      case 'contacts': return <ContactsPage onOpenChat={handleOpenChat} onNavigateSettings={() => setActivePage('settings')} />;
+      case 'conversations': return <ConversationsPage initialContact={selectedContact} onContactOpened={() => setSelectedContact(null)} onNavigateSettings={() => setActivePage('settings')} />;
       case 'voice': return <VoiceStudioPage />;
       case 'settings': return <SettingsPage />;
     }

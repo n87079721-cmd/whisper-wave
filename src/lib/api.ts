@@ -138,7 +138,7 @@ async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
 export const api = {
   // Status & QR
   getStatus() {
-    return requestJson<{ status: 'disconnected' | 'qr_waiting' | 'connected' | 'reconnecting'; qr: string | null; pairingCode?: string | null; stats?: Stats }>('/api/status');
+    return requestJson<{ status: 'disconnected' | 'qr_waiting' | 'connected' | 'reconnecting'; qr: string | null; pairingCode?: string | null; stats?: Stats; syncState?: any }>('/api/status');
   },
 
   getQR() {

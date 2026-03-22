@@ -3,13 +3,18 @@ import { motion } from 'framer-motion';
 import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
+import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
+import SyncBanner from '@/components/SyncBanner';
 
 interface ConversationsPageProps {
   initialContact?: Contact | null;
   onContactOpened?: () => void;
+  onNavigateSettings?: () => void;
 }
 
-const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPageProps) => {
+const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings }: ConversationsPageProps) => {
+  const { status: waStatus, syncState } = useWhatsAppStatus();
+  const isWaConnected = waStatus === 'connected';
   const [conversations, setConversations] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -304,6 +309,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   return (
     <div className="space-y-4">
       <h1 className="text-xl md:text-2xl font-bold text-foreground">Conversations</h1>
+      <SyncBanner syncState={syncState} isConnected={isWaConnected} onResync={onNavigateSettings} compact />
 
       <div className="relative flex gap-4 h-[calc(100vh-180px)] md:h-[calc(100vh-180px)] h-[calc(100dvh-160px)]">
         {/* Contact list - hidden on mobile when chat is open */}

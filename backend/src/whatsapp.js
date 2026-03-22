@@ -109,7 +109,21 @@ function getInstance(userId) {
       msgRetryCounterCache: new NodeCache({ stdTTL: 600, checkperiod: 120 }),
       autoReplyCooldowns: new Map(),
       messageBatchBuffers: new Map(),
-      lidMap: new Map(), // Maps LID JID -> phone number (e.g. "77481361039542@lid" -> "2348012345678")
+      lidMap: new Map(),
+      // Sync state tracking
+      syncState: {
+        phase: 'idle',         // idle | waiting_history | importing | partial | ready
+        connectedAt: null,
+        lastHistorySyncAt: null,
+        storeContacts: 0,
+        historyChats: 0,
+        historyContacts: 0,
+        historyMessages: 0,
+        unresolvedLids: 0,
+        totalDbContacts: 0,
+        totalDbMessages: 0,
+      },
+      syncGraceTimer: null,
     });
   }
   return userInstances.get(userId);
@@ -336,7 +350,41 @@ function resolveLidPhone(inst, jid) {
 
 export function getWhatsAppState(userId) {
   const inst = getInstance(userId);
-  return { status: inst.connectionStatus, qr: inst.qrCode, pairingCode: inst.pairingCode };
+  return {
+    status: inst.connectionStatus,
+    qr: inst.qrCode,
+    pairingCode: inst.pairingCode,
+    syncState: { ...inst.syncState },
+  };
+}
+
+function updateSyncState(userId, db, updates) {
+  const inst = getInstance(userId);
+  Object.assign(inst.syncState, updates);
+  // Compute live DB counts
+  try {
+    inst.syncState.totalDbContacts = db.prepare('SELECT COUNT(*) as c FROM contacts WHERE user_id = ? AND is_group = 0').get(userId)?.c || 0;
+    inst.syncState.totalDbMessages = db.prepare('SELECT COUNT(*) as c FROM messages WHERE user_id = ?').get(userId)?.c || 0;
+    inst.syncState.unresolvedLids = db.prepare("SELECT COUNT(*) as c FROM contacts WHERE user_id = ? AND jid LIKE '%@lid'").get(userId)?.c || 0;
+  } catch {}
+  emit(userId, 'sync_state', inst.syncState);
+}
+
+function scheduleSyncGrace(userId, db) {
+  const inst = getInstance(userId);
+  if (inst.syncGraceTimer) clearTimeout(inst.syncGraceTimer);
+  inst.syncGraceTimer = setTimeout(() => {
+    inst.syncGraceTimer = null;
+    // If still waiting for history and nothing arrived, mark partial
+    if (inst.syncState.phase === 'waiting_history') {
+      updateSyncState(userId, db, { phase: 'partial' });
+    }
+    // If importing finished but counts are very low, mark partial
+    if (inst.syncState.phase === 'importing') {
+      const phase = inst.syncState.historyMessages > 0 ? 'ready' : 'partial';
+      updateSyncState(userId, db, { phase });
+    }
+  }, 30000); // 30s grace period
 }
 
 export function onWhatsAppEvent(userId, listener) {
@@ -567,6 +615,8 @@ async function startConnection(userId, db, options = {}) {
         inst.repairInProgress = false;
         emit(userId, 'connected', null);
         console.log(`✅ [${userId}] WhatsApp connected (gen ${generation})`);
+        updateSyncState(userId, db, { phase: 'waiting_history', connectedAt: new Date().toISOString() });
+        scheduleSyncGrace(userId, db);
         syncContacts(userId, db);
       }
 
@@ -708,6 +758,17 @@ async function startConnection(userId, db, options = {}) {
     inst.sock.ev.on('messaging-history.set', ({ chats, contacts: syncedContacts, messages: historyMsgs }) => {
       console.log(`📜 [${userId}] History sync: ${chats?.length || 0} chats, ${syncedContacts?.length || 0} contacts, ${historyMsgs?.length || 0} messages`);
 
+      // Update sync state
+      updateSyncState(userId, db, {
+        phase: 'importing',
+        lastHistorySyncAt: new Date().toISOString(),
+        historyChats: (inst.syncState.historyChats || 0) + (chats?.length || 0),
+        historyContacts: (inst.syncState.historyContacts || 0) + (syncedContacts?.length || 0),
+        historyMessages: (inst.syncState.historyMessages || 0) + (historyMsgs?.length || 0),
+      });
+      // Reset grace timer since we got data
+      scheduleSyncGrace(userId, db);
+
       let contactChanges = 0;
       let historyDebugCount = 0;
 
@@ -847,6 +908,10 @@ async function startConnection(userId, db, options = {}) {
         emit(userId, 'contacts_sync', { count: contactChanges });
       }
       emit(userId, 'history_sync', { chats: chats?.length || 0, messages: historyMsgs?.length || 0 });
+
+      // Update sync state after processing
+      const phase = (inst.syncState.historyMessages > 10 && inst.syncState.historyContacts > 0) ? 'ready' : 'partial';
+      updateSyncState(userId, db, { phase });
 
       // Schedule a deferred LID sweep to catch any late-arriving mappings
       schedulelidSweep(userId, db, inst);
@@ -998,7 +1063,7 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false) 
   return id;
 }
 
-async function syncContacts(userId, db) {
+function syncContacts(userId, db) {
   const inst = getInstance(userId);
   if (!inst.store?.contacts) return;
   console.log(`📇 [${userId}] Contact sync initiated`);
@@ -1006,6 +1071,7 @@ async function syncContacts(userId, db) {
   try {
     const contacts = Object.values(inst.store.contacts);
     console.log(`📇 [${userId}] Found ${contacts.length} contacts in store`);
+    updateSyncState(userId, db, { storeContacts: contacts.length });
 
     // First pass: build all LID mappings
     for (const c of contacts) {
@@ -1228,6 +1294,21 @@ async function clearSession(userId, db) {
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
+  if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
+
+  // Reset sync state
+  inst.syncState = {
+    phase: 'idle',
+    connectedAt: null,
+    lastHistorySyncAt: null,
+    storeContacts: 0,
+    historyChats: 0,
+    historyContacts: 0,
+    historyMessages: 0,
+    unresolvedLids: 0,
+    totalDbContacts: 0,
+    totalDbMessages: 0,
+  };
 
   if (inst.sock) {
     try { inst.sock.ev.removeAllListeners('connection.update'); } catch {}
@@ -1259,5 +1340,6 @@ async function clearSession(userId, db) {
 
   inst.isConnecting = false;
   emit(userId, 'status', { status: 'disconnected' });
+  emit(userId, 'sync_state', inst.syncState);
   console.log(`🗑️ [${userId}] Session fully cleared.`);
 }
