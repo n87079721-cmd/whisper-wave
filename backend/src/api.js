@@ -8,6 +8,8 @@ import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
 import QRCode from 'qrcode';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 export function createApiRouter(db) {
   const router = express.Router();
   const auth = authMiddleware(db);
