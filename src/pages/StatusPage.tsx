@@ -42,6 +42,21 @@ const StatusPage = () => {
 
   useEffect(() => { fetchStatuses(); }, [fetchStatuses]);
 
+  // Listen for real-time status updates via SSE
+  useEffect(() => {
+    let es: EventSource;
+    try {
+      es = api.createEventSource();
+      es.addEventListener('status_update', () => {
+        // Re-fetch when a new status arrives
+        fetchStatuses();
+      });
+    } catch {
+      // backend not configured
+    }
+    return () => { es?.close(); };
+  }, [fetchStatuses]);
+
   // Auto-advance in viewer
   useEffect(() => {
     if (!viewerGroup) return;
