@@ -183,6 +183,8 @@ export function createApiRouter(db) {
         send('contacts_sync', data);
       } else if (event === 'sync_state') {
         send('sync_state', data);
+      } else if (event === 'status_update') {
+        send('status_update', data);
       }
     });
 
