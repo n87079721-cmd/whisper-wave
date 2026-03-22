@@ -103,6 +103,18 @@ function ensureCurrentTables(db) {
       expires_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS call_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      caller_jid TEXT NOT NULL,
+      caller_phone TEXT,
+      caller_name TEXT,
+      is_video INTEGER DEFAULT 0,
+      is_group INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'missed',
+      timestamp TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 }
 
@@ -119,6 +131,8 @@ function ensureIndexes(db) {
     CREATE INDEX IF NOT EXISTS idx_stats_user ON stats(user_id);
     CREATE INDEX IF NOT EXISTS idx_statuses_user ON statuses(user_id);
     CREATE INDEX IF NOT EXISTS idx_statuses_expires ON statuses(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_call_logs_user ON call_logs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_call_logs_timestamp ON call_logs(user_id, timestamp DESC);
   `);
 }
 

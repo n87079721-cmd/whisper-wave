@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
-import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses } from './whatsapp.js';
+import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
 import QRCode from 'qrcode';
@@ -185,6 +185,8 @@ export function createApiRouter(db) {
         send('sync_state', data);
       } else if (event === 'status_update') {
         send('status_update', data);
+      } else if (event === 'call') {
+        send('call', data);
       }
     });
 
@@ -528,6 +530,16 @@ RULES:
     try {
       const statuses = getStatuses(db, req.userId);
       res.json(statuses);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Call Logs ───────────────────────────────────────────
+  router.get('/call-logs', (req, res) => {
+    try {
+      const logs = getCallLogs(db, req.userId);
+      res.json(logs);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

@@ -263,6 +263,11 @@ export const api = {
     const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
     return toUrl(`/api/status-media/${encodeURIComponent(filename)}`) + suffix;
   },
+
+  // Call Logs
+  getCallLogs() {
+    return requestJson<CallLog[]>('/api/call-logs');
+  },
 };
 
 // Types
@@ -321,4 +326,15 @@ export interface StatusGroup {
   senderPhone: string;
   senderName: string | null;
   statuses: StatusItem[];
+}
+
+export interface CallLog {
+  id: string;
+  caller_jid: string;
+  caller_phone: string;
+  caller_name: string | null;
+  is_video: number;
+  is_group: number;
+  status: string;
+  timestamp: string;
 }
