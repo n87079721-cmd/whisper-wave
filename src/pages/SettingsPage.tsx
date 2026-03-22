@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Key, Shield, Power, Loader2, Globe, Brain, LogOut, MessageSquare, Save, Clock, Dice5, Gauge, RefreshCw } from 'lucide-react';
+import { Key, Shield, Power, Loader2, Globe, Brain, LogOut, MessageSquare, Save, Clock, Dice5, Gauge, RefreshCw, AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getStoredApiUrl, setStoredApiUrl, isBackendConfigured } from '@/lib/api';
 import { toast } from 'sonner';
 import { Slider } from '@/components/ui/slider';
+import { useWhatsAppStatus, type SyncState } from '@/hooks/useWhatsAppStatus';
 
 const SettingsPage = () => {
   const [backendUrl, setBackendUrl] = useState(getStoredApiUrl());
