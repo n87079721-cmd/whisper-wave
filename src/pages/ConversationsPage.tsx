@@ -43,14 +43,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     const viewport = messagesViewportRef.current;
     if (!viewport) return;
     viewport.scrollTo({ top: viewport.scrollHeight, behavior });
-    shouldAutoScrollRef.current = true;
   }, []);
 
   const syncAutoScrollState = useCallback(() => {
     const viewport = messagesViewportRef.current;
     if (!viewport) return;
     const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-    shouldAutoScrollRef.current = distanceFromBottom < 80;
+    shouldAutoScrollRef.current = distanceFromBottom < 150;
   }, []);
 
   const refreshMessages = useCallback(async (
