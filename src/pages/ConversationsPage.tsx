@@ -9,9 +9,12 @@ import SyncBanner from '@/components/SyncBanner';
 interface ConversationsPageProps {
   initialContact?: Contact | null;
   onContactOpened?: () => void;
+  onNavigateSettings?: () => void;
 }
 
-const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPageProps) => {
+const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings }: ConversationsPageProps) => {
+  const { status: waStatus, syncState } = useWhatsAppStatus();
+  const isWaConnected = waStatus === 'connected';
   const [conversations, setConversations] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
