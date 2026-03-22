@@ -334,7 +334,11 @@ const VoiceStudioPage = () => {
           <textarea
             ref={textareaRef}
             value={text}
-            onChange={(e) => { setText(e.target.value); setAudioUrl(null); }}
+            onChange={(e) => {
+              setText(e.target.value);
+              setAudioUrl(null);
+              if (originalText !== null) setOriginalText(null);
+            }}
             placeholder={isV3
               ? "[laughing] Oh stop it! ... [whispering] But seriously, I miss you."
               : "Type or paste the text you want to convert to a voice note..."}
@@ -356,14 +360,16 @@ const VoiceStudioPage = () => {
                 )}
                 <button
                   onClick={async () => {
-                    if (!text.trim()) return;
+                    const sourceText = (originalText ?? text).trim();
+                    const preservedOriginal = originalText ?? text;
+                    if (!sourceText) return;
                     setIsEnhancing(true);
                     try {
-                      const res = await api.enhanceText(text);
-                      setOriginalText(text);
+                      const res = await api.enhanceText(sourceText);
+                      setOriginalText(preservedOriginal);
                       setText(res.enhanced);
                       setAudioUrl(null);
-                      toast.success('Text enhanced!');
+                      toast.success('Fresh rewrite ready');
                     } catch (err: any) {
                       toast.error(err.message || 'Failed to enhance text');
                     } finally {

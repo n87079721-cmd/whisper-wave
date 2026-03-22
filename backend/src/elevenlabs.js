@@ -116,6 +116,24 @@ export const VOICES = [
   { id: 'onwK4e9ZLuTAKqWW03F9', name: 'Daniel', desc: 'Authoritative, deep', gender: 'male' },
 ];
 
+const HUMAN_VOICE_SETTINGS = {
+  stability: 0.38,
+  similarity_boost: 0.72,
+  style: 0.55,
+  use_speaker_boost: true,
+  speed: 0.9,
+};
+
+function normalizeSpeechText(text) {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/([,;:.!?])(?=\S)/g, '$1 ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgroundSound) {
   if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
@@ -127,6 +145,7 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgrou
 
   try {
     const model = modelId || 'eleven_v3';
+    const preparedText = normalizeSpeechText(text);
 
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
@@ -137,15 +156,9 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgrou
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          text,
+          text: preparedText,
           model_id: model,
-          voice_settings: {
-            stability: 0.3,
-            similarity_boost: 0.65,
-            style: 0.8,
-            use_speaker_boost: true,
-            speed: 0.95,
-          },
+          voice_settings: HUMAN_VOICE_SETTINGS,
         }),
       }
     );
@@ -191,6 +204,7 @@ export async function generatePreviewAudio(apiKey, text, voiceId, modelId, backg
 
   const ffmpeg = getFfmpeg();
   const model = modelId || 'eleven_v3';
+  const preparedText = normalizeSpeechText(text);
   const fileId = uuid();
   const voiceMp3Path = path.join(TEMP_DIR, `${fileId}-voice.mp3`);
   const mixedMp3Path = path.join(TEMP_DIR, `${fileId}-mixed.mp3`);
@@ -205,15 +219,9 @@ export async function generatePreviewAudio(apiKey, text, voiceId, modelId, backg
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          text,
+          text: preparedText,
           model_id: model,
-          voice_settings: {
-            stability: 0.3,
-            similarity_boost: 0.65,
-            style: 0.8,
-            use_speaker_boost: true,
-            speed: 0.95,
-          },
+          voice_settings: HUMAN_VOICE_SETTINGS,
         }),
       }
     );

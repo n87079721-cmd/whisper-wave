@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
-import { getAvatarColor } from '@/lib/avatarColors';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
 
 interface ConversationsPageProps {
@@ -164,15 +163,14 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
   const Avatar = ({ contact, size = 'md' }: { contact: Contact; size?: 'sm' | 'md' | 'lg' }) => {
     const sizeClasses = size === 'lg' ? 'w-10 h-10 text-sm' : size === 'md' ? 'w-[46px] h-[46px] text-sm' : 'w-9 h-9 text-xs';
-    const color = getAvatarColor(contact.jid || contact.id);
+    const altText = getContactDisplayName(contact);
     
     if (contact.avatar_url) {
-      return <img src={contact.avatar_url} alt="" className={`${sizeClasses} rounded-full object-cover flex-shrink-0`} />;
+      return <img src={contact.avatar_url} alt={altText} className={`${sizeClasses} rounded-full object-cover flex-shrink-0`} />;
     }
     return (
       <div
-        className={`${sizeClasses} rounded-full flex items-center justify-center font-medium text-white flex-shrink-0`}
-        style={{ backgroundColor: `hsl(${color})` }}
+        className={`${sizeClasses} rounded-full flex items-center justify-center border border-border bg-muted font-medium text-foreground flex-shrink-0`}
       >
         {getContactInitials(contact)}
       </div>
