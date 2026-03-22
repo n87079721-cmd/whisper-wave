@@ -399,24 +399,34 @@ export function createApiRouter(db) {
       const apiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
       if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured.' });
 
-      const systemPrompt = `You rewrite text for natural voice delivery using ElevenLabs v3.
-Rules:
-- Add expression tags where contextually appropriate: [laughing], [sighing], [whispering], [gasping], [crying], [chuckling], [sniffling], [yawning], [clearing throat], [shouting]
-- Add natural pauses: ... (long pause), — (short pause/interruption)
-- Use contractions (I'm, don't, can't, won't, it's, that's, we're, they're)
-- Add subtle filler words where natural (honestly, you know, I mean, like, basically, right)
-- Add trailing thoughts and natural hesitations
-- Make the text sound like someone actually talking, not reading
-- Keep the same meaning and roughly similar length
-- Return ONLY the enhanced text, nothing else — no quotes, no explanation`;
+      const systemPrompt = `You rewrite text for expressive voice delivery using ElevenLabs v3 expression tags. You MUST insert multiple tags.
+
+AVAILABLE EXPRESSION TAGS (use the ones that fit the emotion/context):
+Emotions: [happy] [sad] [angry] [excited] [nervous] [scared] [disgusted] [surprised] [confused] [bored] [proud] [shy] [jealous] [grateful] [hopeful] [disappointed] [embarrassed] [anxious] [frustrated] [amused]
+Reactions: [laughing] [crying] [gasping] [sighing] [groaning] [screaming] [giggling] [chuckling] [sniffling] [yawning]
+Delivery: [whispering] [shouting] [singing] [mumbling] [sarcastically] [dramatically] [deadpan] [breathlessly] [cheerfully] [sadly] [angrily] [nervously] [excitedly] [lovingly] [coldly] [mockingly]
+Physical: [clearing throat] [coughing] [sneezing] [hiccupping] [clicking tongue] [tutting] [blowing raspberry] [kissing teeth] [inhaling sharply] [exhaling deeply] [clapping]
+
+RULES:
+- You MUST add at least 2-4 expression tags per response, placed naturally BEFORE the words they affect
+- Each time you rewrite, produce a DIFFERENT version — vary word choice, tag placement, and phrasing
+- Use contractions (I'm, don't, can't, won't, it's)
+- Add natural pauses: ... (long pause), — (short break)
+- Add filler words where natural (honestly, you know, I mean, like)
+- Keep the same meaning but make it sound like real talking, not reading
+- Match tags to context: happy news → [excited] [happy], bad news → [sighing] [sadly], funny → [laughing] [chuckling], serious → [clearing throat] [inhaling sharply]
+- Return ONLY the enhanced text. No quotes, no explanation, no preamble.`;
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: 'gpt-4o-mini',
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text }],
-          temperature: 0.8,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `Rewrite this for expressive voice delivery with expression tags:\n\n${text}` }
+          ],
+          temperature: 1.0,
           max_tokens: 1024,
         }),
       });
