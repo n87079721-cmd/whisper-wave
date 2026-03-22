@@ -1,7 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { api, type StatusGroup, type StatusItem } from '@/lib/api';
+import { api, type StatusGroup } from '@/lib/api';
 import { formatDistanceToNow } from 'date-fns';
-import { RefreshCw, X, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { RefreshCw, X, ChevronRight, Eye } from 'lucide-react';
+
+const STORY_DURATION_MS = 5000;
+const HOLD_THRESHOLD_MS = 220;
+
+const STATUS_BG_VARIANTS = [
+  { container: 'bg-primary', text: 'text-primary-foreground' },
+  { container: 'bg-accent', text: 'text-accent-foreground' },
+  { container: 'bg-secondary', text: 'text-secondary-foreground' },
+];
 
 function getDisplayName(s: { name?: string | null; phone?: string | null; jid?: string }) {
   if (s.name && !/^\+?\d{7,}$/.test(s.name.replace(/\s/g, '')) && !s.name.includes('@')) return s.name;
@@ -9,16 +18,10 @@ function getDisplayName(s: { name?: string | null; phone?: string | null; jid?: 
   return s.jid?.replace(/@.*$/, '') || 'Unknown';
 }
 
-
-const TEXT_BG_COLORS = [
-  'bg-emerald-600', 'bg-sky-600', 'bg-violet-600', 'bg-amber-600',
-  'bg-rose-600', 'bg-teal-600', 'bg-indigo-600', 'bg-pink-600',
-];
-
-function hashColor(jid: string) {
-  let h = 0;
-  for (let i = 0; i < jid.length; i++) h = (h * 31 + jid.charCodeAt(i)) | 0;
-  return TEXT_BG_COLORS[Math.abs(h) % TEXT_BG_COLORS.length];
+function getStatusVariant(jid: string) {
+  let hash = 0;
+  for (let i = 0; i < jid.length; i++) hash = (hash * 31 + jid.charCodeAt(i)) | 0;
+  return STATUS_BG_VARIANTS[Math.abs(hash) % STATUS_BG_VARIANTS.length];
 }
 
 const StatusPage = () => {
@@ -26,7 +29,13 @@ const StatusPage = () => {
   const [loading, setLoading] = useState(true);
   const [viewerGroup, setViewerGroup] = useState<StatusGroup | null>(null);
   const [viewerIdx, setViewerIdx] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [mediaReady, setMediaReady] = useState(true);
+  const [mediaError, setMediaError] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const holdStartedAtRef = useRef<number | null>(null);
+  const blockTapRef = useRef(false);
 
   const fetchStatuses = useCallback(async () => {
     try {
@@ -40,58 +49,108 @@ const StatusPage = () => {
     }
   }, []);
 
-  useEffect(() => { fetchStatuses(); }, [fetchStatuses]);
-
-  // Listen for real-time status updates via SSE
   useEffect(() => {
-    let es: EventSource;
+    fetchStatuses();
+  }, [fetchStatuses]);
+
+  useEffect(() => {
+    let es: EventSource | null = null;
     try {
       es = api.createEventSource();
-      es.addEventListener('status_update', () => {
-        // Re-fetch when a new status arrives
-        fetchStatuses();
-      });
+      es.addEventListener('status_update', fetchStatuses);
     } catch {
       // backend not configured
     }
-    return () => { es?.close(); };
+    return () => es?.close();
   }, [fetchStatuses]);
 
-  // Auto-advance in viewer
-  useEffect(() => {
-    if (!viewerGroup) return;
-    const current = viewerGroup.statuses[viewerIdx];
-    if (!current) return;
+  const currentStatus = viewerGroup?.statuses[viewerIdx] ?? null;
 
-    // Don't auto-advance videos (user controls playback)
-    if (current.mediaType === 'video') return;
+  const closeViewer = useCallback(() => {
+    setViewerGroup(null);
+    setViewerIdx(0);
+    setIsPaused(false);
+    setProgress(0);
+    setMediaReady(true);
+    setMediaError(false);
+    blockTapRef.current = false;
+    holdStartedAtRef.current = null;
+    videoRef.current = null;
+  }, []);
 
-    timerRef.current = setTimeout(() => {
-      if (viewerIdx < viewerGroup.statuses.length - 1) {
-        setViewerIdx(viewerIdx + 1);
-      } else {
-        setViewerGroup(null);
-        setViewerIdx(0);
-      }
-    }, 5000);
-
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [viewerGroup, viewerIdx]);
-
-  const goNext = () => {
+  const goNextRaw = useCallback(() => {
     if (!viewerGroup) return;
     if (viewerIdx < viewerGroup.statuses.length - 1) {
-      setViewerIdx(viewerIdx + 1);
-    } else {
-      setViewerGroup(null);
-      setViewerIdx(0);
+      setViewerIdx((prev) => prev + 1);
+      return;
     }
+    closeViewer();
+  }, [closeViewer, viewerGroup, viewerIdx]);
+
+  const goPrevRaw = useCallback(() => {
+    if (!viewerGroup) return;
+    if (viewerIdx > 0) {
+      setViewerIdx((prev) => prev - 1);
+    }
+  }, [viewerGroup, viewerIdx]);
+
+  const consumeBlockedTap = () => {
+    const blocked = blockTapRef.current;
+    blockTapRef.current = false;
+    return blocked;
+  };
+
+  const goNext = () => {
+    if (consumeBlockedTap()) return;
+    goNextRaw();
   };
 
   const goPrev = () => {
-    if (!viewerGroup) return;
-    if (viewerIdx > 0) {
-      setViewerIdx(viewerIdx - 1);
+    if (consumeBlockedTap()) return;
+    goPrevRaw();
+  };
+
+  useEffect(() => {
+    if (!currentStatus) return;
+    setProgress(0);
+    setIsPaused(false);
+    setMediaError(false);
+    setMediaReady(currentStatus.mediaType === 'text');
+  }, [currentStatus?.id]);
+
+  useEffect(() => {
+    if (!currentStatus || currentStatus.mediaType === 'video' || !mediaReady || mediaError || isPaused) return;
+    const timer = window.setInterval(() => {
+      setProgress((prev) => Math.min(prev + 1, 100));
+    }, STORY_DURATION_MS / 100);
+    return () => window.clearInterval(timer);
+  }, [currentStatus?.id, mediaError, mediaReady, isPaused, currentStatus?.mediaType]);
+
+  useEffect(() => {
+    if (progress < 100) return;
+    setProgress(0);
+    goNextRaw();
+  }, [goNextRaw, progress]);
+
+  const handleHoldStart = () => {
+    if (!currentStatus) return;
+    holdStartedAtRef.current = Date.now();
+    blockTapRef.current = false;
+    setIsPaused(true);
+    if (currentStatus.mediaType === 'video') {
+      videoRef.current?.pause();
+    }
+  };
+
+  const handleHoldEnd = () => {
+    if (!currentStatus) return;
+    const startedAt = holdStartedAtRef.current;
+    const heldLongEnough = startedAt ? Date.now() - startedAt >= HOLD_THRESHOLD_MS : false;
+    blockTapRef.current = heldLongEnough;
+    holdStartedAtRef.current = null;
+    setIsPaused(false);
+    if (currentStatus.mediaType === 'video' && mediaReady && !mediaError) {
+      videoRef.current?.play().catch(() => undefined);
     }
   };
 
@@ -100,83 +159,139 @@ const StatusPage = () => {
     setViewerIdx(0);
   };
 
-  // ── Full-screen viewer ──
-  if (viewerGroup) {
-    const status = viewerGroup.statuses[viewerIdx];
+  if (viewerGroup && currentStatus) {
     const total = viewerGroup.statuses.length;
+    const variant = getStatusVariant(viewerGroup.senderJid);
 
     return (
-      <div className="fixed inset-0 z-50 bg-black flex flex-col">
-        {/* Progress bars */}
+      <div className="fixed inset-0 z-50 flex flex-col bg-foreground text-background">
         <div className="flex gap-1 px-2 pt-2">
-          {viewerGroup.statuses.map((_, i) => (
-            <div key={i} className="flex-1 h-0.5 rounded-full bg-white/30 overflow-hidden">
-              <div
-                className={`h-full bg-white transition-all duration-300 ${
-                  i < viewerIdx ? 'w-full' : i === viewerIdx ? 'w-full animate-pulse' : 'w-0'
-                }`}
-              />
-            </div>
-          ))}
+          {viewerGroup.statuses.map((_, i) => {
+            const width = i < viewerIdx ? '100%' : i === viewerIdx ? `${progress}%` : '0%';
+            return (
+              <div key={i} className="flex-1 h-0.5 overflow-hidden rounded-full bg-background/30">
+                <div className="h-full bg-background transition-[width] duration-75" style={{ width }} />
+              </div>
+            );
+          })}
         </div>
 
-        {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3">
-          <button onClick={() => { setViewerGroup(null); setViewerIdx(0); }} className="text-white">
-            <X className="w-6 h-6" />
+          <button onClick={closeViewer} className="text-background" aria-label="Close status viewer">
+            <X className="h-6 w-6" />
           </button>
-          <div className="flex-1 min-w-0">
-            <p className="text-white text-sm font-medium truncate">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">
               {getDisplayName({ name: viewerGroup.senderName, phone: viewerGroup.senderPhone, jid: viewerGroup.senderJid })}
             </p>
-            <p className="text-white/60 text-xs">
-              {formatDistanceToNow(new Date(status.timestamp), { addSuffix: true })}
+            <p className="text-xs text-background/70">
+              {formatDistanceToNow(new Date(currentStatus.timestamp), { addSuffix: true })}
             </p>
           </div>
-          <span className="text-white/60 text-xs">{viewerIdx + 1}/{total}</span>
+          <span className="text-xs text-background/70">{viewerIdx + 1}/{total}</span>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 flex items-center justify-center relative">
-          {/* Tap zones */}
-          <button onClick={goPrev} className="absolute left-0 top-0 w-1/3 h-full z-10" />
-          <button onClick={goNext} className="absolute right-0 top-0 w-1/3 h-full z-10" />
+        <div className="relative flex flex-1 items-center justify-center overflow-hidden">
+          <button
+            type="button"
+            className="absolute left-0 top-0 z-20 h-full w-1/3"
+            onPointerDown={handleHoldStart}
+            onPointerUp={handleHoldEnd}
+            onPointerCancel={handleHoldEnd}
+            onPointerLeave={handleHoldEnd}
+            onClick={goPrev}
+            aria-label="Previous status"
+          />
+          <div
+            className="absolute left-1/3 top-0 z-20 h-full w-1/3"
+            onPointerDown={handleHoldStart}
+            onPointerUp={handleHoldEnd}
+            onPointerCancel={handleHoldEnd}
+            onPointerLeave={handleHoldEnd}
+          />
+          <button
+            type="button"
+            className="absolute right-0 top-0 z-20 h-full w-1/3"
+            onPointerDown={handleHoldStart}
+            onPointerUp={handleHoldEnd}
+            onPointerCancel={handleHoldEnd}
+            onPointerLeave={handleHoldEnd}
+            onClick={goNext}
+            aria-label="Next status"
+          />
 
-          {status.mediaType === 'text' && (
-            <div className={`${hashColor(viewerGroup.senderJid)} w-full h-full flex items-center justify-center p-8`}>
-              <p className="text-white text-xl md:text-2xl text-center font-medium leading-relaxed max-w-lg">
-                {status.content}
+          {currentStatus.mediaType === 'text' && (
+            <div className={`flex h-full w-full items-center justify-center p-8 ${variant.container}`}>
+              <p className={`max-w-lg text-center text-xl font-medium leading-relaxed md:text-2xl ${variant.text}`}>
+                {currentStatus.content || 'Status update'}
               </p>
             </div>
           )}
 
-          {status.mediaType === 'image' && status.mediaPath && (
-            <div className="w-full h-full flex items-center justify-center">
-              <img
-                src={api.getStatusMediaUrl(status.mediaPath)}
-                alt=""
-                className="max-w-full max-h-full object-contain"
-              />
-              {status.content && (
-                <div className="absolute bottom-16 left-0 right-0 px-6 py-3 bg-black/50">
-                  <p className="text-white text-sm text-center">{status.content}</p>
+          {currentStatus.mediaType === 'image' && currentStatus.mediaPath && (
+            <div className="relative flex h-full w-full items-center justify-center">
+              {!mediaReady && !mediaError && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-foreground/70 text-background">
+                  <RefreshCw className="h-5 w-5 animate-spin" />
+                  <p className="text-sm text-background/80">Loading status…</p>
+                </div>
+              )}
+              {mediaError ? (
+                <div className="flex flex-col items-center gap-2 text-center text-background/80">
+                  <p className="text-sm">This status couldn’t load.</p>
+                  <button className="rounded-md border border-background/30 px-3 py-1 text-sm" onClick={() => { setMediaError(false); setMediaReady(false); }}>
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <img
+                  key={currentStatus.id}
+                  src={api.getStatusMediaUrl(currentStatus.mediaPath)}
+                  alt="WhatsApp status"
+                  className="max-h-full max-w-full object-contain"
+                  onLoad={() => setMediaReady(true)}
+                  onError={() => setMediaError(true)}
+                />
+              )}
+              {currentStatus.content && !mediaError && (
+                <div className="absolute bottom-16 left-0 right-0 bg-foreground/60 px-6 py-3">
+                  <p className="text-center text-sm text-background">{currentStatus.content}</p>
                 </div>
               )}
             </div>
           )}
 
-          {status.mediaType === 'video' && status.mediaPath && (
-            <div className="w-full h-full flex items-center justify-center">
-              <video
-                src={api.getStatusMediaUrl(status.mediaPath)}
-                controls
-                autoPlay
-                className="max-w-full max-h-full"
-                onEnded={goNext}
-              />
-              {status.content && (
-                <div className="absolute bottom-16 left-0 right-0 px-6 py-3 bg-black/50">
-                  <p className="text-white text-sm text-center">{status.content}</p>
+          {currentStatus.mediaType === 'video' && currentStatus.mediaPath && (
+            <div className="relative flex h-full w-full items-center justify-center">
+              {!mediaReady && !mediaError && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-foreground/70 text-background">
+                  <RefreshCw className="h-5 w-5 animate-spin" />
+                  <p className="text-sm text-background/80">Loading status…</p>
+                </div>
+              )}
+              {mediaError ? (
+                <div className="flex flex-col items-center gap-2 text-center text-background/80">
+                  <p className="text-sm">This status couldn’t load.</p>
+                  <button className="rounded-md border border-background/30 px-3 py-1 text-sm" onClick={() => { setMediaError(false); setMediaReady(false); }}>
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <video
+                  key={currentStatus.id}
+                  ref={videoRef}
+                  src={api.getStatusMediaUrl(currentStatus.mediaPath)}
+                  controls
+                  autoPlay
+                  className="max-h-full max-w-full"
+                  onLoadedData={() => setMediaReady(true)}
+                  onError={() => setMediaError(true)}
+                  onEnded={goNextRaw}
+                />
+              )}
+              {currentStatus.content && !mediaError && (
+                <div className="absolute bottom-16 left-0 right-0 bg-foreground/60 px-6 py-3">
+                  <p className="text-center text-sm text-background">{currentStatus.content}</p>
                 </div>
               )}
             </div>
@@ -186,25 +301,25 @@ const StatusPage = () => {
     );
   }
 
-  // ── Status list ──
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="mb-4 flex items-center justify-between">
         <h1 className="text-xl font-semibold text-foreground">Status</h1>
         <button
           onClick={fetchStatuses}
           disabled={loading}
-          className="p-2 rounded-lg text-muted-foreground hover:bg-accent transition-colors"
+          className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent"
+          aria-label="Refresh statuses"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
       {groups.length === 0 && !loading && (
-        <div className="text-center py-16 text-muted-foreground">
-          <Eye className="w-12 h-12 mx-auto mb-3 opacity-40" />
+        <div className="py-16 text-center text-muted-foreground">
+          <Eye className="mx-auto mb-3 h-12 w-12 opacity-40" />
           <p className="text-sm">No status updates yet</p>
-          <p className="text-xs mt-1">Status updates from your contacts will appear here</p>
+          <p className="mt-1 text-xs">Status updates from your contacts will appear here</p>
         </div>
       )}
 
@@ -212,27 +327,24 @@ const StatusPage = () => {
         {groups.map((group) => {
           const lastStatus = group.statuses[group.statuses.length - 1];
           const count = group.statuses.length;
+          const displayName = getDisplayName({ name: group.senderName, phone: group.senderPhone, jid: group.senderJid });
+
           return (
             <button
               key={group.senderJid}
               onClick={() => openViewer(group)}
-              className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-accent/50 transition-colors text-left"
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-accent/50"
             >
-              {/* Ring indicator */}
-              <div className="w-12 h-12 rounded-full border-2 border-primary flex items-center justify-center bg-muted">
-                <span className="text-sm font-medium text-muted-foreground">
-                  {(getDisplayName({ name: group.senderName, phone: group.senderPhone, jid: group.senderJid }) || '?')[0].toUpperCase()}
-                </span>
+              <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-primary bg-muted">
+                <span className="text-sm font-medium text-muted-foreground">{(displayName || '?')[0].toUpperCase()}</span>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground truncate">
-                  {getDisplayName({ name: group.senderName, phone: group.senderPhone, jid: group.senderJid })}
-                </p>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-foreground">{displayName}</p>
                 <p className="text-xs text-muted-foreground">
                   {count} update{count > 1 ? 's' : ''} · {formatDistanceToNow(new Date(lastStatus.timestamp), { addSuffix: true })}
                 </p>
               </div>
-              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </button>
           );
         })}

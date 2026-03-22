@@ -259,7 +259,9 @@ export const api = {
   },
 
   getStatusMediaUrl(filename: string) {
-    return toUrl(`/api/status-media/${filename}`);
+    const token = getAuthToken();
+    const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
+    return toUrl(`/api/status-media/${encodeURIComponent(filename)}`) + suffix;
   },
 };
 
