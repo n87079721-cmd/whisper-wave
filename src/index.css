@@ -5,8 +5,59 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 @layer base {
+  /* ===== LIGHT MODE (default) ===== */
   :root {
-    /* WhatsApp Dark Theme */
+    --background: 0 0% 100%;
+    --foreground: 200 19% 10%;
+
+    --card: 210 17% 95%;
+    --card-foreground: 200 19% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 200 19% 10%;
+
+    --primary: 162 73% 34%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 14% 93%;
+    --secondary-foreground: 200 12% 30%;
+
+    --muted: 210 14% 93%;
+    --muted-foreground: 200 10% 46%;
+
+    --accent: 162 60% 90%;
+    --accent-foreground: 162 73% 20%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 210 14% 89%;
+    --input: 210 14% 89%;
+    --ring: 162 73% 34%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 200 10% 40%;
+    --sidebar-primary: 162 73% 34%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 14% 95%;
+    --sidebar-accent-foreground: 200 19% 10%;
+    --sidebar-border: 210 14% 91%;
+    --sidebar-ring: 162 73% 34%;
+
+    --success: 162 73% 34%;
+    --warning: 38 92% 50%;
+    --info: 210 100% 56%;
+
+    --wa-teal-dark: 162 73% 34%;
+    --wa-bubble-out: 138 55% 88%;
+    --wa-bubble-in: 0 0% 100%;
+    --wa-chat-bg: 30 36% 89%;
+  }
+
+  /* ===== DARK MODE ===== */
+  .dark {
     --background: 200 18% 10%;
     --foreground: 0 0% 93%;
 
@@ -16,7 +67,7 @@
     --popover: 200 15% 15%;
     --popover-foreground: 0 0% 93%;
 
-    --primary: 150 60% 42%;
+    --primary: 162 73% 34%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 200 12% 17%;
@@ -25,7 +76,7 @@
     --muted: 200 10% 15%;
     --muted-foreground: 200 8% 50%;
 
-    --accent: 150 45% 36%;
+    --accent: 162 45% 20%;
     --accent-foreground: 0 0% 95%;
 
     --destructive: 0 72% 51%;
@@ -33,26 +84,25 @@
 
     --border: 200 10% 18%;
     --input: 200 10% 18%;
-    --ring: 150 60% 42%;
-
-    --radius: 0.5rem;
+    --ring: 162 73% 34%;
 
     --sidebar-background: 200 20% 7%;
     --sidebar-foreground: 200 8% 60%;
-    --sidebar-primary: 150 60% 42%;
+    --sidebar-primary: 162 73% 34%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 200 14% 14%;
     --sidebar-accent-foreground: 0 0% 93%;
     --sidebar-border: 200 12% 14%;
-    --sidebar-ring: 150 60% 42%;
+    --sidebar-ring: 162 73% 34%;
 
-    --success: 150 60% 42%;
+    --success: 162 73% 34%;
     --warning: 38 92% 50%;
     --info: 210 100% 56%;
 
-    --wa-teal-dark: 150 60% 42%;
-    --wa-bubble-out: 150 30% 20%;
+    --wa-teal-dark: 162 73% 34%;
+    --wa-bubble-out: 162 30% 18%;
     --wa-bubble-in: 200 12% 17%;
+    --wa-chat-bg: 200 18% 8%;
   }
 }
 
@@ -92,7 +142,8 @@
     @apply bg-clip-text text-transparent bg-gradient-to-r from-[hsl(var(--primary))] to-[hsl(var(--accent))];
   }
   .wa-pattern {
-    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.02'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    background-color: hsl(var(--wa-chat-bg));
+    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23000000' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
   }
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);

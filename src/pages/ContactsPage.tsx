@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 import { Search, MessageSquare } from 'lucide-react';
 import { api, type Contact } from '@/lib/api';
 import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
+import { getAvatarColor } from '@/lib/avatarColors';
 import SyncBanner from '@/components/SyncBanner';
 
 interface ContactsPageProps {
@@ -18,30 +18,21 @@ const ContactsPage = ({ onOpenChat, onNavigateSettings }: ContactsPageProps) => 
   const [loading, setLoading] = useState(true);
 
   const fetchContacts = () => {
-    api.getContacts().then(data => {
-      setContacts(data);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    api.getContacts().then(data => { setContacts(data); setLoading(false); }).catch(() => setLoading(false));
   };
 
   useEffect(() => {
     fetchContacts();
-
     let es: EventSource | null = null;
     const interval = window.setInterval(fetchContacts, 5000);
-
     try {
       es = api.createEventSource();
-      es.addEventListener('history_sync', () => fetchContacts());
-      es.addEventListener('message', () => fetchContacts());
-      es.addEventListener('contacts_sync', () => fetchContacts());
+      es.addEventListener('history_sync', fetchContacts);
+      es.addEventListener('message', fetchContacts);
+      es.addEventListener('contacts_sync', fetchContacts);
       es.onerror = () => {};
     } catch {}
-
-    return () => {
-      es?.close();
-      window.clearInterval(interval);
-    };
+    return () => { es?.close(); window.clearInterval(interval); };
   }, []);
 
   const cleanPhone = (p: string) => p?.replace(/@.*$/, '') || '';
@@ -65,23 +56,27 @@ const ContactsPage = ({ onOpenChat, onNavigateSettings }: ContactsPageProps) => 
   };
 
   const getInitials = (contact: Contact) =>
-    getDisplayName(contact)
-      .split(' ')
-      .map(n => n[0])
-      .join('')
-      .slice(0, 2)
-      .toUpperCase();
+    getDisplayName(contact).split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
 
   const filtered = contacts.filter(c =>
     (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
     cleanPhone(c.phone || '').includes(search)
   );
 
+  // Group contacts alphabetically
+  const grouped = filtered.reduce<Record<string, Contact[]>>((acc, c) => {
+    const letter = getDisplayName(c)[0]?.toUpperCase() || '#';
+    const key = /[A-Z]/.test(letter) ? letter : '#';
+    (acc[key] = acc[key] || []).push(c);
+    return acc;
+  }, {});
+  const sortedKeys = Object.keys(grouped).sort((a, b) => a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b));
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Contacts</h1>
-        <p className="text-sm text-muted-foreground mt-1">
+        <h1 className="text-lg font-bold text-foreground">Contacts</h1>
+        <p className="text-sm text-muted-foreground">
           {loading ? 'Loading...' : `${contacts.length} contacts synced`}
         </p>
       </div>
@@ -94,39 +89,51 @@ const ContactsPage = ({ onOpenChat, onNavigateSettings }: ContactsPageProps) => 
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search contacts..."
-          className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+          className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-secondary text-foreground text-sm placeholder:text-muted-foreground focus:outline-none"
         />
       </div>
 
       {filtered.length === 0 && !loading ? (
         <p className="text-sm text-muted-foreground text-center py-8">
-          {contacts.length === 0 ? 'No contacts yet. Connect WhatsApp to sync contacts.' : 'No contacts match your search.'}
+          {contacts.length === 0 ? 'No contacts yet. Connect WhatsApp to sync.' : 'No contacts match your search.'}
         </p>
       ) : (
-        <div className="space-y-1">
-          {filtered.map((contact, i) => (
-            <motion.div
-              key={contact.id}
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.03 }}
-              onClick={() => onOpenChat?.(contact)}
-              className="flex items-center justify-between p-3 rounded-lg hover:bg-secondary/80 transition-colors group cursor-pointer"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground">
-                  {getInitials(contact)}
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-foreground">{getDisplayName(contact)}</p>
-                  <p className="text-xs text-muted-foreground">{getDisplayMeta(contact)}</p>
-                </div>
+        <div>
+          {sortedKeys.map(letter => (
+            <div key={letter}>
+              <div className="px-3 py-1.5 sticky top-0 bg-background z-10">
+                <span className="text-xs font-semibold text-primary">{letter}</span>
               </div>
-              <div className="flex items-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
-                <span className="text-xs text-muted-foreground">{contact.message_count || 0} msgs</span>
-                <MessageSquare className="w-4 h-4 text-primary" />
-              </div>
-            </motion.div>
+              {grouped[letter].map((contact) => {
+                const color = getAvatarColor(contact.jid || contact.id);
+                return (
+                  <button
+                    key={contact.id}
+                    onClick={() => onOpenChat?.(contact)}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-secondary/60 transition-colors"
+                  >
+                    {contact.avatar_url ? (
+                      <img src={contact.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                    ) : (
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium text-white flex-shrink-0"
+                        style={{ backgroundColor: `hsl(${color})` }}
+                      >
+                        {getInitials(contact)}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[15px] font-medium text-foreground truncate">{getDisplayName(contact)}</p>
+                      <p className="text-xs text-muted-foreground">{getDisplayMeta(contact)}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 opacity-60">
+                      <span className="text-xs text-muted-foreground">{contact.message_count || 0}</span>
+                      <MessageSquare className="w-3.5 h-3.5 text-muted-foreground" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           ))}
         </div>
       )}
