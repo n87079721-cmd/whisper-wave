@@ -103,6 +103,18 @@ function ensureCurrentTables(db) {
       expires_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS call_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      caller_jid TEXT NOT NULL,
+      caller_phone TEXT,
+      caller_name TEXT,
+      is_video INTEGER DEFAULT 0,
+      is_group INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'missed',
+      timestamp TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 }
 
