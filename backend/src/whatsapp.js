@@ -947,6 +947,34 @@ async function startConnection(userId, db, options = {}) {
       if (changed > 0) emit(userId, 'contacts_sync', { count: changed });
     });
 
+    // Handle status deletions / revocations
+    inst.sock.ev.on('messages.update', (updates) => {
+      for (const update of updates) {
+        try {
+          const jid = update.key?.remoteJid;
+          if (jid !== 'status@broadcast') continue;
+          
+          // Check if status was deleted/revoked
+          const msgUpdate = update.update;
+          if (msgUpdate?.messageStubType === 1 || msgUpdate?.message === null || msgUpdate?.status === 5) {
+            const statusId = update.key?.id;
+            if (!statusId) continue;
+            
+            const row = db.prepare("SELECT media_path FROM statuses WHERE id = ? AND user_id = ?").get(statusId, userId);
+            if (row?.media_path) {
+              const filePath = path.join(STATUS_MEDIA_DIR, row.media_path);
+              try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
+            }
+            db.prepare("DELETE FROM statuses WHERE id = ? AND user_id = ?").run(statusId, userId);
+            emit(userId, 'status_update', { deleted: true, statusId });
+            console.log(`🗑️ [${userId}] Status deleted: ${statusId}`);
+          }
+        } catch (err) {
+          console.error('messages.update (status) error:', err?.message || err);
+        }
+      }
+    });
+
     inst.sock.ev.on('contacts.upsert', (contacts) => {
       let changed = 0;
       for (const c of contacts) {
