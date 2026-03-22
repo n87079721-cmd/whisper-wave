@@ -185,6 +185,8 @@ export function createApiRouter(db) {
         send('sync_state', data);
       } else if (event === 'status_update') {
         send('status_update', data);
+      } else if (event === 'call') {
+        send('call', data);
       }
     });
 
