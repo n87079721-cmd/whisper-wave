@@ -90,6 +90,19 @@ function ensureCurrentTables(db) {
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS statuses (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      sender_jid TEXT NOT NULL,
+      sender_phone TEXT,
+      sender_name TEXT,
+      content TEXT,
+      media_type TEXT DEFAULT 'text',
+      media_path TEXT,
+      timestamp TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 }
 
