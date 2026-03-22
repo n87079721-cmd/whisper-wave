@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
+import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
+import SyncBanner from '@/components/SyncBanner';
 
 interface ConversationsPageProps {
   initialContact?: Contact | null;
