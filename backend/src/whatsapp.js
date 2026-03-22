@@ -626,9 +626,22 @@ async function startConnection(userId, db, options = {}) {
           const phone = '+' + resolved.phone;
           const resolvedJid = resolved.jid;
 
-          // If we just resolved a LID, reconcile existing DB entries
+          // If we just resolved a LID, reconcile existing DB entries BEFORE creating new ones
           if (jid.endsWith('@lid') && resolvedJid !== jid) {
             reconcileLidContacts(db, userId, jid, resolved.phone);
+          }
+          // Also check if there's an existing contact with the resolved JID to prevent duplicates
+          if (jid.endsWith('@lid') && resolvedJid === jid && msg.key.senderPn) {
+            // senderPn gave us the real phone but resolveLidPhone may have already used it
+            const senderPhone = msg.key.senderPn.replace('@s.whatsapp.net', '').replace(/@.*$/, '');
+            if (senderPhone && /^\d{7,15}$/.test(senderPhone)) {
+              reconcileLidContacts(db, userId, jid, senderPhone);
+              // Re-resolve after reconciliation
+              const reResolved = resolveLidPhone(inst, jid);
+              if (reResolved.jid !== jid) {
+                Object.assign(resolved, reResolved);
+              }
+            }
           }
 
           const isGroup = jid.endsWith('@g.us');
