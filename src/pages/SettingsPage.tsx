@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Key, Shield, Power, Loader2, Globe, Brain, LogOut, MessageSquare, Save, Clock, Dice5, Gauge, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Clock, Dice5, Gauge, RefreshCw, Globe } from 'lucide-react';
 import { api } from '@/lib/api';
-import { getStoredApiUrl, setStoredApiUrl, isBackendConfigured } from '@/lib/api';
 import { toast } from 'sonner';
 import { Slider } from '@/components/ui/slider';
 import { useWhatsAppStatus, type SyncState } from '@/hooks/useWhatsAppStatus';
@@ -10,8 +9,6 @@ import { useWhatsAppStatus, type SyncState } from '@/hooks/useWhatsAppStatus';
 const SettingsPage = () => {
   const { status: waStatus, syncState } = useWhatsAppStatus();
   const isConnected = waStatus === 'connected';
-  const [backendUrl, setBackendUrl] = useState(getStoredApiUrl());
-  const [backendSaved, setBackendSaved] = useState(isBackendConfigured());
   const [elevenLabsKey, setElevenLabsKey] = useState('');
   const [openaiKey, setOpenaiKey] = useState('');
   const [autoEnabled, setAutoEnabled] = useState(false);
@@ -22,7 +19,7 @@ const SettingsPage = () => {
   const [keyExists, setKeyExists] = useState(false);
   const [openaiKeyExists, setOpenaiKeyExists] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [resyncing, setResyncing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   // Availability settings
   const [activeHoursStart, setActiveHoursStart] = useState('10:00');
@@ -95,6 +92,15 @@ const SettingsPage = () => {
     finally { setLoggingOut(false); }
   };
 
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      await api.triggerSync();
+      toast.success('Sync started — contacts and messages are being refreshed');
+    } catch { toast.error('Failed to start sync'); }
+    finally { setSyncing(false); }
+  };
+
   const handleToggleAuto = async () => {
     const newVal = !autoEnabled;
     setAutoEnabled(newVal);
@@ -106,13 +112,6 @@ const SettingsPage = () => {
     catch { toast.error('Failed to save setting'); }
   };
 
-  const handleSaveBackendUrl = () => {
-    setStoredApiUrl(backendUrl);
-    setBackendSaved(!!backendUrl);
-    toast.success(backendUrl ? 'Backend URL saved — reload to connect' : 'Backend URL cleared');
-    setTimeout(() => window.location.reload(), 600);
-  };
-
   return (
     <div className="space-y-4 md:space-y-6 max-w-2xl">
       <div>
@@ -120,22 +119,47 @@ const SettingsPage = () => {
         <p className="text-sm text-muted-foreground mt-1">Manage API keys and bot configuration</p>
       </div>
 
-      {/* Backend URL */}
+      {/* Sync */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-6 space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center"><Globe className="w-5 h-5 text-primary" /></div>
-          <div>
-            <h3 className="font-semibold text-foreground text-sm">Backend URL</h3>
-            <p className="text-xs text-muted-foreground">Your VPS backend address (e.g. http://167.235.128.214:3002){backendSaved && <span className="text-primary ml-1">✓ Connected</span>}</p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center"><RefreshCw className="w-5 h-5 text-primary" /></div>
+            <div>
+              <h3 className="font-semibold text-foreground text-sm">Sync</h3>
+              <p className="text-xs text-muted-foreground">Re-sync contacts and messages from WhatsApp</p>
+            </div>
           </div>
+          <button onClick={handleSync} disabled={syncing || !isConnected}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40">
+            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            {syncing ? 'Syncing...' : 'Sync Now'}
+          </button>
         </div>
-        <input type="url" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)}
-          placeholder="http://your-vps-ip:3002"
-          className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50" />
-        <button onClick={handleSaveBackendUrl}
-          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2">
-          <Save className="w-4 h-4" /> Save Backend URL
-        </button>
+
+        {/* Live sync stats */}
+        {isConnected && (
+          <div className="p-3 rounded-lg bg-muted/50 border border-border space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-foreground">Sync Status</span>
+              <span className={`text-xs font-medium ${
+                syncState.phase === 'ready' ? 'text-primary' :
+                syncState.phase === 'partial' ? 'text-warning' :
+                syncState.phase === 'importing' ? 'text-primary' : 'text-muted-foreground'
+              }`}>
+                {syncState.phase === 'ready' ? '✓ Complete' :
+                 syncState.phase === 'partial' ? '⚠ Partial' :
+                 syncState.phase === 'importing' ? '⏳ Importing…' :
+                 syncState.phase === 'waiting_history' ? '⏳ Waiting…' : '—'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span>Contacts: <span className="text-foreground font-medium">{syncState.totalDbContacts}</span></span>
+              <span>Messages: <span className="text-foreground font-medium">{syncState.totalDbMessages}</span></span>
+              <span>History chats: <span className="text-foreground font-medium">{syncState.historyChats}</span></span>
+              <span>Unresolved: <span className={`font-medium ${syncState.unresolvedLids > 0 ? 'text-warning' : 'text-foreground'}`}>{syncState.unresolvedLids}</span></span>
+            </div>
+          </div>
+        )}
       </motion.div>
 
       {/* ElevenLabs API Key — input only, no reveal */}
@@ -190,69 +214,6 @@ const SettingsPage = () => {
             {loggingOut ? 'Logging out...' : 'Logout'}
           </button>
         </div>
-      </motion.div>
-
-      {/* Fresh Re-sync */}
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.07 }} className="glass rounded-xl p-6 space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center"><RefreshCw className="w-5 h-5 text-primary" /></div>
-          <div>
-            <h3 className="font-semibold text-foreground text-sm">Fresh Re-sync</h3>
-            <p className="text-xs text-muted-foreground">If contacts/chats are missing, this clears your session and re-imports everything from WhatsApp.</p>
-          </div>
-        </div>
-
-        {/* Live sync status */}
-        {isConnected && (
-          <div className="p-3 rounded-lg bg-muted/50 border border-border space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-foreground">Sync Status</span>
-              <span className={`text-xs font-medium ${
-                syncState.phase === 'ready' ? 'text-primary' :
-                syncState.phase === 'partial' ? 'text-warning' :
-                syncState.phase === 'importing' ? 'text-primary' : 'text-muted-foreground'
-              }`}>
-                {syncState.phase === 'ready' ? '✓ Complete' :
-                 syncState.phase === 'partial' ? '⚠ Partial' :
-                 syncState.phase === 'importing' ? '⏳ Importing…' :
-                 syncState.phase === 'waiting_history' ? '⏳ Waiting…' : '—'}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-              <span>Contacts: <span className="text-foreground font-medium">{syncState.totalDbContacts}</span></span>
-              <span>Messages: <span className="text-foreground font-medium">{syncState.totalDbMessages}</span></span>
-              <span>History chats: <span className="text-foreground font-medium">{syncState.historyChats}</span></span>
-              <span>Unresolved: <span className={`font-medium ${syncState.unresolvedLids > 0 ? 'text-warning' : 'text-foreground'}`}>{syncState.unresolvedLids}</span></span>
-            </div>
-          </div>
-        )}
-
-        <div className="p-3 rounded-lg bg-muted/50 border border-border">
-          <p className="text-xs text-muted-foreground">
-            <strong className="text-foreground">What this does:</strong> Disconnects WhatsApp, clears local data, and asks you to scan a new QR code.
-            When you re-pair, WhatsApp will send your full chat history again with proper contact names.
-          </p>
-          <p className="text-xs text-muted-foreground mt-1.5">
-            <strong className="text-foreground">Your phone messages are NOT affected.</strong> Only the local copy in this app is reset.
-          </p>
-        </div>
-        <button 
-          onClick={async () => {
-            if (!confirm('This will clear all local data and require you to re-scan the QR code. Your WhatsApp messages on your phone are NOT affected. Continue?')) return;
-            setResyncing(true);
-            try {
-              await api.clearSession();
-              toast.success('Session cleared — scan the QR code on the Dashboard to re-sync');
-              setTimeout(() => window.location.reload(), 1500);
-            } catch { toast.error('Failed to clear session'); }
-            finally { setResyncing(false); }
-          }}
-          disabled={resyncing}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40"
-        >
-          {resyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          {resyncing ? 'Clearing...' : 'Clear & Re-sync'}
-        </button>
       </motion.div>
 
       {/* Automation Toggle + Settings */}
