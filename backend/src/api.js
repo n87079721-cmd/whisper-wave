@@ -176,6 +176,8 @@ export function createApiRouter(db) {
         send('history_sync', data);
       } else if (event === 'contacts_sync') {
         send('contacts_sync', data);
+      } else if (event === 'sync_state') {
+        send('sync_state', data);
       }
     });
 
