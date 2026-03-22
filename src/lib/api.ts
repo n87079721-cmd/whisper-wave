@@ -305,3 +305,18 @@ export interface Stats {
   messagesReceived: number;
   activeContacts: number;
 }
+
+export interface StatusItem {
+  id: string;
+  content: string;
+  mediaType: 'text' | 'image' | 'video';
+  mediaPath: string | null;
+  timestamp: string;
+}
+
+export interface StatusGroup {
+  senderJid: string;
+  senderPhone: string;
+  senderName: string | null;
+  statuses: StatusItem[];
+}

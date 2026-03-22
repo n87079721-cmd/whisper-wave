@@ -29,6 +29,7 @@ const Index = () => {
       case 'conversations': return <ConversationsPage initialContact={selectedContact} onContactOpened={() => setSelectedContact(null)} onNavigateSettings={() => setActivePage('settings')} />;
       case 'voice': return <VoiceStudioPage />;
       case 'settings': return <SettingsPage />;
+      case 'status': return <StatusPage />;
     }
   };
 
