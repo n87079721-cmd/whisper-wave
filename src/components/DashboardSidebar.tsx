@@ -11,6 +11,7 @@ import {
   LogOut,
   Sun,
   Moon,
+  CircleDot,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
