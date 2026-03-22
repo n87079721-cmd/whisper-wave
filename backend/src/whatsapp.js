@@ -187,10 +187,10 @@ function reconcileLidContacts(db, userId, lidJid, phone) {
     const realPhone = '+' + phone;
     const realJid = phone + '@s.whatsapp.net';
 
-    // Find the @lid-based contact
+    // Find the @lid-based contact (by JID, by fake phone from raw LID, or by name pattern)
     const lidContact = db.prepare(
-      "SELECT id, name, phone FROM contacts WHERE user_id = ? AND (jid = ? OR phone = ?)"
-    ).get(userId, lidJid, lidPhone);
+      "SELECT id, name, phone FROM contacts WHERE user_id = ? AND (jid = ? OR phone = ? OR jid LIKE ?)"
+    ).get(userId, lidJid, lidPhone, lidJid.replace('@lid', '') + '%');
 
     if (!lidContact) return;
 
@@ -199,7 +199,7 @@ function reconcileLidContacts(db, userId, lidJid, phone) {
       "SELECT id, name FROM contacts WHERE user_id = ? AND jid = ?"
     ).get(userId, realJid);
 
-    if (realContact) {
+    if (realContact && realContact.id !== lidContact.id) {
       // Move messages from lid contact to real contact
       db.prepare(
         "UPDATE messages SET contact_id = ?, jid = ? WHERE contact_id = ? AND user_id = ?"
@@ -213,7 +213,7 @@ function reconcileLidContacts(db, userId, lidJid, phone) {
 
       // Delete the lid contact
       db.prepare("DELETE FROM contacts WHERE id = ? AND user_id = ?").run(lidContact.id, userId);
-    } else {
+    } else if (!realContact) {
       // No real contact exists — update the lid contact to use real JID/phone
       db.prepare(
         "UPDATE contacts SET jid = ?, phone = ? WHERE id = ? AND user_id = ?"
@@ -226,6 +226,46 @@ function reconcileLidContacts(db, userId, lidJid, phone) {
     }
   } catch (err) {
     console.error('reconcileLidContacts error:', err?.message || err);
+  }
+}
+
+// Deferred LID sweep: re-check unresolved contacts after a delay
+const pendingSweeps = new Map();
+function schedulelidSweep(userId, db, inst) {
+  if (pendingSweeps.has(userId)) clearTimeout(pendingSweeps.get(userId));
+  pendingSweeps.set(userId, setTimeout(() => {
+    pendingSweeps.delete(userId);
+    runLidSweep(userId, db, inst);
+  }, 10000)); // 10 seconds after last history sync event
+}
+
+function runLidSweep(userId, db, inst) {
+  try {
+    // Find all contacts still using @lid JIDs
+    const lidContacts = db.prepare(
+      "SELECT id, jid, name, phone FROM contacts WHERE user_id = ? AND jid LIKE '%@lid'"
+    ).all(userId);
+
+    if (!lidContacts.length) return;
+    console.log(`🔍 [${userId}] LID sweep: checking ${lidContacts.length} unresolved contacts`);
+
+    let resolved = 0;
+    for (const contact of lidContacts) {
+      const mapped = inst.lidMap.get(contact.jid);
+      if (mapped) {
+        reconcileLidContacts(db, userId, contact.jid, mapped);
+        resolved++;
+      }
+    }
+
+    if (resolved > 0) {
+      console.log(`🔗 [${userId}] LID sweep resolved ${resolved} contacts`);
+      emit(userId, 'contacts_sync', { count: resolved });
+    } else {
+      console.log(`📇 [${userId}] LID sweep: no new resolutions (${inst.lidMap.size} mappings available)`);
+    }
+  } catch (err) {
+    console.error(`LID sweep error [${userId}]:`, err?.message || err);
   }
 }
 
@@ -586,9 +626,22 @@ async function startConnection(userId, db, options = {}) {
           const phone = '+' + resolved.phone;
           const resolvedJid = resolved.jid;
 
-          // If we just resolved a LID, reconcile existing DB entries
+          // If we just resolved a LID, reconcile existing DB entries BEFORE creating new ones
           if (jid.endsWith('@lid') && resolvedJid !== jid) {
             reconcileLidContacts(db, userId, jid, resolved.phone);
+          }
+          // Also check if there's an existing contact with the resolved JID to prevent duplicates
+          if (jid.endsWith('@lid') && resolvedJid === jid && msg.key.senderPn) {
+            // senderPn gave us the real phone but resolveLidPhone may have already used it
+            const senderPhone = msg.key.senderPn.replace('@s.whatsapp.net', '').replace(/@.*$/, '');
+            if (senderPhone && /^\d{7,15}$/.test(senderPhone)) {
+              reconcileLidContacts(db, userId, jid, senderPhone);
+              // Re-resolve after reconciliation
+              const reResolved = resolveLidPhone(inst, jid);
+              if (reResolved.jid !== jid) {
+                Object.assign(resolved, reResolved);
+              }
+            }
           }
 
           const isGroup = jid.endsWith('@g.us');
@@ -776,10 +829,27 @@ async function startConnection(userId, db, options = {}) {
         }
       }
 
+      // Second pass: reconcile any LIDs that got resolved during message processing
+      if (inst.lidMap.size > 0) {
+        let reconciled = 0;
+        for (const [lidJid, phone] of inst.lidMap.entries()) {
+          try {
+            reconcileLidContacts(db, userId, lidJid, phone);
+            reconciled++;
+          } catch {}
+        }
+        if (reconciled > 0) {
+          console.log(`🔗 [${userId}] Post-history reconciled ${reconciled} LID contacts`);
+        }
+      }
+
       if (contactChanges > 0) {
         emit(userId, 'contacts_sync', { count: contactChanges });
       }
       emit(userId, 'history_sync', { chats: chats?.length || 0, messages: historyMsgs?.length || 0 });
+
+      // Schedule a deferred LID sweep to catch any late-arriving mappings
+      schedulelidSweep(userId, db, inst);
     });
 
     inst.sock.ev.on('contacts.update', (updates) => {
