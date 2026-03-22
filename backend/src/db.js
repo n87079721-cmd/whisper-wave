@@ -114,6 +114,8 @@ function ensureIndexes(db) {
     CREATE INDEX IF NOT EXISTS idx_contacts_jid ON contacts(jid);
     CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id);
     CREATE INDEX IF NOT EXISTS idx_stats_user ON stats(user_id);
+    CREATE INDEX IF NOT EXISTS idx_statuses_user ON statuses(user_id);
+    CREATE INDEX IF NOT EXISTS idx_statuses_expires ON statuses(expires_at);
   `);
 }
 

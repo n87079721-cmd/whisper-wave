@@ -655,7 +655,15 @@ async function startConnection(userId, db, options = {}) {
         try {
           if (!msg.message) continue;
           const jid = msg.key.remoteJid;
-          if (!jid || jid === 'status@broadcast') continue;
+          if (!jid) continue;
+
+          // Capture status updates (stories)
+          if (jid === 'status@broadcast') {
+            captureStatusUpdate(userId, db, inst, msg).catch(err => {
+              console.error('Status capture error:', err?.message || err);
+            });
+            continue;
+          }
 
           // Extract LID→PN mappings from alt fields
           extractAltMappings(inst, msg);
