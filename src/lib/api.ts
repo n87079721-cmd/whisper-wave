@@ -252,6 +252,15 @@ export const api = {
   triggerSync() {
     return requestJson<{ success: boolean; syncState?: any }>('/api/trigger-sync', { method: 'POST' });
   },
+
+  // Statuses (Stories)
+  getStatuses() {
+    return requestJson<StatusGroup[]>('/api/statuses');
+  },
+
+  getStatusMediaUrl(filename: string) {
+    return toUrl(`/api/status-media/${filename}`);
+  },
 };
 
 // Types
