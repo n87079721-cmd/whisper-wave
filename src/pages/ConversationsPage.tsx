@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare } from 'lucide-react';
+import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 import { getAvatarColor } from '@/lib/avatarColors';
@@ -37,6 +37,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
   const selectedContactRef = useRef<Contact | null>(null);
   const shouldAutoScrollRef = useRef(true);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -50,6 +51,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     if (!viewport) return;
     const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     shouldAutoScrollRef.current = distanceFromBottom < 150;
+    setShowScrollDown(distanceFromBottom > 300);
   }, []);
 
   const refreshMessages = useCallback(async (
@@ -425,18 +427,20 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
               </div>
 
               {/* Messages area */}
-              <div
-                ref={messagesViewportRef}
-                onScroll={syncAutoScrollState}
-                className="flex-1 overflow-y-auto overscroll-contain p-3 md:p-4 wa-pattern"
-              >
-                {groupedMessages.map((group) => (
-                  <div key={group.date}>
-                    {/* Date separator */}
-                    <div className="flex justify-center my-3">
-                      <span className="px-3 py-1 rounded-lg bg-card/90 text-[11px] text-muted-foreground shadow-sm">
-                        {group.date}
-                      </span>
+              <div className="relative flex-1 min-h-0">
+                <div
+                  ref={messagesViewportRef}
+                  onScroll={syncAutoScrollState}
+                  className="absolute inset-0 overflow-y-auto overscroll-contain p-3 md:p-4 wa-pattern"
+                >
+                  {groupedMessages.map((group) => (
+                    <div key={group.date}>
+                      {/* Date separator */}
+                      <div className="flex justify-center my-3">
+                        <span className="px-3 py-1 rounded-lg bg-card/90 text-[11px] text-muted-foreground shadow-sm">
+                          {group.date}
+                        </span>
+                      </div>
                     </div>
                     {/* Messages */}
                     <div className="space-y-1">
