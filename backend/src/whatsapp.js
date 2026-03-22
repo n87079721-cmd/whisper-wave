@@ -758,6 +758,17 @@ async function startConnection(userId, db, options = {}) {
     inst.sock.ev.on('messaging-history.set', ({ chats, contacts: syncedContacts, messages: historyMsgs }) => {
       console.log(`📜 [${userId}] History sync: ${chats?.length || 0} chats, ${syncedContacts?.length || 0} contacts, ${historyMsgs?.length || 0} messages`);
 
+      // Update sync state
+      updateSyncState(userId, db, {
+        phase: 'importing',
+        lastHistorySyncAt: new Date().toISOString(),
+        historyChats: (inst.syncState.historyChats || 0) + (chats?.length || 0),
+        historyContacts: (inst.syncState.historyContacts || 0) + (syncedContacts?.length || 0),
+        historyMessages: (inst.syncState.historyMessages || 0) + (historyMsgs?.length || 0),
+      });
+      // Reset grace timer since we got data
+      scheduleSyncGrace(userId, db);
+
       let contactChanges = 0;
       let historyDebugCount = 0;
 
