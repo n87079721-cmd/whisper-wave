@@ -2,9 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
-import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
 import { getAvatarColor } from '@/lib/avatarColors';
-import SyncBanner from '@/components/SyncBanner';
 
 interface ConversationsPageProps {
   initialContact?: Contact | null;
@@ -12,9 +10,7 @@ interface ConversationsPageProps {
   onNavigateSettings?: () => void;
 }
 
-const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings }: ConversationsPageProps) => {
-  const { status: waStatus, syncState } = useWhatsAppStatus();
-  const isWaConnected = waStatus === 'connected';
+const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPageProps) => {
   const [conversations, setConversations] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -339,13 +335,6 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
 
   return (
     <div className="h-[calc(100dvh-5rem)] md:h-[calc(100vh-2.5rem)] flex flex-col">
-      {/* Sync banner */}
-      {(syncState.phase === 'partial' || syncState.phase === 'importing' || syncState.phase === 'waiting_history') && (
-        <div className="px-1 pb-2">
-          <SyncBanner syncState={syncState} isConnected={isWaConnected} onResync={onNavigateSettings} compact />
-        </div>
-      )}
-
       <div className="flex-1 flex min-h-0 rounded-xl overflow-hidden border border-border bg-card">
         {/* ===== LEFT: Conversation list ===== */}
         <div className={`${showChatOnMobile ? 'hidden md:flex' : 'flex'} w-full md:w-[340px] lg:w-[380px] flex-shrink-0 flex-col border-r border-border bg-background`}>
