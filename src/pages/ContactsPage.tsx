@@ -20,11 +20,10 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
   useEffect(() => {
     fetchContacts();
     let es: EventSource | null = null;
-    const interval = window.setInterval(fetchContacts, 5000);
+    const interval = window.setInterval(fetchContacts, 30000);
     try {
       es = api.createEventSource();
       es.addEventListener('history_sync', fetchContacts);
-      es.addEventListener('message', fetchContacts);
       es.addEventListener('contacts_sync', fetchContacts);
       es.onerror = () => {};
     } catch {}

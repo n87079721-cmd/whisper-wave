@@ -37,6 +37,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
   const selectedContactRef = useRef<Contact | null>(null);
   const shouldAutoScrollRef = useRef(true);
+  const conversationsRefreshTimerRef = useRef<number | null>(null);
+  const contactsRefreshTimerRef = useRef<number | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [chatSearch, setChatSearch] = useState('');
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
@@ -91,11 +93,31 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     } catch {}
   }, []);
 
+  const scheduleConversationRefresh = useCallback(() => {
+    if (conversationsRefreshTimerRef.current !== null) return;
+    conversationsRefreshTimerRef.current = window.setTimeout(() => {
+      conversationsRefreshTimerRef.current = null;
+      refreshConversations();
+    }, 120);
+  }, [refreshConversations]);
+
+  const scheduleContactsRefresh = useCallback(() => {
+    if (contactsRefreshTimerRef.current !== null) return;
+    contactsRefreshTimerRef.current = window.setTimeout(() => {
+      contactsRefreshTimerRef.current = null;
+      refreshAllContacts();
+    }, 180);
+  }, [refreshAllContacts]);
+
   useEffect(() => {
     refreshConversations().then(() => setLoading(false));
     api.getVoices().then(setVoices).catch(() => {});
+  }, [refreshConversations]);
+
+  useEffect(() => {
+    if (!showNewChat || allContacts.length > 0) return;
     refreshAllContacts();
-  }, [refreshConversations, refreshAllContacts]);
+  }, [allContacts.length, refreshAllContacts, showNewChat]);
 
   useEffect(() => {
     if (!initialContact) return;
@@ -104,25 +126,64 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [initialContact, onContactOpened]);
 
   useEffect(() => {
-    const refreshActiveConversation = () => {
-      refreshConversations();
-      refreshAllContacts();
+    const refreshSelectedConversation = () => {
       const current = selectedContactRef.current;
       if (current) refreshMessages(current.id);
+    };
+
+    const handleMessageEvent = (event: Event) => {
+      scheduleConversationRefresh();
+      const current = selectedContactRef.current;
+      if (!current) return;
+      try {
+        const data = event instanceof MessageEvent ? JSON.parse(event.data) : null;
+        if (!data?.contactId || data.contactId === current.id) {
+          refreshMessages(current.id);
+        }
+      } catch {
+        refreshMessages(current.id);
+      }
+    };
+
+    const handleHistoryEvent = () => {
+      scheduleConversationRefresh();
+      refreshSelectedConversation();
+      if (showNewChat) scheduleContactsRefresh();
+    };
+
+    const handleContactsEvent = () => {
+      scheduleConversationRefresh();
+      if (showNewChat) scheduleContactsRefresh();
     };
 
     let es: EventSource | null = null;
     try {
       es = api.createEventSource();
-      es.addEventListener('message', refreshActiveConversation);
-      es.addEventListener('history_sync', refreshActiveConversation);
-      es.addEventListener('contacts_sync', refreshActiveConversation);
+      es.addEventListener('message', handleMessageEvent);
+      es.addEventListener('history_sync', handleHistoryEvent);
+      es.addEventListener('contacts_sync', handleContactsEvent);
       es.onerror = () => {};
     } catch {}
 
-    const interval = setInterval(refreshActiveConversation, 5000);
-    return () => { es?.close(); clearInterval(interval); };
-  }, [refreshAllContacts, refreshConversations, refreshMessages]);
+    const interval = window.setInterval(() => {
+      refreshConversations();
+      refreshSelectedConversation();
+      if (showNewChat) refreshAllContacts();
+    }, 30000);
+
+    return () => {
+      es?.close();
+      window.clearInterval(interval);
+      if (conversationsRefreshTimerRef.current !== null) {
+        window.clearTimeout(conversationsRefreshTimerRef.current);
+        conversationsRefreshTimerRef.current = null;
+      }
+      if (contactsRefreshTimerRef.current !== null) {
+        window.clearTimeout(contactsRefreshTimerRef.current);
+        contactsRefreshTimerRef.current = null;
+      }
+    };
+  }, [showNewChat, refreshAllContacts, refreshConversations, refreshMessages, scheduleContactsRefresh, scheduleConversationRefresh]);
 
   useEffect(() => {
     if (!selectedContact?.id) return;

@@ -246,9 +246,14 @@ export function createApiRouter(db) {
   // ── Contacts ──────────────────────────────────────────────
   router.get('/contacts', (req, res) => {
     const contacts = db.prepare(`
-      SELECT c.*, 
-        (SELECT COUNT(*) FROM messages m WHERE m.contact_id = c.id AND m.user_id = ?) as message_count
-      FROM contacts c 
+      SELECT c.*, COALESCE(mc.message_count, 0) as message_count
+      FROM contacts c
+      LEFT JOIN (
+        SELECT contact_id, COUNT(*) as message_count
+        FROM messages
+        WHERE user_id = ?
+        GROUP BY contact_id
+      ) mc ON mc.contact_id = c.id
       WHERE c.user_id = ? AND c.is_group = 0
       ORDER BY c.updated_at DESC
     `).all(req.userId, req.userId);
@@ -265,13 +270,19 @@ export function createApiRouter(db) {
 
   router.get('/conversations', (req, res) => {
     const conversations = db.prepare(`
-      SELECT c.*, m.content as last_message, m.type as last_type, m.timestamp as last_timestamp
-      FROM contacts c
-      INNER JOIN messages m ON m.id = (
-        SELECT id FROM messages WHERE contact_id = c.id AND user_id = ? ORDER BY timestamp DESC LIMIT 1
+      WITH ranked_messages AS (
+        SELECT m.*, ROW_NUMBER() OVER (
+          PARTITION BY m.contact_id
+          ORDER BY m.timestamp DESC, m.created_at DESC, m.id DESC
+        ) as rn
+        FROM messages m
+        WHERE m.user_id = ?
       )
+      SELECT c.*, rm.content as last_message, rm.type as last_type, rm.timestamp as last_timestamp
+      FROM contacts c
+      INNER JOIN ranked_messages rm ON rm.contact_id = c.id AND rm.rn = 1
       WHERE c.user_id = ? AND c.is_group = 0
-      ORDER BY m.timestamp DESC
+      ORDER BY rm.timestamp DESC
     `).all(req.userId, req.userId);
     res.json(conversations);
   });
