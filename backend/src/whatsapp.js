@@ -921,18 +921,6 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false) 
     return target.id;
   }
 
-  if (existing) {
-    const comparisonPhone = safePhone || existing.phone || '';
-    if (shouldReplaceName(candidate, existing.name, comparisonPhone) || (isUnresolvedLid && !existing.name)) {
-      db.prepare("UPDATE contacts SET name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = datetime('now') WHERE id = ?")
-        .run(resolvedName, safePhone, isGroup ? 1 : 0, existing.id);
-    } else {
-      db.prepare("UPDATE contacts SET phone = COALESCE(?, phone), is_group = ?, updated_at = datetime('now') WHERE id = ?")
-        .run(safePhone, isGroup ? 1 : 0, existing.id);
-    }
-    return existing.id;
-  }
-
   const id = uuid();
   db.prepare(`
     INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, ?)

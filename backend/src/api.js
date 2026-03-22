@@ -49,6 +49,56 @@ export function createApiRouter(db) {
     return getOrInitWhatsApp(req.userId, db);
   }
 
+  function normalizePhoneDigits(value) {
+    return String(value || '').replace(/[^0-9]/g, '');
+  }
+
+  function getCanonicalPhoneJid(phone) {
+    const raw = String(phone || '').trim();
+    if (!raw || raw.includes('@')) return null;
+
+    const digits = normalizePhoneDigits(raw);
+    if (digits.length < 7 || digits.length > 15) return null;
+    return `${digits}@s.whatsapp.net`;
+  }
+
+  function mergeContactRows(userId, sourceContactId, targetContactId, targetJid) {
+    if (!sourceContactId || !targetContactId || sourceContactId === targetContactId) return;
+
+    db.prepare('UPDATE messages SET contact_id = ?, jid = ? WHERE contact_id = ? AND user_id = ?')
+      .run(targetContactId, targetJid, sourceContactId, userId);
+
+    db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?')
+      .run(sourceContactId, userId);
+  }
+
+  function canonicalizeContact(userId, contact) {
+    if (!contact) return null;
+
+    const canonicalJid = contact.jid.endsWith('@lid') ? getCanonicalPhoneJid(contact.phone) : contact.jid;
+    if (!canonicalJid || canonicalJid === contact.jid) return contact;
+
+    const canonicalPhoneDigits = normalizePhoneDigits(contact.phone);
+    const canonicalPhone = canonicalPhoneDigits ? `+${canonicalPhoneDigits}` : null;
+    const canonical = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE jid = ? AND user_id = ?')
+      .get(canonicalJid, userId);
+
+    if (canonical && canonical.id !== contact.id) {
+      const betterName = contact.name && !contact.name.includes('@') ? contact.name : canonical.name;
+      db.prepare("UPDATE contacts SET name = COALESCE(?, name), phone = COALESCE(?, phone), updated_at = datetime('now') WHERE id = ?")
+        .run(betterName, canonicalPhone, canonical.id);
+      mergeContactRows(userId, contact.id, canonical.id, canonicalJid);
+      return { ...canonical, name: canonical.name || betterName, phone: canonical.phone || canonicalPhone };
+    }
+
+    db.prepare("UPDATE contacts SET jid = ?, phone = COALESCE(?, phone), updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+      .run(canonicalJid, canonicalPhone, contact.id, userId);
+    db.prepare('UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?')
+      .run(canonicalJid, contact.id, userId);
+
+    return { ...contact, jid: canonicalJid, phone: contact.phone || canonicalPhone };
+  }
+
   // ── Status & QR ──────────────────────────────────────────
   router.get('/status', (req, res) => {
     const wa = getWA(req);
@@ -204,25 +254,58 @@ export function createApiRouter(db) {
       if (!message || (!contactId && !jid)) return res.status(400).json({ error: 'Missing contactId/jid or message' });
 
       const wa = getWA(req);
+      let contactRow = null;
       let targetJid = jid;
+
       if (contactId && !jid) {
-        const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, req.userId);
+        const contact = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE id = ? AND user_id = ?').get(contactId, req.userId);
         if (!contact) return res.status(404).json({ error: 'Contact not found' });
-        targetJid = contact.jid;
+        contactRow = canonicalizeContact(req.userId, contact);
+        targetJid = contactRow.jid;
       }
 
       await wa.sendTextMessage(targetJid, message);
 
       const msgId = uuid();
-      // Upsert contact — create if doesn't exist
-      let contactRow = db.prepare('SELECT id FROM contacts WHERE jid = ? AND user_id = ?').get(targetJid, req.userId);
+
       if (!contactRow) {
-        const newId = uuid();
-        const phone = '+' + targetJid.replace(/@.*$/, '');
-        db.prepare(`
-          INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, 0)
-        `).run(newId, req.userId, targetJid, phone, phone);
-        contactRow = { id: newId };
+        contactRow = db.prepare('SELECT id, jid, phone FROM contacts WHERE jid = ? AND user_id = ?').get(targetJid, req.userId);
+      }
+
+      if (!contactRow) {
+        const phoneDigits = targetJid.endsWith('@s.whatsapp.net') ? normalizePhoneDigits(targetJid) : '';
+        const normalizedPhone = phoneDigits ? `+${phoneDigits}` : null;
+
+        if (normalizedPhone) {
+          contactRow = db.prepare(`
+            SELECT id, jid, phone
+            FROM contacts
+            WHERE user_id = ? AND phone = ? AND is_group = 0
+            ORDER BY CASE
+              WHEN jid = ? THEN 0
+              WHEN jid LIKE '%@lid' THEN 1
+              ELSE 2
+            END,
+            updated_at DESC
+            LIMIT 1
+          `).get(req.userId, normalizedPhone, targetJid);
+
+          if (contactRow) {
+            db.prepare("UPDATE contacts SET jid = ?, phone = COALESCE(?, phone), updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+              .run(targetJid, normalizedPhone, contactRow.id, req.userId);
+            db.prepare('UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?')
+              .run(targetJid, contactRow.id, req.userId);
+          }
+        }
+
+        if (!contactRow) {
+          const newId = uuid();
+          const phone = normalizedPhone || (targetJid.endsWith('@lid') ? null : '+' + targetJid.replace(/@.*$/, ''));
+          db.prepare(`
+            INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, 0)
+          `).run(newId, req.userId, targetJid, phone || 'WhatsApp contact', phone);
+          contactRow = { id: newId, jid: targetJid, phone };
+        }
       }
 
       db.prepare(`
