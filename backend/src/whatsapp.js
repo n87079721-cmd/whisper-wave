@@ -615,6 +615,8 @@ async function startConnection(userId, db, options = {}) {
         inst.repairInProgress = false;
         emit(userId, 'connected', null);
         console.log(`✅ [${userId}] WhatsApp connected (gen ${generation})`);
+        updateSyncState(userId, db, { phase: 'waiting_history', connectedAt: new Date().toISOString() });
+        scheduleSyncGrace(userId, db);
         syncContacts(userId, db);
       }
 
