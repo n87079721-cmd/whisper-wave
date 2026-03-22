@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2, AlertTriangle, Settings, QrCode, Phone, ArrowRight, RefreshCw } from 'lucide-react';
 import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
 import StatusBadge from '@/components/StatusBadge';
-import SyncBanner from '@/components/SyncBanner';
 import { api, isBackendConfigured } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
@@ -181,8 +180,6 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
           </div>
         </div>
       </div>
-
-      <SyncBanner syncState={syncState} isConnected={isConnected} onResync={onNavigateSettings} />
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
