@@ -2,9 +2,12 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Search, MessageSquare } from 'lucide-react';
 import { api, type Contact } from '@/lib/api';
+import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
+import SyncBanner from '@/components/SyncBanner';
 
 interface ContactsPageProps {
   onOpenChat?: (contact: Contact) => void;
+  onNavigateSettings?: () => void;
 }
 
 const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
