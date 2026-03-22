@@ -1294,6 +1294,21 @@ async function clearSession(userId, db) {
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
+  if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
+
+  // Reset sync state
+  inst.syncState = {
+    phase: 'idle',
+    connectedAt: null,
+    lastHistorySyncAt: null,
+    storeContacts: 0,
+    historyChats: 0,
+    historyContacts: 0,
+    historyMessages: 0,
+    unresolvedLids: 0,
+    totalDbContacts: 0,
+    totalDbMessages: 0,
+  };
 
   if (inst.sock) {
     try { inst.sock.ev.removeAllListeners('connection.update'); } catch {}
@@ -1325,5 +1340,6 @@ async function clearSession(userId, db) {
 
   inst.isConnecting = false;
   emit(userId, 'status', { status: 'disconnected' });
+  emit(userId, 'sync_state', inst.syncState);
   console.log(`🗑️ [${userId}] Session fully cleared.`);
 }
