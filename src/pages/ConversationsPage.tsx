@@ -300,18 +300,50 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
   const showChatOnMobile = !!selectedContact;
 
+  // In-chat search matches
+  const chatSearchMatches = useMemo(() => {
+    if (!chatSearch.trim()) return [] as number[];
+    const q = chatSearch.toLowerCase();
+    return messages
+      .map((msg, idx) => ({ msg, idx }))
+      .filter(({ msg }) => msg.type !== 'voice' && msg.content?.toLowerCase().includes(q))
+      .map(({ idx }) => idx);
+  }, [messages, chatSearch]);
+
+  useEffect(() => {
+    if (chatSearchMatches.length > 0) setChatSearchIndex(0);
+  }, [chatSearchMatches.length, chatSearch]);
+
+  const scrollToChatSearchMatch = useCallback((matchIdx: number) => {
+    const viewport = messagesViewportRef.current;
+    if (!viewport) return;
+    const msgIdx = chatSearchMatches[matchIdx];
+    const el = viewport.querySelector(`[data-msg-idx="${msgIdx}"]`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [chatSearchMatches]);
+
+  useEffect(() => {
+    if (chatSearchMatches.length > 0) scrollToChatSearchMatch(chatSearchIndex);
+  }, [chatSearchIndex, chatSearchMatches, scrollToChatSearchMatch]);
+
+  const chatSearchMatchSet = useMemo(() => new Set(chatSearchMatches), [chatSearchMatches]);
+  const activeChatSearchIdx = chatSearchMatches[chatSearchIndex] ?? -1;
+
   // Group messages by date
   const groupedMessages = useMemo(() => {
-    const groups: { date: string; messages: Message[] }[] = [];
+    const groups: { date: string; messages: (Message & { _idx: number })[] }[] = [];
     let currentDate = '';
+    let idx = 0;
     for (const msg of messages) {
       const date = formatDate(msg.timestamp);
+      const tagged = { ...msg, _idx: idx };
       if (date !== currentDate) {
         currentDate = date;
-        groups.push({ date, messages: [msg] });
+        groups.push({ date, messages: [tagged] });
       } else {
-        groups[groups.length - 1].messages.push(msg);
+        groups[groups.length - 1].messages.push(tagged);
       }
+      idx++;
     }
     return groups;
   }, [messages]);
