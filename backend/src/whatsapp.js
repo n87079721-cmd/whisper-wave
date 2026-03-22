@@ -1527,13 +1527,13 @@ export function getStatuses(db, userId) {
       mediaPath: row.media_path,
       timestamp: row.timestamp,
     });
+  }
+
+  return Object.values(grouped);
 }
 
 export function getCallLogs(db, userId) {
   return db.prepare(`
     SELECT * FROM call_logs WHERE user_id = ? ORDER BY timestamp DESC LIMIT 200
   `).all(userId);
-}
-
-  return Object.values(grouped);
 }
