@@ -244,6 +244,9 @@ const DashboardPage = () => {
         )}
       </motion.div>
 
+      {/* Sync Status */}
+      <SyncBanner syncState={syncState} isConnected={isConnected} />
+
       {/* Stats */}
       <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
         {statCards.map((stat, i) => (

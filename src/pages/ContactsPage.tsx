@@ -10,7 +10,9 @@ interface ContactsPageProps {
   onNavigateSettings?: () => void;
 }
 
-const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
+const ContactsPage = ({ onOpenChat, onNavigateSettings }: ContactsPageProps) => {
+  const { status, syncState } = useWhatsAppStatus();
+  const isConnected = status === 'connected';
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
