@@ -156,7 +156,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const getDisplayMeta = (contact: Contact) => {
     const cleaned = cleanPhone(contact.phone || '');
     if (cleaned) return cleaned;
-    return contact.jid.endsWith('@lid') ? 'Waiting for sync' : '';
+    return '';
   };
 
   const getInitials = (contact: Contact) =>
