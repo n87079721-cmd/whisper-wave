@@ -1,15 +1,19 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2, AlertTriangle, Settings, QrCode, Phone } from 'lucide-react';
+import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2, AlertTriangle, Settings, QrCode, Phone, ArrowRight, RefreshCw } from 'lucide-react';
 import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
 import StatusBadge from '@/components/StatusBadge';
 import SyncBanner from '@/components/SyncBanner';
 import { api, isBackendConfigured } from '@/lib/api';
-import { Link, useNavigate } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 
-const DashboardPage = () => {
+interface DashboardPageProps {
+  onNavigateSettings?: () => void;
+  onNavigateConversations?: () => void;
+}
+
+const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: DashboardPageProps) => {
   const backendReady = isBackendConfigured();
   const { status, qr, stats, syncState, refresh } = useWhatsAppStatus();
   const [connecting, setConnecting] = useState(false);
@@ -21,12 +25,26 @@ const DashboardPage = () => {
   const isConnected = status === 'connected';
   const isWaiting = status === 'qr_waiting';
   const isReconnecting = status === 'reconnecting';
+  const needsAttention = syncState.phase === 'partial' || syncState.unresolvedLids > 0;
+  const syncSummary = isConnected
+    ? syncState.phase === 'ready' && syncState.unresolvedLids === 0
+      ? 'Linked and fully usable.'
+      : syncState.phase === 'partial'
+        ? 'Linked, but WhatsApp did not finish bringing older history over.'
+        : syncState.phase === 'importing' || syncState.phase === 'waiting_history'
+          ? 'Connection is live while chats and names continue importing.'
+          : 'Linked device is still resolving contact identities.'
+    : isWaiting
+      ? 'Waiting for QR scan or pairing-code confirmation.'
+      : isReconnecting
+        ? 'Trying to restore the device session safely.'
+        : 'Not connected to a WhatsApp device yet.';
 
   const statCards = [
-    { label: 'Messages Sent', value: stats.messagesSent.toLocaleString(), icon: MessageSquare },
-    { label: 'Voice Notes', value: stats.voiceSent.toString(), icon: Mic },
-    { label: 'Active Contacts', value: stats.activeContacts.toString(), icon: Users },
-    { label: 'Received', value: stats.messagesReceived.toLocaleString(), icon: Activity },
+    { label: 'Messages Sent', value: stats.messagesSent.toLocaleString(), icon: MessageSquare, caption: 'Outgoing text activity' },
+    { label: 'Voice Notes', value: stats.voiceSent.toString(), icon: Mic, caption: 'Generated and delivered' },
+    { label: 'Active Contacts', value: stats.activeContacts.toString(), icon: Users, caption: 'Contacts with history' },
+    { label: 'Received', value: stats.messagesReceived.toLocaleString(), icon: Activity, caption: 'Inbound message volume' },
   ];
 
   const handleConnect = async () => {
@@ -86,36 +104,91 @@ const DashboardPage = () => {
               Deploy the backend on your VPS, then set the URL in Settings to connect.
             </p>
           </div>
-          <Link
-            to="/settings"
+          <button
+            type="button"
+            onClick={onNavigateSettings}
             className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors flex items-center gap-1.5"
           >
             <Settings className="w-3.5 h-3.5" />
             Settings
-          </Link>
+          </button>
         </motion.div>
       )}
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">Dashboard</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">WhatsApp Bot Control Panel</p>
+      <section className="rounded-2xl border border-border bg-card/95 p-5 md:p-6 shadow-sm">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-2xl space-y-4">
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">Operations dashboard</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-2xl md:text-3xl font-semibold text-foreground">Professional control over connection, sync, and message flow.</h1>
+              </div>
+              <p className="max-w-xl text-sm text-muted-foreground">
+                {syncSummary}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge
+                connected={isConnected}
+                label={isWaiting ? 'QR Waiting' : isReconnecting ? 'Reconnecting' : undefined}
+                syncPhase={isConnected ? syncState.phase : undefined}
+              />
+              <button
+                type="button"
+                onClick={() => onNavigateConversations?.()}
+                className="inline-flex items-center gap-2 rounded-lg bg-secondary px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/80"
+              >
+                Open chats
+                <ArrowRight className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigateSettings?.()}
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/50"
+              >
+                {needsAttention ? <RefreshCw className="h-4 w-4" /> : <Settings className="h-4 w-4" />}
+                {needsAttention ? 'Recovery tools' : 'Settings'}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:w-[25rem]">
+            <div className="rounded-xl border border-border bg-background/70 p-4">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Sync health</p>
+              <p className="mt-2 text-2xl font-semibold text-foreground">{syncState.totalDbMessages.toLocaleString()}</p>
+              <p className="mt-1 text-sm text-muted-foreground">Messages currently available in the local dashboard.</p>
+            </div>
+            <div className="rounded-xl border border-border bg-background/70 p-4">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Contacts ready</p>
+              <p className="mt-2 text-2xl font-semibold text-foreground">{syncState.totalDbContacts.toLocaleString()}</p>
+              <p className="mt-1 text-sm text-muted-foreground">Contacts visible for search, new chats, and replies.</p>
+            </div>
+            <div className="rounded-xl border border-border bg-background/70 p-4 sm:col-span-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">What this app can and cannot do</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Live messaging works once linked. Old chats only appear if the linked WhatsApp device actually finishes history sync.
+                  </p>
+                </div>
+                <div className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-foreground">
+                  {syncState.phase === 'partial' ? 'Needs re-sync' : syncState.phase === 'ready' ? 'Stable' : 'Live'}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <StatusBadge
-          connected={isConnected}
-          label={isWaiting ? 'QR Waiting' : isReconnecting ? 'Reconnecting' : undefined}
-          syncPhase={isConnected ? syncState.phase : undefined}
-        />
-      </div>
+      </section>
 
       {/* Connection Card */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-lg bg-card border border-border p-5"
-      >
-        <div className="flex items-center justify-between">
+      <div className="grid gap-4 lg:grid-cols-[1.4fr,1fr]">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl bg-card border border-border p-5"
+        >
+          <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             {isConnected ? (
               <div className="w-10 h-10 rounded-full bg-primary/15 flex items-center justify-center">
@@ -242,24 +315,59 @@ const DashboardPage = () => {
             )}
           </div>
         )}
-      </motion.div>
+        </motion.div>
+
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">System status</h2>
+              <p className="mt-1 text-xs text-muted-foreground">A cleaner read on what is healthy versus what still needs work.</p>
+            </div>
+            <Activity className="h-5 w-5 text-primary" />
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <div className="rounded-xl border border-border bg-background/70 p-4">
+              <p className="text-xs text-muted-foreground">Transport</p>
+              <p className="mt-1 text-sm font-medium text-foreground">
+                {isConnected ? 'Connected to linked device' : isWaiting ? 'Awaiting pairing' : isReconnecting ? 'Trying to recover session' : 'Disconnected'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-border bg-background/70 p-4">
+              <p className="text-xs text-muted-foreground">History import</p>
+              <p className="mt-1 text-sm font-medium text-foreground">
+                {syncState.phase === 'ready' ? 'Imported and resolved' : syncState.phase === 'partial' ? 'Partial — older chats may be missing' : syncState.phase === 'importing' ? 'Importing now' : syncState.phase === 'waiting_history' ? 'Waiting for WhatsApp history' : 'Idle'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-border bg-background/70 p-4">
+              <p className="text-xs text-muted-foreground">Unresolved identities</p>
+              <p className="mt-1 text-sm font-medium text-foreground">{syncState.unresolvedLids} still waiting for real phone-number mapping.</p>
+            </div>
+          </div>
+        </section>
+      </div>
 
       {/* Sync Status */}
-      <SyncBanner syncState={syncState} isConnected={isConnected} />
+      <SyncBanner syncState={syncState} isConnected={isConnected} onResync={onNavigateSettings} />
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {statCards.map((stat, i) => (
           <motion.div
             key={stat.label}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.04 }}
-            className="rounded-lg bg-card border border-border p-4"
+            className="rounded-2xl bg-card border border-border p-4"
           >
-            <div className="flex items-center gap-2 mb-2">
-              <stat.icon className="w-4 h-4 text-primary" />
-              <span className="text-xs text-muted-foreground">{stat.label}</span>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/15">
+                <stat.icon className="w-4 h-4 text-primary" />
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground">{stat.label}</span>
+                <p className="text-[11px] text-muted-foreground/80">{stat.caption}</p>
+              </div>
             </div>
             <p className="text-2xl font-semibold text-foreground">{stat.value}</p>
           </motion.div>
