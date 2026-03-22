@@ -38,6 +38,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const selectedContactRef = useRef<Contact | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [chatSearch, setChatSearch] = useState('');
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [chatSearchIndex, setChatSearchIndex] = useState(0);
+  const chatSearchInputRef = useRef<HTMLInputElement | null>(null);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
