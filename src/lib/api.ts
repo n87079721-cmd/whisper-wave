@@ -327,3 +327,14 @@ export interface StatusGroup {
   senderName: string | null;
   statuses: StatusItem[];
 }
+
+export interface CallLog {
+  id: string;
+  caller_jid: string;
+  caller_phone: string;
+  caller_name: string | null;
+  is_video: number;
+  is_group: number;
+  status: string;
+  timestamp: string;
+}

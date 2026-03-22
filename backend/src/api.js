@@ -535,6 +535,16 @@ RULES:
     }
   });
 
+  // ── Call Logs ───────────────────────────────────────────
+  router.get('/call-logs', (req, res) => {
+    try {
+      const logs = getCallLogs(db, req.userId);
+      res.json(logs);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/status-media/:filename', (req, res) => {
     try {
       const filePath = path.join(__dirname, '..', 'data', 'status-media', req.params.filename);
