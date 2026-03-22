@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, type StatusGroup, type StatusItem } from '@/lib/api';
 import { formatDistanceToNow } from 'date-fns';
 import { RefreshCw, X, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
-import { getDisplayName } from '@/lib/contactDisplay';
+import { getContactDisplayName } from '@/lib/contactDisplay';
 
 const TEXT_BG_COLORS = [
   'bg-emerald-600', 'bg-sky-600', 'bg-violet-600', 'bg-amber-600',
