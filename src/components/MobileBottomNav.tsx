@@ -23,15 +23,16 @@ const navItems: { id: Page; label: string; icon: React.ElementType }[] = [
 
 const MobileBottomNav = ({ activePage, onPageChange }: MobileBottomNavProps) => {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-sidebar border-t border-sidebar-border md:hidden safe-bottom">
-      <div className="flex items-center justify-around px-1 py-1.5">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-sidebar-border bg-sidebar/95 backdrop-blur md:hidden safe-bottom shadow-[0_-12px_30px_hsl(var(--background)/0.45)]">
+      <div className="mx-auto flex max-w-xl items-center justify-around px-2 py-2">
         {navItems.map((item) => {
           const isActive = activePage === item.id;
           return (
             <button
+              type="button"
               key={item.id}
               onClick={() => onPageChange(item.id)}
-              className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg transition-colors min-w-0 flex-1 ${
+              className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-2 py-2 transition-colors ${
                 isActive ? 'text-primary' : 'text-sidebar-foreground'
               }`}
             >

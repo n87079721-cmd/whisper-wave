@@ -321,6 +321,8 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
   };
 
   const openNewChatPanel = () => {
+    setNewChatPhone('');
+    setContactSearch('');
     setShowNewChat(true);
   };
 
@@ -561,7 +563,7 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
 
         {/* New conversation panel — replaces chat on mobile, overlay on desktop */}
         {showNewChat && (
-          <div className="fixed inset-0 z-50 flex items-end bg-background/80 backdrop-blur-sm md:absolute md:items-center md:justify-center">
+          <div className="fixed inset-0 z-[70] flex items-end bg-background/80 backdrop-blur-sm md:absolute md:items-center md:justify-center">
             <div className="w-full overflow-hidden rounded-t-2xl border border-border bg-card shadow-2xl md:w-[26rem] md:max-h-[80vh] md:rounded-2xl">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-foreground">New Conversation</h3>
