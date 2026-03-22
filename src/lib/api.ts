@@ -55,6 +55,14 @@ const toUrl = (path: string) => {
   return base ? `${base}${path}` : path;
 };
 
+function normalizePhoneDigits(value: string): string {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function toPhoneJid(value: string): string {
+  return `${normalizePhoneDigits(value)}@s.whatsapp.net`;
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   if (!getApiUrl()) {
     throw new Error('Backend URL not configured. Go to Settings → Backend URL to set it.');
@@ -188,7 +196,7 @@ export const api = {
   },
 
   sendTextToPhone(phone: string, message: string) {
-    const jid = phone.replace(/^\+/, '') + '@s.whatsapp.net';
+    const jid = toPhoneJid(phone);
     return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/text', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

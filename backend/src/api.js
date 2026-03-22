@@ -62,6 +62,20 @@ export function createApiRouter(db) {
     return `${digits}@s.whatsapp.net`;
   }
 
+  function getCanonicalTargetJid(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    if (!raw.includes('@')) return getCanonicalPhoneJid(raw);
+
+    if (raw.endsWith('@s.whatsapp.net')) {
+      const digits = normalizePhoneDigits(raw);
+      if (digits.length < 7 || digits.length > 15) return null;
+      return `${digits}@s.whatsapp.net`;
+    }
+
+    return raw;
+  }
+
   function mergeContactRows(userId, sourceContactId, targetContactId, targetJid) {
     if (!sourceContactId || !targetContactId || sourceContactId === targetContactId) return;
 
@@ -255,7 +269,7 @@ export function createApiRouter(db) {
 
       const wa = getWA(req);
       let contactRow = null;
-      let targetJid = jid;
+      let targetJid = jid ? getCanonicalTargetJid(jid) : null;
 
       if (contactId && !jid) {
         const contact = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE id = ? AND user_id = ?').get(contactId, req.userId);
@@ -263,6 +277,8 @@ export function createApiRouter(db) {
         contactRow = canonicalizeContact(req.userId, contact);
         targetJid = contactRow.jid;
       }
+
+      if (!targetJid) return res.status(400).json({ error: 'Invalid WhatsApp number' });
 
       await wa.sendTextMessage(targetJid, message);
 
