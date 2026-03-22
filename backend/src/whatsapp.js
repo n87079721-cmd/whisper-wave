@@ -459,6 +459,7 @@ export function initWhatsApp(userId, db) {
     clearSession: () => clearSession(userId, db),
     getSocket: () => getInstance(userId).sock,
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
+    triggerSync: () => syncContacts(userId, db),
   };
 }
 
@@ -477,6 +478,7 @@ export function getOrInitWhatsApp(userId, db) {
     clearSession: () => clearSession(userId, db),
     getSocket: () => inst.sock,
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
+    triggerSync: () => syncContacts(userId, db),
   };
 }
 

@@ -248,6 +248,10 @@ export const api = {
   clearSession() {
     return requestJson<{ success: boolean }>('/api/clear-session', { method: 'POST' });
   },
+
+  triggerSync() {
+    return requestJson<{ success: boolean; syncState?: any }>('/api/trigger-sync', { method: 'POST' });
+  },
 };
 
 // Types
