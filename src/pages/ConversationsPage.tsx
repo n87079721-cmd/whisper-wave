@@ -309,6 +309,7 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
   return (
     <div className="space-y-4">
       <h1 className="text-xl md:text-2xl font-bold text-foreground">Conversations</h1>
+      <SyncBanner syncState={syncState} isConnected={isWaConnected} onResync={onNavigateSettings} compact />
 
       <div className="relative flex gap-4 h-[calc(100vh-180px)] md:h-[calc(100vh-180px)] h-[calc(100dvh-160px)]">
         {/* Contact list - hidden on mobile when chat is open */}
