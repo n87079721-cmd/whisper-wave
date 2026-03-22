@@ -399,21 +399,31 @@ export function createApiRouter(db) {
       const apiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
       if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured.' });
 
-      const systemPrompt = `You rewrite text for expressive voice delivery using ElevenLabs v3 expression tags. You MUST insert multiple tags.
+      const cleanedInput = String(text)
+        .replace(/\[[^\]\n]{1,40}\]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim() || String(text).trim();
+
+      const systemPrompt = `You rewrite text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note.
 
 AVAILABLE EXPRESSION TAGS (use the ones that fit the emotion/context):
 Emotions: [happy] [sad] [angry] [excited] [nervous] [scared] [disgusted] [surprised] [confused] [bored] [proud] [shy] [jealous] [grateful] [hopeful] [disappointed] [embarrassed] [anxious] [frustrated] [amused]
 Reactions: [laughing] [crying] [gasping] [sighing] [groaning] [screaming] [giggling] [chuckling] [sniffling] [yawning]
 Delivery: [whispering] [shouting] [singing] [mumbling] [sarcastically] [dramatically] [deadpan] [breathlessly] [cheerfully] [sadly] [angrily] [nervously] [excitedly] [lovingly] [coldly] [mockingly]
 Physical: [clearing throat] [coughing] [sneezing] [hiccupping] [clicking tongue] [tutting] [blowing raspberry] [kissing teeth] [inhaling sharply] [exhaling deeply] [clapping]
+Pacing cues: [pause] [hesitates] [breathes] [slows down] [drawn out] [continues after a beat] ... —
 
 RULES:
-- You MUST add at least 2-4 expression tags per response, placed naturally BEFORE the words they affect
-- Each time you rewrite, produce a DIFFERENT version — vary word choice, tag placement, and phrasing
+- Output ONE rewritten version only
+- Make it sound spoken, not written
+- Use 2-4 total cues, and at least 1 of them must shape pacing naturally
+- Use the RIGHT cue in the RIGHT spot; never spam tags or stack them everywhere
+- If the input already had tags, rewrite from the meaning and create a fresh new version instead of keeping the same tags
+- Break long sentences into shorter spoken chunks when needed
 - Use contractions (I'm, don't, can't, won't, it's)
-- Add natural pauses: ... (long pause), — (short break)
-- Add filler words where natural (honestly, you know, I mean, like)
-- Keep the same meaning but make it sound like real talking, not reading
+- Add natural pauses with tags or punctuation where helpful, but keep it believable
+- Add filler words only when they genuinely help the delivery
+- Keep the same meaning but make it feel conversational and human-paced
 - Match tags to context: happy news → [excited] [happy], bad news → [sighing] [sadly], funny → [laughing] [chuckling], serious → [clearing throat] [inhaling sharply]
 - Return ONLY the enhanced text. No quotes, no explanation, no preamble.`;
 
@@ -424,9 +434,9 @@ RULES:
           model: 'gpt-4o-mini',
           messages: [
             { role: 'system', content: systemPrompt },
-            { role: 'user', content: `Rewrite this for expressive voice delivery with expression tags:\n\n${text}` }
+            { role: 'user', content: `Rewrite this for a natural WhatsApp voice note:\n\n${cleanedInput}` }
           ],
-          temperature: 1.0,
+          temperature: 1.15,
           max_tokens: 1024,
         }),
       });

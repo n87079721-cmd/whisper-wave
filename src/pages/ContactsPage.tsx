@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, MessageSquare } from 'lucide-react';
 import { api, type Contact } from '@/lib/api';
-import { getAvatarColor } from '@/lib/avatarColors';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
 
 interface ContactsPageProps {
@@ -76,7 +75,6 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
                 <span className="text-xs font-semibold text-primary">{letter}</span>
               </div>
               {grouped[letter].map((contact) => {
-                const color = getAvatarColor(contact.jid || contact.id);
                 return (
                   <button
                     key={contact.id}
@@ -87,8 +85,7 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
                       <img src={contact.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
                     ) : (
                       <div
-                        className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium text-white flex-shrink-0"
-                        style={{ backgroundColor: `hsl(${color})` }}
+                        className="w-10 h-10 rounded-full flex items-center justify-center border border-border bg-muted text-sm font-medium text-foreground flex-shrink-0"
                       >
                         {getContactInitials(contact)}
                       </div>
