@@ -500,6 +500,7 @@ async function startConnection(userId, db, options = {}) {
     try { inst.sock.ev.removeAllListeners('connection.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('messages.upsert'); } catch {}
     try { inst.sock.ev.removeAllListeners('messages.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('call'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.upsert'); } catch {}
     try { inst.sock.ev.removeAllListeners('messaging-history.set'); } catch {}
