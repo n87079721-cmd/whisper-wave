@@ -136,7 +136,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
   const hasRealName = (contact: Contact) => {
     const value = contact.name?.trim();
-    return !!value && !value.includes('@') && !/^\+?\d{7,}$/.test(value.replace(/\s+/g, ''));
+    return (
+      !!value
+      && !value.includes('@')
+      && !value.toLowerCase().startsWith('whatsapp contact')
+      && value.toLowerCase() !== 'unknown contact'
+      && !/^\+?\d{7,}$/.test(value.replace(/\s+/g, ''))
+    );
   };
 
   const getDisplayName = (contact: Contact) => {
