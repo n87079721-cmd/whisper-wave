@@ -505,9 +505,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       </div>
                       {/* Messages */}
                       <div className="space-y-1">
-                        {group.messages.map((msg) => (
+                        {group.messages.map((msg) => {
+                          const isMatch = chatSearchMatchSet.has(msg._idx);
+                          const isActive = msg._idx === activeChatSearchIdx;
+                          return (
                           <div
                             key={msg.id}
+                            data-msg-idx={msg._idx}
                             className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                           >
                             <div
@@ -515,7 +519,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                 msg.direction === 'sent'
                                   ? 'bg-wa-bubble-out text-foreground rounded-tr-none'
                                   : 'bg-wa-bubble-in text-foreground rounded-tl-none'
-                              }`}
+                              } ${isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''}`}
                             >
                               {msg.type === 'voice' ? (
                                 <div className="flex items-center gap-2">
