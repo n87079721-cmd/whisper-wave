@@ -350,7 +350,41 @@ function resolveLidPhone(inst, jid) {
 
 export function getWhatsAppState(userId) {
   const inst = getInstance(userId);
-  return { status: inst.connectionStatus, qr: inst.qrCode, pairingCode: inst.pairingCode };
+  return {
+    status: inst.connectionStatus,
+    qr: inst.qrCode,
+    pairingCode: inst.pairingCode,
+    syncState: { ...inst.syncState },
+  };
+}
+
+function updateSyncState(userId, db, updates) {
+  const inst = getInstance(userId);
+  Object.assign(inst.syncState, updates);
+  // Compute live DB counts
+  try {
+    inst.syncState.totalDbContacts = db.prepare('SELECT COUNT(*) as c FROM contacts WHERE user_id = ? AND is_group = 0').get(userId)?.c || 0;
+    inst.syncState.totalDbMessages = db.prepare('SELECT COUNT(*) as c FROM messages WHERE user_id = ?').get(userId)?.c || 0;
+    inst.syncState.unresolvedLids = db.prepare("SELECT COUNT(*) as c FROM contacts WHERE user_id = ? AND jid LIKE '%@lid'").get(userId)?.c || 0;
+  } catch {}
+  emit(userId, 'sync_state', inst.syncState);
+}
+
+function scheduleSyncGrace(userId, db) {
+  const inst = getInstance(userId);
+  if (inst.syncGraceTimer) clearTimeout(inst.syncGraceTimer);
+  inst.syncGraceTimer = setTimeout(() => {
+    inst.syncGraceTimer = null;
+    // If still waiting for history and nothing arrived, mark partial
+    if (inst.syncState.phase === 'waiting_history') {
+      updateSyncState(userId, db, { phase: 'partial' });
+    }
+    // If importing finished but counts are very low, mark partial
+    if (inst.syncState.phase === 'importing') {
+      const phase = inst.syncState.historyMessages > 0 ? 'ready' : 'partial';
+      updateSyncState(userId, db, { phase });
+    }
+  }, 30000); // 30s grace period
 }
 
 export function onWhatsAppEvent(userId, listener) {
