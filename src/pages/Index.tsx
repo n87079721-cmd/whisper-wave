@@ -7,10 +7,11 @@ import ConversationsPage from '@/pages/ConversationsPage';
 import VoiceStudioPage from '@/pages/VoiceStudioPage';
 import SettingsPage from '@/pages/SettingsPage';
 import StatusPage from '@/pages/StatusPage';
+import CallsPage from '@/pages/CallsPage';
 import { type Contact } from '@/lib/api';
 import { useTheme } from '@/hooks/useTheme';
 
-type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status';
+type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status' | 'calls';
 
 const Index = () => {
   const [activePage, setActivePage] = useState<Page>('dashboard');
@@ -30,6 +31,7 @@ const Index = () => {
       case 'voice': return <VoiceStudioPage />;
       case 'settings': return <SettingsPage />;
       case 'status': return <StatusPage />;
+      case 'calls': return <CallsPage />;
     }
   };
 
