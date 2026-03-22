@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Search, MessageSquare } from 'lucide-react';
 import { api, type Contact } from '@/lib/api';
 import { getAvatarColor } from '@/lib/avatarColors';
+import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
 
 interface ContactsPageProps {
   onOpenChat?: (contact: Contact) => void;
@@ -31,43 +32,14 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
     return () => { es?.close(); window.clearInterval(interval); };
   }, []);
 
-  const cleanPhone = (p: string) => p?.replace(/@.*$/, '') || '';
-
-  const hasRealName = (contact: Contact) => {
-    const value = contact.name?.trim();
-    return (
-      !!value
-      && !value.includes('@')
-      && !value.toLowerCase().startsWith('whatsapp contact')
-      && value.toLowerCase() !== 'unknown contact'
-      && !/^\+?\d{7,}$/.test(value.replace(/\s+/g, ''))
-    );
-  };
-
-  const getDisplayName = (contact: Contact) => {
-    const cleaned = cleanPhone(contact.phone || '');
-    if (hasRealName(contact)) return contact.name as string;
-    if (cleaned) return cleaned;
-    return contact.jid.endsWith('@lid') ? 'WhatsApp contact' : 'Unknown contact';
-  };
-
-  const getDisplayMeta = (contact: Contact) => {
-    const cleaned = cleanPhone(contact.phone || '');
-    if (cleaned) return cleaned;
-    return '';
-  };
-
-  const getInitials = (contact: Contact) =>
-    getDisplayName(contact).split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
-
   const filtered = contacts.filter(c =>
-    (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
-    cleanPhone(c.phone || '').includes(search)
+    getContactDisplayName(c).toLowerCase().includes(search.toLowerCase()) ||
+    cleanContactPhone(c.phone || '').includes(search)
   );
 
   // Group contacts alphabetically
   const grouped = filtered.reduce<Record<string, Contact[]>>((acc, c) => {
-    const letter = getDisplayName(c)[0]?.toUpperCase() || '#';
+    const letter = getContactDisplayName(c)[0]?.toUpperCase() || '#';
     const key = /[A-Z]/.test(letter) ? letter : '#';
     (acc[key] = acc[key] || []).push(c);
     return acc;
@@ -118,12 +90,12 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
                         className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium text-white flex-shrink-0"
                         style={{ backgroundColor: `hsl(${color})` }}
                       >
-                        {getInitials(contact)}
+                        {getContactInitials(contact)}
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <p className="text-[15px] font-medium text-foreground truncate">{getDisplayName(contact)}</p>
-                      <p className="text-xs text-muted-foreground">{getDisplayMeta(contact)}</p>
+                      <p className="text-[15px] font-medium text-foreground truncate">{getContactDisplayName(contact)}</p>
+                      <p className="text-xs text-muted-foreground">{getContactDisplayMeta(contact)}</p>
                     </div>
                     <div className="flex items-center gap-1.5 opacity-60">
                       <span className="text-xs text-muted-foreground">{contact.message_count || 0}</span>

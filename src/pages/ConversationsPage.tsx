@@ -3,6 +3,7 @@ import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, A
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 import { getAvatarColor } from '@/lib/avatarColors';
+import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
 
 interface ConversationsPageProps {
   initialContact?: Contact | null;
@@ -127,7 +128,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     refreshMessages(selectedContact.id, { forceScroll: true });
   }, [selectedContact?.id, refreshMessages]);
 
-  const cleanPhone = (p: string) => p?.replace(/@.*$/, '') || '';
   const normalizePhoneDigits = (value: string) => value.replace(/\D/g, '');
   const formatPhoneDraft = (value: string) => {
     const trimmed = value.trim();
@@ -135,36 +135,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     return trimmed.startsWith('+') ? `+${digits}` : digits;
   };
 
-  const hasRealName = (contact: Contact) => {
-    const value = contact.name?.trim();
-    return (
-      !!value
-      && !value.includes('@')
-      && !value.toLowerCase().startsWith('whatsapp contact')
-      && value.toLowerCase() !== 'unknown contact'
-      && !/^\+?\d{7,}$/.test(value.replace(/\s+/g, ''))
-    );
-  };
-
-  const getDisplayName = (contact: Contact) => {
-    const cleaned = cleanPhone(contact.phone || '');
-    if (hasRealName(contact)) return contact.name as string;
-    if (cleaned) return cleaned;
-    return contact.jid.endsWith('@lid') ? 'WhatsApp contact' : 'Unknown contact';
-  };
-
-  const getDisplayMeta = (contact: Contact) => {
-    const cleaned = cleanPhone(contact.phone || '');
-    if (cleaned) return cleaned;
-    return '';
-  };
-
-  const getInitials = (contact: Contact) =>
-    getDisplayName(contact).split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
-
   const filtered = conversations.filter(c =>
-    (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
-    cleanPhone(c.phone || '').includes(search)
+    getContactDisplayName(c).toLowerCase().includes(search.toLowerCase()) ||
+    cleanContactPhone(c.phone || '').includes(search)
   );
 
   const formatTime = (ts: string) => {
@@ -201,7 +174,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         className={`${sizeClasses} rounded-full flex items-center justify-center font-medium text-white flex-shrink-0`}
         style={{ backgroundColor: `hsl(${color})` }}
       >
-        {getInitials(contact)}
+        {getContactInitials(contact)}
       </div>
     );
   };
@@ -319,7 +292,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     if (!contactSearch.trim()) return allContacts.slice(0, 30);
     const q = contactSearch.toLowerCase();
     return allContacts.filter(c =>
-      (c.name || '').toLowerCase().includes(q) || cleanPhone(c.phone || '').includes(q)
+      getContactDisplayName(c).toLowerCase().includes(q) || cleanContactPhone(c.phone || '').includes(q)
     ).slice(0, 30);
   }, [allContacts, contactSearch]);
 
@@ -395,7 +368,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     <div className="min-w-0 flex-1">
                       <div className="flex justify-between items-baseline">
                         <p className={`text-[15px] truncate ${isActive ? 'text-foreground font-semibold' : 'text-foreground font-medium'}`}>
-                          {getDisplayName(contact)}
+                          {getContactDisplayName(contact)}
                         </p>
                         <span className={`text-[11px] flex-shrink-0 ml-2 ${
                           isActive ? 'text-foreground/70' : 'text-muted-foreground'
@@ -404,7 +377,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                         </span>
                       </div>
                       <p className="text-[13px] text-muted-foreground truncate mt-0.5">
-                        {contact.last_type === 'voice' ? '🎤 Voice note' : contact.last_message || getDisplayMeta(contact)}
+                        {contact.last_type === 'voice' ? '🎤 Voice note' : contact.last_message || getContactDisplayMeta(contact)}
                       </p>
                     </div>
                   </button>
@@ -428,8 +401,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 </button>
                 <Avatar contact={selectedContact} size="lg" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[15px] font-semibold text-foreground truncate">{getDisplayName(selectedContact)}</p>
-                  <p className="text-xs text-muted-foreground truncate">{getDisplayMeta(selectedContact)}</p>
+                  <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
+                  <p className="text-xs text-muted-foreground truncate">{getContactDisplayMeta(selectedContact)}</p>
                 </div>
               </div>
 
@@ -634,8 +607,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   >
                     <Avatar contact={contact} size="sm" />
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{getDisplayName(contact)}</p>
-                      <p className="text-xs text-muted-foreground">{getDisplayMeta(contact)}</p>
+                      <p className="text-sm font-medium text-foreground truncate">{getContactDisplayName(contact)}</p>
+                      <p className="text-xs text-muted-foreground">{getContactDisplayMeta(contact)}</p>
                     </div>
                   </button>
                 ))}

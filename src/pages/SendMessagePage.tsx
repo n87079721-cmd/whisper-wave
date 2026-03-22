@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Send, ChevronDown, Mic, Type, Loader2, Play, Square, Volume2 } from 'lucide-react';
 import { api, type Contact, type Voice } from '@/lib/api';
+import { getContactDisplayMeta, getContactDisplayName } from '@/lib/contactDisplay';
 import { toast } from 'sonner';
 
 const SendMessagePage = () => {
@@ -92,7 +93,7 @@ const SendMessagePage = () => {
               className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm text-foreground hover:bg-secondary/80 transition-colors"
             >
               <span className={selected ? 'text-foreground' : 'text-muted-foreground'}>
-                {selected ? `${selected.name || selected.phone} (${selected.phone})` : 'Select a contact'}
+                {selected ? `${getContactDisplayName(selected)}${getContactDisplayMeta(selected) ? ` (${getContactDisplayMeta(selected)})` : ''}` : 'Select a contact'}
               </span>
               <ChevronDown className="w-4 h-4 text-muted-foreground" />
             </button>
@@ -107,7 +108,7 @@ const SendMessagePage = () => {
                       onClick={() => { setSelectedContact(c.id); setShowContacts(false); }}
                       className="w-full text-left px-4 py-2.5 text-sm text-foreground hover:bg-secondary transition-colors"
                     >
-                      {c.name || c.phone} <span className="text-muted-foreground text-xs">({c.phone})</span>
+                      {getContactDisplayName(c)}{getContactDisplayMeta(c) ? <span className="text-muted-foreground text-xs"> ({getContactDisplayMeta(c)})</span> : null}
                     </button>
                   ))
                 )}

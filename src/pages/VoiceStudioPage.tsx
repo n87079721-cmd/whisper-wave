@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2 } from 'lucide-react';
 import { api, type Contact, type Voice } from '@/lib/api';
+import { getContactDisplayMeta, getContactDisplayName } from '@/lib/contactDisplay';
 import { toast } from 'sonner';
 
 const MODELS = [
@@ -447,7 +448,7 @@ const VoiceStudioPage = () => {
                   className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground"
                 >
                   <span className={selected ? 'text-foreground' : 'text-muted-foreground'}>
-                    {selected ? `${selected.name || selected.phone} (${selected.phone})` : 'Select recipient'}
+                    {selected ? `${getContactDisplayName(selected)}${getContactDisplayMeta(selected) ? ` (${getContactDisplayMeta(selected)})` : ''}` : 'Select recipient'}
                   </span>
                   <ChevronDown className="w-4 h-4 text-muted-foreground" />
                 </button>
@@ -459,7 +460,7 @@ const VoiceStudioPage = () => {
                         onClick={() => { setSelectedContact(c.id); setShowContacts(false); }}
                         className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-secondary transition-colors"
                       >
-                        {c.name || c.phone} <span className="text-muted-foreground text-xs">({c.phone})</span>
+                        {getContactDisplayName(c)}{getContactDisplayMeta(c) ? <span className="text-muted-foreground text-xs"> ({getContactDisplayMeta(c)})</span> : null}
                       </button>
                     ))}
                   </div>
