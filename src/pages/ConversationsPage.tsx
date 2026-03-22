@@ -3,6 +3,7 @@ import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, A
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 import { getAvatarColor } from '@/lib/avatarColors';
+import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
 
 interface ConversationsPageProps {
   initialContact?: Contact | null;
@@ -127,7 +128,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     refreshMessages(selectedContact.id, { forceScroll: true });
   }, [selectedContact?.id, refreshMessages]);
 
-  const cleanPhone = (p: string) => p?.replace(/@.*$/, '') || '';
   const normalizePhoneDigits = (value: string) => value.replace(/\D/g, '');
   const formatPhoneDraft = (value: string) => {
     const trimmed = value.trim();
@@ -135,36 +135,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     return trimmed.startsWith('+') ? `+${digits}` : digits;
   };
 
-  const hasRealName = (contact: Contact) => {
-    const value = contact.name?.trim();
-    return (
-      !!value
-      && !value.includes('@')
-      && !value.toLowerCase().startsWith('whatsapp contact')
-      && value.toLowerCase() !== 'unknown contact'
-      && !/^\+?\d{7,}$/.test(value.replace(/\s+/g, ''))
-    );
-  };
-
-  const getDisplayName = (contact: Contact) => {
-    const cleaned = cleanPhone(contact.phone || '');
-    if (hasRealName(contact)) return contact.name as string;
-    if (cleaned) return cleaned;
-    return contact.jid.endsWith('@lid') ? 'WhatsApp contact' : 'Unknown contact';
-  };
-
-  const getDisplayMeta = (contact: Contact) => {
-    const cleaned = cleanPhone(contact.phone || '');
-    if (cleaned) return cleaned;
-    return '';
-  };
-
-  const getInitials = (contact: Contact) =>
-    getDisplayName(contact).split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
-
   const filtered = conversations.filter(c =>
-    (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
-    cleanPhone(c.phone || '').includes(search)
+    getContactDisplayName(c).toLowerCase().includes(search.toLowerCase()) ||
+    cleanContactPhone(c.phone || '').includes(search)
   );
 
   const formatTime = (ts: string) => {
