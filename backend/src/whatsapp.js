@@ -109,7 +109,21 @@ function getInstance(userId) {
       msgRetryCounterCache: new NodeCache({ stdTTL: 600, checkperiod: 120 }),
       autoReplyCooldowns: new Map(),
       messageBatchBuffers: new Map(),
-      lidMap: new Map(), // Maps LID JID -> phone number (e.g. "77481361039542@lid" -> "2348012345678")
+      lidMap: new Map(),
+      // Sync state tracking
+      syncState: {
+        phase: 'idle',         // idle | waiting_history | importing | partial | ready
+        connectedAt: null,
+        lastHistorySyncAt: null,
+        storeContacts: 0,
+        historyChats: 0,
+        historyContacts: 0,
+        historyMessages: 0,
+        unresolvedLids: 0,
+        totalDbContacts: 0,
+        totalDbMessages: 0,
+      },
+      syncGraceTimer: null,
     });
   }
   return userInstances.get(userId);
