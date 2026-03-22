@@ -2,7 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, type StatusGroup, type StatusItem } from '@/lib/api';
 import { formatDistanceToNow } from 'date-fns';
 import { RefreshCw, X, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
-import { getContactDisplayName } from '@/lib/contactDisplay';
+
+function getDisplayName(s: { name?: string | null; phone?: string | null; jid?: string }) {
+  if (s.name && !/^\+?\d{7,}$/.test(s.name.replace(/\s/g, '')) && !s.name.includes('@')) return s.name;
+  if (s.phone) return s.phone;
+  return s.jid?.replace(/@.*$/, '') || 'Unknown';
+}
+
 
 const TEXT_BG_COLORS = [
   'bg-emerald-600', 'bg-sky-600', 'bg-violet-600', 'bg-amber-600',
