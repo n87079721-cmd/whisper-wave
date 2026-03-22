@@ -111,8 +111,11 @@ function ensureIndexes(db) {
     CREATE INDEX IF NOT EXISTS idx_messages_contact ON messages(contact_id);
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_user_contact ON messages(user_id, contact_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_user_contact_time ON messages(user_id, contact_id, timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_contacts_jid ON contacts(jid);
     CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id);
+    CREATE INDEX IF NOT EXISTS idx_contacts_user_updated ON contacts(user_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_stats_user ON stats(user_id);
     CREATE INDEX IF NOT EXISTS idx_statuses_user ON statuses(user_id);
     CREATE INDEX IF NOT EXISTS idx_statuses_expires ON statuses(expires_at);
