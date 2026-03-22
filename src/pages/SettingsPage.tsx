@@ -8,6 +8,8 @@ import { Slider } from '@/components/ui/slider';
 import { useWhatsAppStatus, type SyncState } from '@/hooks/useWhatsAppStatus';
 
 const SettingsPage = () => {
+  const { status: waStatus, syncState } = useWhatsAppStatus();
+  const isConnected = waStatus === 'connected';
   const [backendUrl, setBackendUrl] = useState(getStoredApiUrl());
   const [backendSaved, setBackendSaved] = useState(isBackendConfigured());
   const [elevenLabsKey, setElevenLabsKey] = useState('');
