@@ -113,6 +113,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [selectedContact, refreshMessages]);
 
   const cleanPhone = (p: string) => p?.replace(/@.*$/, '') || '';
+  const normalizePhoneDigits = (value: string) => value.replace(/\D/g, '');
+  const formatPhoneDraft = (value: string) => {
+    const trimmed = value.trim();
+    const digits = normalizePhoneDigits(trimmed);
+    return trimmed.startsWith('+') ? `+${digits}` : digits;
+  };
 
   const hasRealName = (contact: Contact) => {
     const value = contact.name?.trim();
@@ -240,19 +246,20 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       return;
     }
     
-    const phone = newChatPhone.replace(/[^0-9+]/g, '');
-    if (phone.length < 7) {
+    const phoneDigits = normalizePhoneDigits(newChatPhone);
+    if (phoneDigits.length < 7) {
       toast.error('Enter a valid phone number');
       return;
     }
     
     setNewChatLoading(true);
     try {
-      const jid = phone.replace(/^\+/, '') + '@s.whatsapp.net';
+      const canonicalPhone = `+${phoneDigits}`;
+      const jid = `${phoneDigits}@s.whatsapp.net`;
       
       // Check if contact already exists
       const existing = [...conversations, ...allContacts].find(
-        c => c.phone?.replace(/[^0-9]/g, '') === phone.replace(/[^0-9]/g, '') || c.jid === jid
+        c => normalizePhoneDigits(c.phone || '') === phoneDigits || c.jid === jid
       );
       
       if (existing) {
@@ -263,7 +270,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
           id: 'temp-' + Date.now(),
           jid,
           name: null,
-          phone: phone.startsWith('+') ? phone : '+' + phone,
+          phone: canonicalPhone,
           avatar_url: null,
           is_group: 0,
           last_seen: null,
@@ -530,7 +537,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 <div className="flex gap-2">
                   <input
                     value={newChatPhone}
-                    onChange={(e) => setNewChatPhone(e.target.value)}
+                    onChange={(e) => setNewChatPhone(formatPhoneDraft(e.target.value))}
                     placeholder="Enter phone number (e.g. +1234567890)"
                     className="flex-1 px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
                     onKeyDown={(e) => { if (e.key === 'Enter') handleStartNewChat(); }}
