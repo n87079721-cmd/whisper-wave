@@ -1,93 +1,94 @@
 
-Goal
 
-Make the app honest and usable when WhatsApp itself has not fully synced, instead of showing “connected” while chats/names are still incomplete. The screenshot confirms this is not just a frontend bug: the linked device itself is in a partial-sync state.
+## WhatsApp-Style UI Redesign with Light/Dark Mode
 
-What I found
+### What we're building
 
-- `backend/src/whatsapp.js` logs history/contact sync counts, but `getWhatsAppState()` only returns `status`, `qr`, and `pairingCode`. The frontend cannot tell “connected but incomplete” from “fully synced”.
-- `src/hooks/useWhatsAppStatus.ts` and `src/pages/DashboardPage.tsx` only model transport state (`connected`, `qr_waiting`, `reconnecting`), so the UI overstates success.
-- `src/pages/ContactsPage.tsx` and `src/pages/ConversationsPage.tsx` only show per-contact “Waiting for sync” for unresolved `@lid` rows; there is no global explanation or recovery guidance.
-- `src/pages/SettingsPage.tsx` already has a Fresh Re-sync action, but it is not driven by real sync diagnostics and does not show progress/results.
-- The identity layer is improved, but split-thread risk still exists unless every open/reply/new-chat path prefers the canonical `@s.whatsapp.net` thread and unresolved `@lid` rows are treated as temporary.
+A complete visual overhaul modeled on WhatsApp Web's layout (as shown in your screenshot), with light and dark mode support, profile picture avatars, and a cleaner, more professional feel across all pages.
 
-Implementation plan
+### Design reference
 
-1. Add real sync-state tracking in the backend
-- Extend the per-user WhatsApp instance in `backend/src/whatsapp.js` with sync metadata:
-  - phase: `idle | waiting_history | importing | partial | ready | repair_required`
-  - counts: store contacts, history chats, history contacts, history messages, unresolved LID contacts
-  - timestamps: connectedAt, lastHistorySyncAt
-  - summary message + recommended action
-- Update this state during:
-  - connection open
-  - `syncContacts()`
-  - `messaging-history.set`
-  - deferred LID sweep
-  - clear session / reconnect
+The WhatsApp Web screenshot shows:
+- Left sidebar: search bar, filter chips (All/Unread/Favourites/Groups), conversation list with profile pictures, name, timestamp, and message preview
+- Right panel: empty state with branding when no chat selected, full chat view when selected
+- Clean white/light background with subtle borders
+- Green accent color for active elements
 
-2. Expose sync-state to the frontend
-- Extend `getWhatsAppState()` and `/api/status` in `backend/src/api.js` to return sync metadata alongside connection state.
-- Stream sync updates over SSE with a dedicated event (for example `sync_state`) so the UI can update immediately during import/recovery.
+### Changes
 
-3. Make the dashboard reflect reality
-- Update `useWhatsAppStatus.ts` to store both connection status and sync status.
-- Update `src/pages/DashboardPage.tsx` and `src/components/StatusBadge.tsx` so “Connected” can become:
-  - Connected
-  - Syncing history
-  - Connected, partial sync
-  - Re-sync required
-- Add a warning card when the device is connected but WhatsApp history is incomplete, with plain-language copy explaining that this can happen even on linked devices.
+**1. Add light mode + dark mode toggle**
 
-4. Add clear recovery UX where users actually need it
-- Add a shared warning banner to `ConversationsPage.tsx` and `ContactsPage.tsx` when sync is partial.
-- Banner should explain:
-  - newer/manual chats may still work
-  - names/older threads may be missing
-  - Fresh Re-sync is the fix when WhatsApp did not finish importing
-- Link directly to Settings or trigger the existing re-sync flow from there.
+- Add a proper light theme to `src/index.css` with WhatsApp-accurate colors (white backgrounds, light gray cards, green accents)
+- Dark mode stays as current theme but refined
+- Default to light mode, add a toggle in the sidebar and settings
+- Store preference in localStorage
 
-5. Tighten thread identity so replies don’t split
-- In `backend/src/whatsapp.js` and `backend/src/api.js`, make every send/open path prefer canonical phone JIDs when known.
-- Ensure unresolved `@lid` contacts remain temporary placeholders until a trusted mapping exists.
-- When a trusted mapping arrives, merge records/messages into the canonical contact so replies to people like Bev stay in one thread.
+Light mode palette:
+- Background: white (#ffffff)
+- Sidebar/header: #f0f2f5
+- Chat area: #efeae2 (WhatsApp doodle bg)
+- Sent bubble: #d9fdd3
+- Received bubble: #ffffff
+- Primary accent: #00a884 (WhatsApp green)
+- Text: #111b21
 
-6. Turn Fresh Re-sync into a guided flow, not just a destructive button
-- Keep the existing clear-session action in `src/pages/SettingsPage.tsx`, but wrap it with clearer steps:
-  - why this is needed
-  - what will be cleared locally
-  - that phone messages are not deleted
-  - what to expect after re-pair
-- After re-pair, surface live sync progress from the new backend sync-state instead of leaving the user guessing.
+**2. Redesign the Conversations page to match WhatsApp Web**
 
-7. Add practical completion rules
-- Mark sync as `partial` when signals look incomplete, such as:
-  - connected but store contacts remain 0
-  - no history event after a grace period
-  - history counts are very small
-  - unresolved LID contacts remain after sweep
-- Mark sync as `ready` only when at least one meaningful history/contact import or stable canonical contact set is present.
-- This prevents the app from claiming parity with WhatsApp Web when the upstream device never finished syncing.
+- Left panel: proper WhatsApp-style conversation list
+  - Profile picture circles (with avatar_url if available, initials fallback with colored backgrounds)
+  - Name bold, timestamp right-aligned
+  - Last message preview below name
+  - Active conversation highlighted with subtle background
+  - Search bar at top with WhatsApp styling
+- Right panel: chat view
+  - Header with profile pic, name, phone number
+  - WhatsApp doodle background pattern
+  - Proper chat bubbles: sent = green tint with tail, received = white with tail
+  - Timestamps inside bubbles, check marks for sent status
+  - Input bar at bottom with rounded input field
+- Empty state when no chat selected (like WhatsApp Web shows)
 
-Files to change
+**3. Redesign the sidebar (desktop) and bottom nav (mobile)**
 
-- `backend/src/whatsapp.js`
-- `backend/src/api.js`
-- `src/hooks/useWhatsAppStatus.ts`
-- `src/components/StatusBadge.tsx`
-- `src/pages/DashboardPage.tsx`
-- `src/pages/ContactsPage.tsx`
-- `src/pages/ConversationsPage.tsx`
-- `src/pages/SettingsPage.tsx`
+- Sidebar: cleaner WhatsApp-style with icon-only or slim text
+- Add theme toggle button (sun/moon icon)
+- Bottom nav: keep current structure but match the new color scheme
 
-Technical notes
+**4. Profile pictures / avatars**
 
-- The core gap is not pairing itself; it is that transport health and sync completeness are currently treated as the same thing.
-- The app already has the right building blocks: history-sync logs, LID reconciliation, SSE, and Fresh Re-sync. What is missing is a real sync model shared with the UI.
-- I would keep the current architecture and add a small sync-state layer rather than redesigning storage.
-- QA focus:
-  - connected-but-partial device shows warning instead of false success
-  - Fresh Re-sync shows progress after re-pair
-  - replying to an existing person does not create a duplicate thread
-  - starting a chat with a new number still works during partial sync
-  - contacts/conversations update live as mappings resolve
+- Use `avatar_url` from contacts when available
+- Generate consistent colored circle with initials as fallback (hash contact name to pick from a set of WhatsApp-like colors)
+- Apply everywhere: conversation list, chat header, contacts page, new chat picker
+
+**5. Dashboard page cleanup**
+
+- Simplify to a cleaner card layout that fits the new theme
+- Remove excessive motion animations that cause glitchy feel
+- Keep sync status and connection controls, but styled consistently
+
+**6. Contacts page styling**
+
+- Match the conversation list style with avatars
+- Clean card-free list layout like WhatsApp's contact picker
+
+### Files to change
+
+- `src/index.css` — add light theme variables, refine dark theme
+- `tailwind.config.ts` — no structural changes needed
+- `src/components/DashboardSidebar.tsx` — add theme toggle, style updates
+- `src/components/MobileBottomNav.tsx` — theme-aware styling
+- `src/pages/ConversationsPage.tsx` — full WhatsApp Web-style redesign
+- `src/pages/ContactsPage.tsx` — avatar colors, cleaner list
+- `src/pages/DashboardPage.tsx` — cleaner cards, remove excessive motion
+- `src/pages/Index.tsx` — pass theme context
+- `src/hooks/useTheme.ts` — new hook for light/dark toggle
+- `src/lib/avatarColors.ts` — new utility for consistent avatar color generation
+
+### Technical notes
+
+- Theme toggle uses `class` strategy already configured in tailwind (`darkMode: ["class"]`)
+- Current CSS only defines dark variables; we add `:root` as light and `.dark` as the current dark values
+- Avatar colors: hash the contact name/jid to pick from ~12 predefined WhatsApp-like colors for consistent per-contact coloring
+- No new dependencies needed
+- All existing functionality (send, receive, voice, new chat, sync banners) preserved — this is purely visual
+
