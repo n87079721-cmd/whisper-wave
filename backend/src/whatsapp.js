@@ -776,10 +776,27 @@ async function startConnection(userId, db, options = {}) {
         }
       }
 
+      // Second pass: reconcile any LIDs that got resolved during message processing
+      if (inst.lidMap.size > 0) {
+        let reconciled = 0;
+        for (const [lidJid, phone] of inst.lidMap.entries()) {
+          try {
+            reconcileLidContacts(db, userId, lidJid, phone);
+            reconciled++;
+          } catch {}
+        }
+        if (reconciled > 0) {
+          console.log(`🔗 [${userId}] Post-history reconciled ${reconciled} LID contacts`);
+        }
+      }
+
       if (contactChanges > 0) {
         emit(userId, 'contacts_sync', { count: contactChanges });
       }
       emit(userId, 'history_sync', { chats: chats?.length || 0, messages: historyMsgs?.length || 0 });
+
+      // Schedule a deferred LID sweep to catch any late-arriving mappings
+      schedulelidSweep(userId, db, inst);
     });
 
     inst.sock.ev.on('contacts.update', (updates) => {
