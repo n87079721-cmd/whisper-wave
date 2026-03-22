@@ -21,7 +21,7 @@ const Index = () => {
 
   const renderPage = () => {
     switch (activePage) {
-      case 'dashboard': return <DashboardPage />;
+      case 'dashboard': return <DashboardPage onNavigateSettings={() => setActivePage('settings')} onNavigateConversations={() => setActivePage('conversations')} />;
       case 'contacts': return <ContactsPage onOpenChat={handleOpenChat} onNavigateSettings={() => setActivePage('settings')} />;
       case 'conversations': return <ConversationsPage initialContact={selectedContact} onContactOpened={() => setSelectedContact(null)} onNavigateSettings={() => setActivePage('settings')} />;
       case 'voice': return <VoiceStudioPage />;
@@ -34,8 +34,10 @@ const Index = () => {
       <div className="hidden md:block">
         <DashboardSidebar activePage={activePage} onPageChange={setActivePage} />
       </div>
-      <main className="flex-1 p-3 md:p-5 overflow-auto pb-20 md:pb-5">
-        {renderPage()}
+      <main className="flex-1 overflow-y-auto px-3 pb-24 pt-3 md:px-6 md:pb-6 md:pt-5">
+        <div className="mx-auto w-full max-w-7xl">
+          {renderPage()}
+        </div>
       </main>
       <MobileBottomNav activePage={activePage} onPageChange={setActivePage} />
     </div>

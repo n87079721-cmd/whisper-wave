@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { forwardRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { MessageSquare, Loader2, User, Lock, UserPlus, LogIn } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
-const LoginPage = () => {
+const LoginPage = forwardRef<HTMLDivElement>((_, ref) => {
   const { login, register } = useAuth();
   const [isRegister, setIsRegister] = useState(false);
   const [username, setUsername] = useState('');
@@ -32,7 +32,7 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div ref={ref} className="min-h-screen bg-background flex items-center justify-center p-4">
       <motion.div
         initial={{ opacity: 0, y: 20, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -127,6 +127,8 @@ const LoginPage = () => {
       </motion.div>
     </div>
   );
-};
+});
+
+LoginPage.displayName = 'LoginPage';
 
 export default LoginPage;

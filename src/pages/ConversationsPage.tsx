@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { motion } from 'framer-motion';
 import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
@@ -33,7 +32,7 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesViewportRef = useRef<HTMLDivElement | null>(null);
 
   // New conversation state
   const [showNewChat, setShowNewChat] = useState(false);
@@ -43,15 +42,41 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
   const [contactSearch, setContactSearch] = useState('');
 
   const selectedContactRef = useRef<Contact | null>(null);
+  const shouldAutoScrollRef = useRef(true);
   selectedContactRef.current = selectedContact;
 
-  const refreshMessages = useCallback(async (contactId: string) => {
+  const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    const viewport = messagesViewportRef.current;
+    if (!viewport) return;
+
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+    shouldAutoScrollRef.current = true;
+  }, []);
+
+  const syncAutoScrollState = useCallback(() => {
+    const viewport = messagesViewportRef.current;
+    if (!viewport) return;
+
+    const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    shouldAutoScrollRef.current = distanceFromBottom < 80;
+  }, []);
+
+  const refreshMessages = useCallback(async (
+    contactId: string,
+    options?: { forceScroll?: boolean; behavior?: ScrollBehavior },
+  ) => {
     try {
       const msgs = await api.getMessages(contactId);
       setMessages(msgs);
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      const shouldScroll = options?.forceScroll ?? shouldAutoScrollRef.current;
+      if (shouldScroll) {
+        const behavior = options?.behavior ?? 'auto';
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => scrollMessagesToBottom(behavior));
+        });
+      }
     } catch {}
-  }, []);
+  }, [scrollMessagesToBottom]);
 
   const refreshAllContacts = useCallback(async () => {
     try {
@@ -104,7 +129,7 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
       es.onerror = () => {};
     } catch {}
 
-    const interval = setInterval(refreshActiveConversation, 3000);
+    const interval = setInterval(refreshActiveConversation, 5000);
 
     return () => {
       es?.close();
@@ -114,7 +139,8 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
 
   useEffect(() => {
     if (!selectedContact) return;
-    refreshMessages(selectedContact.id);
+    shouldAutoScrollRef.current = true;
+    refreshMessages(selectedContact.id, { forceScroll: true });
   }, [selectedContact, refreshMessages]);
 
   const cleanPhone = (p: string) => p?.replace(/@.*$/, '') || '';
@@ -190,7 +216,7 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
 
         if (nextContact) {
           setSelectedContact(nextContact);
-          await refreshMessages(nextContact.id);
+          await refreshMessages(nextContact.id, { forceScroll: true });
         }
       } else {
         if (isTemp) {
@@ -209,7 +235,7 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
         setMessages(msgs);
         await refreshConversations();
       }
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      scrollMessagesToBottom('smooth');
     } catch (err: any) {
       toast.error(err.message || 'Failed to send');
     } finally {
@@ -294,6 +320,12 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
     }
   };
 
+  const openNewChatPanel = () => {
+    setNewChatPhone('');
+    setContactSearch('');
+    setShowNewChat(true);
+  };
+
   const filteredNewChatContacts = useMemo(() => {
     if (!contactSearch.trim()) return allContacts.slice(0, 20);
     const q = contactSearch.toLowerCase();
@@ -308,30 +340,35 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl md:text-2xl font-bold text-foreground">Conversations</h1>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-foreground">Conversations</h1>
+          <p className="text-sm text-muted-foreground">Stay in one thread, start new chats faster, and keep message flow stable.</p>
+        </div>
+        <button
+          type="button"
+          onClick={openNewChatPanel}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          <Plus className="h-4 w-4" />
+          New chat
+        </button>
+      </div>
+
       <SyncBanner syncState={syncState} isConnected={isWaConnected} onResync={onNavigateSettings} compact />
 
-      <div className="relative flex gap-4 h-[calc(100vh-180px)] md:h-[calc(100vh-180px)] h-[calc(100dvh-160px)]">
+      <div className="relative flex min-h-[32rem] gap-4 h-[calc(100dvh-14rem)] md:h-[calc(100vh-13rem)]">
         {/* Contact list - hidden on mobile when chat is open */}
         <div className={`${showChatOnMobile ? 'hidden md:flex' : 'flex'} w-full md:w-72 flex-shrink-0 glass rounded-xl overflow-hidden flex-col`}>
           <div className="p-3 border-b border-border">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search..."
-                  className="w-full pl-9 pr-3 py-2 rounded-lg bg-secondary border-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-                />
-              </div>
-              <button
-                onClick={() => setShowNewChat(true)}
-                className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center text-primary-foreground hover:bg-primary/90 transition-colors flex-shrink-0"
-                title="New conversation"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search conversations..."
+                className="w-full pl-9 pr-3 py-2 rounded-lg bg-secondary border-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+              />
             </div>
           </div>
           <div className="flex-1 overflow-y-auto">
@@ -394,13 +431,14 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-2">
+              <div
+                ref={messagesViewportRef}
+                onScroll={syncAutoScrollState}
+                className="flex-1 overflow-y-auto overscroll-contain p-3 md:p-4 space-y-2"
+              >
                 {messages.map((msg, i) => (
-                  <motion.div
+                  <div
                     key={msg.id}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.02 }}
                     className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
@@ -434,9 +472,8 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
                         {msg.direction === 'sent' && <StatusIcon status={msg.status} />}
                       </div>
                     </div>
-                  </motion.div>
+                  </div>
                 ))}
-                <div ref={messagesEndRef} />
               </div>
 
               {/* Reply box */}
@@ -526,11 +563,12 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
 
         {/* New conversation panel — replaces chat on mobile, overlay on desktop */}
         {showNewChat && (
-          <div className={`${showChatOnMobile ? 'hidden' : 'flex'} md:absolute md:inset-0 md:z-50 md:bg-background/80 md:backdrop-blur-sm md:items-center md:justify-center flex-col w-full md:w-auto`}>
-            <div className="w-full md:w-96 md:max-h-[80vh] glass md:rounded-xl overflow-hidden flex flex-col md:border md:border-border">
+          <div className="fixed inset-0 z-[70] flex items-end bg-background/80 backdrop-blur-sm md:absolute md:items-center md:justify-center">
+            <div className="w-full overflow-hidden rounded-t-2xl border border-border bg-card shadow-2xl md:w-[26rem] md:max-h-[80vh] md:rounded-2xl">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-foreground">New Conversation</h3>
                 <button
+                  type="button"
                   onClick={() => { setShowNewChat(false); setNewChatPhone(''); setContactSearch(''); }}
                   className="p-1 text-muted-foreground hover:text-foreground"
                 >
@@ -549,6 +587,7 @@ const ConversationsPage = ({ initialContact, onContactOpened, onNavigateSettings
                     onKeyDown={(e) => { if (e.key === 'Enter') handleStartNewChat(); }}
                   />
                   <button
+                    type="button"
                     onClick={() => handleStartNewChat()}
                     disabled={newChatPhone.replace(/[^0-9]/g, '').length < 7 || newChatLoading}
                     className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm hover:bg-primary/90 disabled:opacity-40 flex-shrink-0"
