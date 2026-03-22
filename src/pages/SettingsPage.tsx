@@ -201,10 +201,39 @@ const SettingsPage = () => {
             <p className="text-xs text-muted-foreground">If contacts/chats are missing, this clears your session and re-imports everything from WhatsApp.</p>
           </div>
         </div>
+
+        {/* Live sync status */}
+        {isConnected && (
+          <div className="p-3 rounded-lg bg-muted/50 border border-border space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-foreground">Sync Status</span>
+              <span className={`text-xs font-medium ${
+                syncState.phase === 'ready' ? 'text-primary' :
+                syncState.phase === 'partial' ? 'text-warning' :
+                syncState.phase === 'importing' ? 'text-primary' : 'text-muted-foreground'
+              }`}>
+                {syncState.phase === 'ready' ? '✓ Complete' :
+                 syncState.phase === 'partial' ? '⚠ Partial' :
+                 syncState.phase === 'importing' ? '⏳ Importing…' :
+                 syncState.phase === 'waiting_history' ? '⏳ Waiting…' : '—'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span>Contacts: <span className="text-foreground font-medium">{syncState.totalDbContacts}</span></span>
+              <span>Messages: <span className="text-foreground font-medium">{syncState.totalDbMessages}</span></span>
+              <span>History chats: <span className="text-foreground font-medium">{syncState.historyChats}</span></span>
+              <span>Unresolved: <span className={`font-medium ${syncState.unresolvedLids > 0 ? 'text-warning' : 'text-foreground'}`}>{syncState.unresolvedLids}</span></span>
+            </div>
+          </div>
+        )}
+
         <div className="p-3 rounded-lg bg-muted/50 border border-border">
           <p className="text-xs text-muted-foreground">
-            This will disconnect your WhatsApp, clear local data, and ask you to scan a new QR code. 
+            <strong className="text-foreground">What this does:</strong> Disconnects WhatsApp, clears local data, and asks you to scan a new QR code.
             When you re-pair, WhatsApp will send your full chat history again with proper contact names.
+          </p>
+          <p className="text-xs text-muted-foreground mt-1.5">
+            <strong className="text-foreground">Your phone messages are NOT affected.</strong> Only the local copy in this app is reset.
           </p>
         </div>
         <button 
