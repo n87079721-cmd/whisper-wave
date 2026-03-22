@@ -441,46 +441,56 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                           {group.date}
                         </span>
                       </div>
-                    </div>
-                    {/* Messages */}
-                    <div className="space-y-1">
-                      {group.messages.map((msg) => (
-                        <div
-                          key={msg.id}
-                          className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
-                        >
+                      {/* Messages */}
+                      <div className="space-y-1">
+                        {group.messages.map((msg) => (
                           <div
-                            className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg text-[14px] shadow-sm ${
-                              msg.direction === 'sent'
-                                ? 'bg-wa-bubble-out text-foreground rounded-tr-none'
-                                : 'bg-wa-bubble-in text-foreground rounded-tl-none'
-                            }`}
+                            key={msg.id}
+                            className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                           >
-                            {msg.type === 'voice' ? (
-                              <div className="flex items-center gap-2">
-                                <Mic className="w-4 h-4 text-primary" />
-                                <div className="flex gap-0.5">
-                                  {Array.from({ length: 20 }).map((_, j) => (
-                                    <div key={j} className="w-0.5 bg-primary/60 rounded-full" style={{ height: `${Math.random() * 16 + 4}px` }} />
-                                  ))}
+                            <div
+                              className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg text-[14px] shadow-sm ${
+                                msg.direction === 'sent'
+                                  ? 'bg-wa-bubble-out text-foreground rounded-tr-none'
+                                  : 'bg-wa-bubble-in text-foreground rounded-tl-none'
+                              }`}
+                            >
+                              {msg.type === 'voice' ? (
+                                <div className="flex items-center gap-2">
+                                  <Mic className="w-4 h-4 text-primary" />
+                                  <div className="flex gap-0.5">
+                                    {Array.from({ length: 20 }).map((_, j) => (
+                                      <div key={j} className="w-0.5 bg-primary/60 rounded-full" style={{ height: `${Math.random() * 16 + 4}px` }} />
+                                    ))}
+                                  </div>
+                                  <span className="text-xs text-muted-foreground ml-1">
+                                    {msg.duration ? `0:${String(msg.duration).padStart(2, '0')}` : ''}
+                                  </span>
                                 </div>
-                                <span className="text-xs text-muted-foreground ml-1">
-                                  {msg.duration ? `0:${String(msg.duration).padStart(2, '0')}` : ''}
-                                </span>
+                              ) : (
+                                <span className="whitespace-pre-wrap break-words">{msg.content}</span>
+                              )}
+                              <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
+                                <span className="text-[10px] text-muted-foreground">{formatTime(msg.timestamp)}</span>
+                                {msg.direction === 'sent' && <StatusIcon status={msg.status} />}
                               </div>
-                            ) : (
-                              <span className="whitespace-pre-wrap break-words">{msg.content}</span>
-                            )}
-                            <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
-                              <span className="text-[10px] text-muted-foreground">{formatTime(msg.timestamp)}</span>
-                              {msg.direction === 'sent' && <StatusIcon status={msg.status} />}
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+
+                {/* Scroll to bottom button */}
+                {showScrollDown && (
+                  <button
+                    onClick={() => { scrollMessagesToBottom('smooth'); shouldAutoScrollRef.current = true; }}
+                    className="absolute bottom-4 right-4 w-10 h-10 rounded-full bg-card border border-border shadow-lg flex items-center justify-center hover:bg-secondary transition-colors z-10"
+                  >
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  </button>
+                )}
               </div>
 
               {/* Reply box */}
