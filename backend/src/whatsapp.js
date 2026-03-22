@@ -187,10 +187,10 @@ function reconcileLidContacts(db, userId, lidJid, phone) {
     const realPhone = '+' + phone;
     const realJid = phone + '@s.whatsapp.net';
 
-    // Find the @lid-based contact
+    // Find the @lid-based contact (by JID, by fake phone from raw LID, or by name pattern)
     const lidContact = db.prepare(
-      "SELECT id, name, phone FROM contacts WHERE user_id = ? AND (jid = ? OR phone = ?)"
-    ).get(userId, lidJid, lidPhone);
+      "SELECT id, name, phone FROM contacts WHERE user_id = ? AND (jid = ? OR phone = ? OR jid LIKE ?)"
+    ).get(userId, lidJid, lidPhone, lidJid.replace('@lid', '') + '%');
 
     if (!lidContact) return;
 
@@ -199,7 +199,7 @@ function reconcileLidContacts(db, userId, lidJid, phone) {
       "SELECT id, name FROM contacts WHERE user_id = ? AND jid = ?"
     ).get(userId, realJid);
 
-    if (realContact) {
+    if (realContact && realContact.id !== lidContact.id) {
       // Move messages from lid contact to real contact
       db.prepare(
         "UPDATE messages SET contact_id = ?, jid = ? WHERE contact_id = ? AND user_id = ?"
@@ -213,7 +213,7 @@ function reconcileLidContacts(db, userId, lidJid, phone) {
 
       // Delete the lid contact
       db.prepare("DELETE FROM contacts WHERE id = ? AND user_id = ?").run(lidContact.id, userId);
-    } else {
+    } else if (!realContact) {
       // No real contact exists — update the lid contact to use real JID/phone
       db.prepare(
         "UPDATE contacts SET jid = ?, phone = ? WHERE id = ? AND user_id = ?"
@@ -226,6 +226,46 @@ function reconcileLidContacts(db, userId, lidJid, phone) {
     }
   } catch (err) {
     console.error('reconcileLidContacts error:', err?.message || err);
+  }
+}
+
+// Deferred LID sweep: re-check unresolved contacts after a delay
+const pendingSweeps = new Map();
+function schedulelidSweep(userId, db, inst) {
+  if (pendingSweeps.has(userId)) clearTimeout(pendingSweeps.get(userId));
+  pendingSweeps.set(userId, setTimeout(() => {
+    pendingSweeps.delete(userId);
+    runLidSweep(userId, db, inst);
+  }, 10000)); // 10 seconds after last history sync event
+}
+
+function runLidSweep(userId, db, inst) {
+  try {
+    // Find all contacts still using @lid JIDs
+    const lidContacts = db.prepare(
+      "SELECT id, jid, name, phone FROM contacts WHERE user_id = ? AND jid LIKE '%@lid'"
+    ).all(userId);
+
+    if (!lidContacts.length) return;
+    console.log(`🔍 [${userId}] LID sweep: checking ${lidContacts.length} unresolved contacts`);
+
+    let resolved = 0;
+    for (const contact of lidContacts) {
+      const mapped = inst.lidMap.get(contact.jid);
+      if (mapped) {
+        reconcileLidContacts(db, userId, contact.jid, mapped);
+        resolved++;
+      }
+    }
+
+    if (resolved > 0) {
+      console.log(`🔗 [${userId}] LID sweep resolved ${resolved} contacts`);
+      emit(userId, 'contacts_sync', { count: resolved });
+    } else {
+      console.log(`📇 [${userId}] LID sweep: no new resolutions (${inst.lidMap.size} mappings available)`);
+    }
+  } catch (err) {
+    console.error(`LID sweep error [${userId}]:`, err?.message || err);
   }
 }
 
