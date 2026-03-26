@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2 } from 'lucide-react';
+import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2, Search } from 'lucide-react';
 import { api, type Contact, type Voice } from '@/lib/api';
 import { getContactDisplayMeta, getContactDisplayName } from '@/lib/contactDisplay';
 import { toast } from 'sonner';
@@ -106,6 +106,7 @@ const VoiceStudioPage = () => {
   const [showContacts, setShowContacts] = useState(false);
   const [sending, setSending] = useState(false);
   const [voiceFilter, setVoiceFilter] = useState('');
+  const [contactSearch, setContactSearch] = useState('');
   const [showTagHelp, setShowTagHelp] = useState(false);
   const [loadingVoices, setLoadingVoices] = useState(true);
   const [isEnhancing, setIsEnhancing] = useState(false);
@@ -459,16 +460,36 @@ const VoiceStudioPage = () => {
                   <ChevronDown className="w-4 h-4 text-muted-foreground" />
                 </button>
                 {showContacts && (
-                  <div className="absolute z-10 mt-1 w-full bg-popover border border-border rounded-lg shadow-xl max-h-36 overflow-y-auto">
-                    {contacts.map(c => (
-                      <button
-                        key={c.id}
-                        onClick={() => { setSelectedContact(c.id); setShowContacts(false); }}
-                        className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-secondary transition-colors"
-                      >
-                        {getContactDisplayName(c)}{getContactDisplayMeta(c) ? <span className="text-muted-foreground text-xs"> ({getContactDisplayMeta(c)})</span> : null}
-                      </button>
-                    ))}
+                  <div className="absolute z-10 mt-1 w-full bg-popover border border-border rounded-lg shadow-xl max-h-52 overflow-hidden flex flex-col">
+                    <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+                      <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      <input
+                        autoFocus
+                        value={contactSearch}
+                        onChange={e => setContactSearch(e.target.value)}
+                        placeholder="Search contacts..."
+                        className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
+                      />
+                    </div>
+                    <div className="overflow-y-auto max-h-40">
+                      {contacts
+                        .filter(c => {
+                          if (!contactSearch.trim()) return true;
+                          const q = contactSearch.toLowerCase();
+                          const name = getContactDisplayName(c).toLowerCase();
+                          const meta = getContactDisplayMeta(c).toLowerCase();
+                          return name.includes(q) || meta.includes(q);
+                        })
+                        .map(c => (
+                          <button
+                            key={c.id}
+                            onClick={() => { setSelectedContact(c.id); setShowContacts(false); setContactSearch(''); }}
+                            className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-secondary transition-colors"
+                          >
+                            {getContactDisplayName(c)}{getContactDisplayMeta(c) ? <span className="text-muted-foreground text-xs"> ({getContactDisplayMeta(c)})</span> : null}
+                          </button>
+                        ))}
+                    </div>
                   </div>
                 )}
               </div>
