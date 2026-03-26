@@ -198,16 +198,16 @@ const VoiceStudioPage = () => {
   const isV3 = selectedModel === 'eleven_v3';
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-4 sm:space-y-6 max-w-2xl">
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Voice Studio</h1>
-        <p className="text-sm text-muted-foreground mt-1">Generate realistic WhatsApp voice notes with ElevenLabs</p>
+        <h1 className="text-lg sm:text-2xl font-bold text-foreground">Voice Studio</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground mt-1">Generate realistic WhatsApp voice notes with ElevenLabs</p>
       </div>
 
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass rounded-xl p-6 space-y-5"
+        className="glass rounded-xl p-4 sm:p-6 space-y-4 sm:space-y-5"
       >
         {/* Model selection */}
         <div className="space-y-2">
