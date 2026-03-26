@@ -246,7 +246,7 @@ const VoiceStudioPage = () => {
             onChange={e => setVoiceFilter(e.target.value)}
             className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
           />
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
             {filteredVoices.map(voice => (
               <button
                 key={voice.id}
