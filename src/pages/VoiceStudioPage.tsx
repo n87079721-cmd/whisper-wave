@@ -106,6 +106,7 @@ const VoiceStudioPage = () => {
   const [showContacts, setShowContacts] = useState(false);
   const [sending, setSending] = useState(false);
   const [voiceFilter, setVoiceFilter] = useState('');
+  const [contactSearch, setContactSearch] = useState('');
   const [showTagHelp, setShowTagHelp] = useState(false);
   const [loadingVoices, setLoadingVoices] = useState(true);
   const [isEnhancing, setIsEnhancing] = useState(false);
