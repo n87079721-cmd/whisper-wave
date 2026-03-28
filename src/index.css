@@ -2,107 +2,107 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
 @layer base {
-  /* ===== LIGHT MODE (default) ===== */
+  /* ===== LIGHT MODE — iMessage ===== */
   :root {
     --background: 0 0% 100%;
-    --foreground: 200 19% 10%;
+    --foreground: 0 0% 0%;
 
-    --card: 210 17% 95%;
-    --card-foreground: 200 19% 10%;
+    --card: 0 0% 97%;
+    --card-foreground: 0 0% 0%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 200 19% 10%;
+    --popover-foreground: 0 0% 0%;
 
-    --primary: 162 73% 34%;
+    --primary: 211 100% 50%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 14% 93%;
-    --secondary-foreground: 200 12% 30%;
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 0 0% 25%;
 
-    --muted: 210 14% 93%;
-    --muted-foreground: 200 10% 46%;
+    --muted: 240 5% 96%;
+    --muted-foreground: 0 0% 45%;
 
-    --accent: 162 60% 90%;
-    --accent-foreground: 162 73% 20%;
+    --accent: 211 100% 95%;
+    --accent-foreground: 211 100% 35%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 210 14% 89%;
-    --input: 210 14% 89%;
-    --ring: 162 73% 34%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 211 100% 50%;
 
-    --radius: 0.5rem;
+    --radius: 0.75rem;
 
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 200 10% 40%;
-    --sidebar-primary: 162 73% 34%;
+    --sidebar-background: 240 5% 97%;
+    --sidebar-foreground: 0 0% 40%;
+    --sidebar-primary: 211 100% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 210 14% 95%;
-    --sidebar-accent-foreground: 200 19% 10%;
-    --sidebar-border: 210 14% 91%;
-    --sidebar-ring: 162 73% 34%;
+    --sidebar-accent: 240 5% 93%;
+    --sidebar-accent-foreground: 0 0% 0%;
+    --sidebar-border: 0 0% 91%;
+    --sidebar-ring: 211 100% 50%;
 
-    --success: 162 73% 34%;
+    --success: 142 71% 45%;
     --warning: 38 92% 50%;
-    --info: 210 100% 56%;
+    --info: 211 100% 50%;
 
-    --wa-teal-dark: 162 73% 34%;
-    --wa-bubble-out: 138 55% 88%;
-    --wa-bubble-in: 0 0% 100%;
-    --wa-chat-bg: 30 36% 89%;
+    --bubble-out: 211 100% 50%;
+    --bubble-out-foreground: 0 0% 100%;
+    --bubble-in: 240 5% 91%;
+    --bubble-in-foreground: 0 0% 0%;
+    --chat-bg: 0 0% 100%;
   }
 
-  /* ===== DARK MODE ===== */
+  /* ===== DARK MODE — iMessage ===== */
   .dark {
-    --background: 200 18% 10%;
+    --background: 0 0% 0%;
     --foreground: 0 0% 93%;
 
-    --card: 200 15% 13%;
+    --card: 0 0% 11%;
     --card-foreground: 0 0% 93%;
 
-    --popover: 200 15% 15%;
+    --popover: 0 0% 11%;
     --popover-foreground: 0 0% 93%;
 
-    --primary: 162 73% 34%;
+    --primary: 211 100% 50%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 200 12% 17%;
+    --secondary: 0 0% 17%;
     --secondary-foreground: 0 0% 80%;
 
-    --muted: 200 10% 15%;
-    --muted-foreground: 200 8% 50%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 50%;
 
-    --accent: 162 45% 20%;
+    --accent: 211 60% 20%;
     --accent-foreground: 0 0% 95%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 200 10% 18%;
-    --input: 200 10% 18%;
-    --ring: 162 73% 34%;
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 211 100% 50%;
 
-    --sidebar-background: 200 20% 7%;
-    --sidebar-foreground: 200 8% 60%;
-    --sidebar-primary: 162 73% 34%;
+    --sidebar-background: 0 0% 7%;
+    --sidebar-foreground: 0 0% 60%;
+    --sidebar-primary: 211 100% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 200 14% 14%;
+    --sidebar-accent: 0 0% 14%;
     --sidebar-accent-foreground: 0 0% 93%;
-    --sidebar-border: 200 12% 14%;
-    --sidebar-ring: 162 73% 34%;
+    --sidebar-border: 0 0% 14%;
+    --sidebar-ring: 211 100% 50%;
 
-    --success: 162 73% 34%;
+    --success: 142 71% 45%;
     --warning: 38 92% 50%;
-    --info: 210 100% 56%;
+    --info: 211 100% 50%;
 
-    --wa-teal-dark: 162 73% 34%;
-    --wa-bubble-out: 162 30% 18%;
-    --wa-bubble-in: 200 12% 17%;
-    --wa-chat-bg: 200 18% 8%;
+    --bubble-out: 211 100% 50%;
+    --bubble-out-foreground: 0 0% 100%;
+    --bubble-in: 0 0% 17%;
+    --bubble-in-foreground: 0 0% 93%;
+    --chat-bg: 0 0% 0%;
   }
 }
 
@@ -112,8 +112,8 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans antialiased;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    @apply bg-background text-foreground antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
   }
 
   ::-webkit-scrollbar {
@@ -136,14 +136,10 @@
     @apply bg-card border border-border/50;
   }
   .glow-primary {
-    box-shadow: 0 0 12px hsl(var(--primary) / 0.1);
+    box-shadow: 0 0 12px hsl(var(--primary) / 0.15);
   }
   .text-gradient {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-[hsl(var(--primary))] to-[hsl(var(--accent))];
-  }
-  .wa-pattern {
-    background-color: hsl(var(--wa-chat-bg));
-    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23000000' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
   }
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);

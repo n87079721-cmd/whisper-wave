@@ -220,10 +220,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     } catch { return ''; }
   };
 
-  const StatusIcon = ({ status }: { status: string }) => {
-    if (status === 'read') return <CheckCheck className="w-3.5 h-3.5 text-info" />;
-    if (status === 'delivered') return <CheckCheck className="w-3.5 h-3.5 text-muted-foreground" />;
-    return <Check className="w-3.5 h-3.5 text-muted-foreground" />;
+  const StatusLabel = ({ status }: { status: string }) => {
+    if (status === 'read') return <span className="text-[10px] text-primary font-medium">Read</span>;
+    if (status === 'delivered') return <span className="text-[10px] text-muted-foreground">Delivered</span>;
+    return <span className="text-[10px] text-muted-foreground">Sent</span>;
   };
 
   const Avatar = ({ contact, size = 'md' }: { contact: Contact; size?: 'sm' | 'md' | 'lg' }) => {
@@ -554,7 +554,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 <div
                   ref={messagesViewportRef}
                   onScroll={syncAutoScrollState}
-                  className="absolute inset-0 overflow-y-auto overscroll-contain p-3 md:p-4 wa-pattern"
+                  className="absolute inset-0 overflow-y-auto overscroll-contain p-3 md:p-4 bg-chat-bg"
                 >
                   {groupedMessages.map((group) => (
                     <div key={group.date}>
@@ -576,10 +576,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                             className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                           >
                             <div
-                              className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg text-[14px] shadow-sm ${
+                              className={`max-w-[85%] md:max-w-[65%] px-3 py-2 rounded-2xl text-[14px] ${
                                 msg.direction === 'sent'
-                                  ? 'bg-wa-bubble-out text-foreground rounded-tr-none'
-                                  : 'bg-wa-bubble-in text-foreground rounded-tl-none'
+                                  ? 'bg-bubble-out text-bubble-out-foreground rounded-br-md'
+                                  : 'bg-bubble-in text-bubble-in-foreground rounded-bl-md'
                               } ${isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''}`}
                             >
                               {msg.type === 'voice' ? (
@@ -598,8 +598,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                 <span className="whitespace-pre-wrap break-words">{msg.content}</span>
                               )}
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
-                                <span className="text-[10px] text-muted-foreground">{formatTime(msg.timestamp)}</span>
-                                {msg.direction === 'sent' && <StatusIcon status={msg.status} />}
+                                <span className={`text-[10px] ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
+                                {msg.direction === 'sent' && <StatusLabel status={msg.status} />}
                               </div>
                             </div>
                           </div>
@@ -691,11 +691,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             </>
           ) : (
             /* Empty state */
-            <div className="flex-1 flex flex-col items-center justify-center text-center px-6 wa-pattern">
-              <div className="w-16 h-16 rounded-full bg-accent flex items-center justify-center mb-4">
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-6 bg-chat-bg">
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
                 <MessageSquare className="w-8 h-8 text-primary" />
               </div>
-              <h2 className="text-xl font-semibold text-foreground mb-1">WA Controller</h2>
+              <h2 className="text-xl font-semibold text-foreground mb-1">Messages</h2>
               <p className="text-sm text-muted-foreground max-w-sm">
                 Send and receive messages, voice notes, and manage conversations. Select a chat to get started.
               </p>
