@@ -49,7 +49,7 @@ const DashboardSidebar = ({ activePage, onPageChange, theme, onToggleTheme }: Da
           <MessageCircle className="w-5 h-5 text-primary-foreground" />
         </div>
         {!collapsed && (
-          <span className="font-semibold text-foreground text-sm tracking-tight">WA Controller</span>
+          <span className="font-semibold text-foreground text-sm tracking-tight">Messages</span>
         )}
       </div>
 

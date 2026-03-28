@@ -60,9 +60,11 @@ export default {
         success: "hsl(var(--success))",
         warning: "hsl(var(--warning))",
         info: "hsl(var(--info))",
-        "wa-bubble-out": "hsl(var(--wa-bubble-out))",
-        "wa-bubble-in": "hsl(var(--wa-bubble-in))",
-        "wa-chat-bg": "hsl(var(--wa-chat-bg))",
+        "bubble-out": "hsl(var(--bubble-out))",
+        "bubble-out-foreground": "hsl(var(--bubble-out-foreground))",
+        "bubble-in": "hsl(var(--bubble-in))",
+        "bubble-in-foreground": "hsl(var(--bubble-in-foreground))",
+        "chat-bg": "hsl(var(--chat-bg))",
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -85,5 +87,5 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
 } satisfies Config;
