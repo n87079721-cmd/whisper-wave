@@ -936,19 +936,66 @@ RULES:
     }
   });
 
-  router.get('/message-media/:filename', (req, res) => {
+  router.get('/message-media/:filename', async (req, res) => {
     try {
       const safeFilename = path.basename(req.params.filename);
-      const filePath = resolveMessageMediaPath(safeFilename);
-      if (!filePath) return res.status(404).json({ error: 'Media not found' });
 
+      // Check if this is an on-demand WhatsApp media reference (wa:messageId format)
+      const mediaRef = safeFilename.startsWith('wa:') ? safeFilename : null;
+      const messageId = mediaRef ? safeFilename.slice(3) : null;
+
+      // Look up the media_path in DB (could be wa:msgId or legacy filename)
       const mediaRow = db.prepare(`
-        SELECT media_mime, media_name, type
+        SELECT id, media_mime, media_name, media_path, type
         FROM messages
         WHERE user_id = ? AND media_path = ?
         ORDER BY timestamp DESC
         LIMIT 1
       `).get(req.userId, safeFilename);
+
+      // If media_path starts with wa: or we have a wa: reference, stream from WhatsApp
+      const resolvedMediaPath = mediaRow?.media_path || safeFilename;
+      if (resolvedMediaPath.startsWith('wa:')) {
+        const waMessageId = resolvedMediaPath.slice(3);
+        try {
+          const streamed = await streamMediaForMessage(req.userId, waMessageId);
+          let responseMime = streamed.mimetype || mediaRow?.media_mime || 'application/octet-stream';
+          let responseData = streamed.data;
+
+          // Convert audio to mp3 for browser compatibility if requested
+          if (req.query.format === 'mp3' && String(responseMime).startsWith('audio/') && !responseMime.includes('mpeg')) {
+            try {
+              const tmpIn = path.join('/tmp', `wa_${waMessageId}_in.ogg`);
+              const tmpOut = path.join('/tmp', `wa_${waMessageId}_out.mp3`);
+              fs.writeFileSync(tmpIn, responseData);
+              execFileSync('ffmpeg', ['-y', '-i', tmpIn, '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', tmpOut], { stdio: 'ignore' });
+              if (fs.existsSync(tmpOut) && fs.statSync(tmpOut).size > 0) {
+                responseData = fs.readFileSync(tmpOut);
+                responseMime = 'audio/mpeg';
+              }
+              try { fs.unlinkSync(tmpIn); } catch {}
+              try { fs.unlinkSync(tmpOut); } catch {}
+            } catch {}
+          }
+
+          res.set('Content-Type', responseMime);
+          res.set('Content-Length', String(responseData.length));
+
+          if (req.query.download === '1') {
+            const downloadName = sanitizeDownloadName(mediaRow?.media_name || streamed.filename || 'attachment', 'attachment');
+            res.set('Content-Disposition', `attachment; filename="${downloadName}"`);
+          }
+
+          return res.send(responseData);
+        } catch (streamErr) {
+          console.log(`⚠️ On-demand media stream failed for ${waMessageId}: ${streamErr?.message}`);
+          return res.status(404).json({ error: 'Media no longer available from WhatsApp' });
+        }
+      }
+
+      // Legacy: try to serve from local file system (for any previously saved files)
+      const filePath = resolveMessageMediaPath(safeFilename);
+      if (!filePath) return res.status(404).json({ error: 'Media not found' });
 
       let responsePath = filePath;
       let responseMime = mediaRow?.media_mime || detectMimeTypeFromFilename(filePath);
