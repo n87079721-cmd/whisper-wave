@@ -884,6 +884,7 @@ const VoiceStudioPage = () => {
         </DialogContent>
       </Dialog>
     </div>
+    </>
   );
 };
 
