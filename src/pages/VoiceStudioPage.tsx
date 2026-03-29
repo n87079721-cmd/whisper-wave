@@ -125,6 +125,10 @@ const VoiceStudioPage = () => {
   const [customSounds, setCustomSounds] = useState<SoundItem[]>([]);
   const [isUploadingSound, setIsUploadingSound] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [previewingSound, setPreviewingSound] = useState<string | null>(null);
+  const soundAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [editingSoundId, setEditingSoundId] = useState<number | null>(null);
+  const [editingSoundName, setEditingSoundName] = useState('');
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
