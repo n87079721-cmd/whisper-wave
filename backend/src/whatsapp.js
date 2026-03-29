@@ -91,6 +91,7 @@ function getInstance(userId) {
       autoReplyCooldowns: new Map(),
       messageBatchBuffers: new Map(),
       contactCache: new Map(), // phone/jid -> contact info
+      archiveSyncTimer: null,
       // Sync state tracking
       syncState: {
         phase: 'idle',
@@ -590,6 +591,21 @@ async function startConnection(userId, db, options = {}) {
           recoverSync(userId, db).catch(err => console.error('Auto recovery sync error:', err?.message));
         }
       }, 30000);
+
+      // Sync archive states after initial sync
+      setTimeout(() => {
+        if (inst.connectionStatus === 'connected') {
+          syncArchiveStates(userId, db).catch(err => console.error('Auto archive sync error:', err?.message));
+        }
+      }, 15000);
+
+      // Periodic archive sync every 2 minutes
+      if (inst.archiveSyncTimer) clearInterval(inst.archiveSyncTimer);
+      inst.archiveSyncTimer = setInterval(() => {
+        if (inst.connectionStatus === 'connected') {
+          syncArchiveStates(userId, db).catch(err => console.error('Periodic archive sync error:', err?.message));
+        }
+      }, 120000);
     });
 
     // ── Disconnected ──
@@ -598,6 +614,7 @@ async function startConnection(userId, db, options = {}) {
       console.warn(`⚠️ [${userId}] WhatsApp disconnected: ${reason}`);
 
       if (reason === 'LOGOUT' || reason === 'CONFLICT') {
+        if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
         inst.connectionStatus = 'disconnected';
         inst.reconnectAttempt = 0;
         emit(userId, 'status', { status: 'disconnected' });
