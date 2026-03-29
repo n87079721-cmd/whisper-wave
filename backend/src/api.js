@@ -565,7 +565,7 @@ export function createApiRouter(db) {
 
   router.post('/send/media', async (req, res) => {
     try {
-      const { contactId, jid, fileName, mimeType, data, caption, sendAsDocument } = req.body;
+      const { contactId, jid, fileName, mimeType, data, caption, sendAsDocument, isViewOnce } = req.body;
       if (!fileName || !mimeType || !data || (!contactId && !jid)) {
         return res.status(400).json({ error: 'Missing target or media payload' });
       }
@@ -581,14 +581,15 @@ export function createApiRouter(db) {
         fileName,
         caption,
         sendAsDocument: !!sendAsDocument,
+        isViewOnce: !!isViewOnce,
       });
 
       const msgId = getSentMessageId(sendResult);
       const savedMedia = persistOutgoingMedia(msgId, normalizedBase64, mimeType, fileName);
 
       db.prepare(`
-        INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
-        VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, 'sent', ?, ?, ?)
+        INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime, is_view_once)
+        VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, 'sent', ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           contact_id = excluded.contact_id,
           jid = excluded.jid,
@@ -599,7 +600,8 @@ export function createApiRouter(db) {
           status = excluded.status,
           media_path = COALESCE(excluded.media_path, messages.media_path),
           media_name = COALESCE(excluded.media_name, messages.media_name),
-          media_mime = COALESCE(excluded.media_mime, messages.media_mime)
+          media_mime = COALESCE(excluded.media_mime, messages.media_mime),
+          is_view_once = excluded.is_view_once
       `).run(
         msgId,
         req.userId,
@@ -611,6 +613,7 @@ export function createApiRouter(db) {
         savedMedia.mediaPath,
         savedMedia.mediaName,
         savedMedia.mediaMime,
+        isViewOnce ? 1 : 0,
       );
 
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);

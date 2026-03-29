@@ -262,10 +262,10 @@ function getDefaultMediaName(msgType, extension) {
   return `attachment${ext || '.bin'}`;
 }
 
-function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime }) {
+function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce }) {
   db.prepare(`
-    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       contact_id = excluded.contact_id,
       jid = excluded.jid,
@@ -283,8 +283,9 @@ function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, di
       duration = COALESCE(excluded.duration, messages.duration),
       media_path = COALESCE(excluded.media_path, messages.media_path),
       media_name = COALESCE(excluded.media_name, messages.media_name),
-      media_mime = COALESCE(excluded.media_mime, messages.media_mime)
-  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime);
+      media_mime = COALESCE(excluded.media_mime, messages.media_mime),
+      is_view_once = COALESCE(excluded.is_view_once, messages.is_view_once)
+  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0);
 }
 
 function isUuidLike(value) {
@@ -534,6 +535,7 @@ async function startConnection(userId, db, options = {}) {
         const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
         const direction = isFromMe ? 'sent' : 'received';
         const msgId = msg.id?._serialized || msg.id?.id || uuid();
+        const isViewOnce = !!(msg.isViewOnce || msg._data?.isViewOnce);
 
         let mediaPath = null;
         let resolvedMediaName = mediaName;
@@ -563,6 +565,7 @@ async function startConnection(userId, db, options = {}) {
           mediaPath,
           mediaName: resolvedMediaName,
           mediaMime: resolvedMediaMime,
+          isViewOnce,
         });
 
         emit(userId, 'message', { contactId, msgId });
@@ -1217,7 +1220,7 @@ async function sendTextMessage(userId, jid, text) {
 }
 
 async function sendMediaMessage(userId, jid, payload) {
-  const { mimeType, data, fileName, caption, sendAsDocument = false } = payload || {};
+  const { mimeType, data, fileName, caption, sendAsDocument = false, isViewOnce = false } = payload || {};
   if (!data) throw new Error('Missing media data');
 
   return sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
@@ -1225,6 +1228,7 @@ async function sendMediaMessage(userId, jid, payload) {
     const options = {};
     if (caption) options.caption = caption;
     if (sendAsDocument) options.sendMediaAsDocument = true;
+    if (isViewOnce) options.isViewOnce = true;
 
     if (chat) return await chat.sendMessage(media, options);
     return await client.sendMessage(target, media, options);
@@ -1500,7 +1504,8 @@ export async function deleteMessageForEveryone(userId, db, messageId) {
     }
   }
 
-  db.prepare('DELETE FROM messages WHERE id = ? AND user_id = ?').run(messageId, userId);
+  // Mark as deleted instead of removing — show "This message was deleted" placeholder
+  db.prepare("UPDATE messages SET is_deleted = 1, content = '🚫 You deleted this message', media_path = NULL WHERE id = ? AND user_id = ?").run(messageId, userId);
   return { success: true, mode: 'everyone' };
 }
 

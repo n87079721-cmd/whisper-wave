@@ -138,6 +138,12 @@ function ensureCurrentTables(db) {
     if (!messageCols.has('media_mime')) {
       db.exec("ALTER TABLE messages ADD COLUMN media_mime TEXT");
     }
+    if (!messageCols.has('is_view_once')) {
+      db.exec("ALTER TABLE messages ADD COLUMN is_view_once INTEGER DEFAULT 0");
+    }
+    if (!messageCols.has('is_deleted')) {
+      db.exec("ALTER TABLE messages ADD COLUMN is_deleted INTEGER DEFAULT 0");
+    }
   } catch {}
 }
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, type StatusGroup } from '@/lib/api';
 import { formatDistanceToNow } from 'date-fns';
-import { RefreshCw, X, ChevronRight, Eye } from 'lucide-react';
+import { RefreshCw, X, ChevronRight, Eye, Download } from 'lucide-react';
 
 const STORY_DURATION_MS = 5000;
 const HOLD_THRESHOLD_MS = 220;
@@ -188,6 +188,17 @@ const StatusPage = () => {
               {formatDistanceToNow(new Date(currentStatus.timestamp), { addSuffix: true })}
             </p>
           </div>
+          {currentStatus.mediaPath && (currentStatus.mediaType === 'image' || currentStatus.mediaType === 'video') && (
+            <a
+              href={api.getStatusMediaUrl(currentStatus.mediaPath)}
+              download={`status-${currentStatus.id}.${currentStatus.mediaType === 'image' ? 'jpg' : 'mp4'}`}
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-background/20 text-background hover:bg-background/30 transition-colors"
+              title="Save to device"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Download className="h-4 w-4" />
+            </a>
+          )}
           <span className="text-xs text-background/70">{viewerIdx + 1}/{total}</span>
         </div>
 

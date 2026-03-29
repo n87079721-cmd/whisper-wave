@@ -228,7 +228,7 @@ export const api = {
     });
   },
 
-  async sendMedia(contactId: string, file: File, caption?: string) {
+  async sendMedia(contactId: string, file: File, caption?: string, isViewOnce?: boolean) {
     const mimeType = file.type || 'application/octet-stream';
     const data = await fileToBase64(file);
     return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/media', {
@@ -241,11 +241,12 @@ export const api = {
         data,
         caption,
         sendAsDocument: !(mimeType.startsWith('image/') || mimeType.startsWith('video/')),
+        isViewOnce: !!isViewOnce,
       }),
     });
   },
 
-  async sendMediaToPhone(phone: string, file: File, caption?: string) {
+  async sendMediaToPhone(phone: string, file: File, caption?: string, isViewOnce?: boolean) {
     const mimeType = file.type || 'application/octet-stream';
     const data = await fileToBase64(file);
     return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/media', {
@@ -258,6 +259,7 @@ export const api = {
         data,
         caption,
         sendAsDocument: !(mimeType.startsWith('image/') || mimeType.startsWith('video/')),
+        isViewOnce: !!isViewOnce,
       }),
     });
   },
@@ -409,6 +411,8 @@ export interface Message {
   media_path: string | null;
   media_name?: string | null;
   media_mime?: string | null;
+  is_view_once?: number;
+  is_deleted?: number;
 }
 
 export interface Stats {
