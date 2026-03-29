@@ -53,6 +53,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [deletingMessage, setDeletingMessage] = useState<string | null>(null);
   const [deletingConversation, setDeletingConversation] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
   const [pendingAttachment, setPendingAttachment] = useState<{
     file: File;
     previewUrl: string | null;
