@@ -900,43 +900,23 @@ function getMessagePayload(msg) {
 // ── Voice media download ──
 
 async function saveMessageMedia(userId, msg, msgId, options = {}) {
+  // Stream-only mode: don't save media to disk, just store metadata
+  // The media will be fetched on-demand from WhatsApp when requested
   try {
-    if (!fs.existsSync(MESSAGE_MEDIA_DIR)) fs.mkdirSync(MESSAGE_MEDIA_DIR, { recursive: true });
-
-    const downloaded = await msg.downloadMedia();
-    if (!downloaded?.data) {
-      return {
-        mediaPath: null,
-        mediaName: options.mediaName || null,
-        mediaMime: options.mimetype || msg.mimetype || null,
-      };
-    }
-
-    const resolvedMime = downloaded.mimetype || options.mimetype || msg.mimetype || 'application/octet-stream';
-    const resolvedName = sanitizeStoredFilename(downloaded.filename || options.mediaName || msg.filename || msg._data?.filename || null);
+    const resolvedMime = options.mimetype || msg.mimetype || 'application/octet-stream';
+    const resolvedName = sanitizeStoredFilename(msg.filename || msg._data?.filename || options.mediaName || null);
     const extension = getMediaFileExtension(resolvedMime, resolvedName || '');
-    const filename = `${msgId}.${extension}`;
-    const filePath = path.join(MESSAGE_MEDIA_DIR, filename);
 
-    if (!hasSavedMediaFile(filePath)) {
-      const buffer = Buffer.from(downloaded.data, 'base64');
-      if (buffer.length === 0) {
-        return {
-          mediaPath: null,
-          mediaName: resolvedName || getDefaultMediaName(options.msgType, extension),
-          mediaMime: resolvedMime,
-        };
-      }
-      fs.writeFileSync(filePath, buffer);
-    }
+    // Use message ID as the media_path marker for on-demand download
+    const mediaRef = `wa:${msgId}`;
 
     return {
-      mediaPath: filename,
+      mediaPath: mediaRef,
       mediaName: resolvedName || getDefaultMediaName(options.msgType, extension),
       mediaMime: resolvedMime,
     };
   } catch (err) {
-    console.log(`📦 [${userId}] Media download failed (${options.msgType || msg.type}): ${err?.message}`);
+    console.log(`📦 [${userId}] Media metadata extraction failed (${options.msgType || msg.type}): ${err?.message}`);
     return {
       mediaPath: null,
       mediaName: options.mediaName || null,
@@ -952,6 +932,32 @@ async function saveVoiceMedia(userId, msg, msgId, mimetype) {
     mediaName: `voice-note.${getAudioFileExtension(mimetype)}`,
   });
   return savedMedia?.mediaPath || null;
+}
+
+// ── On-demand media streaming from WhatsApp ──
+
+export async function streamMediaForMessage(userId, messageId) {
+  const inst = getInstance(userId);
+  if (!inst.client || inst.connectionStatus !== 'connected') {
+    throw new Error('WhatsApp not connected');
+  }
+
+  try {
+    const msg = await inst.client.getMessageById(messageId);
+    if (!msg) throw new Error('Message not found in WhatsApp');
+    if (!msg.hasMedia) throw new Error('Message has no media');
+
+    const media = await msg.downloadMedia();
+    if (!media?.data) throw new Error('Failed to download media');
+
+    return {
+      data: Buffer.from(media.data, 'base64'),
+      mimetype: media.mimetype || 'application/octet-stream',
+      filename: media.filename || null,
+    };
+  } catch (err) {
+    throw new Error(`Media stream failed: ${err?.message || err}`);
+  }
 }
 
 // ── Contact management ──
