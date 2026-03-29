@@ -410,7 +410,7 @@ export interface Message {
   contact_id: string;
   jid: string;
   content: string | null;
-  type: 'text' | 'voice' | 'image' | 'video' | 'document';
+  type: 'text' | 'voice' | 'image' | 'video' | 'document' | 'sticker';
   direction: 'sent' | 'received';
   timestamp: string;
   status: string;
@@ -420,6 +420,7 @@ export interface Message {
   media_mime?: string | null;
   is_view_once?: number;
   is_deleted?: number;
+  is_edited?: number;
 }
 
 export interface Stats {
