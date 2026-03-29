@@ -400,6 +400,8 @@ export function createApiRouter(db) {
         send('status_deleted', data);
       } else if (event === 'call') {
         send('call', data);
+      } else if (event === 'message_edited') {
+        send('message_edited', data);
       }
     });
 
