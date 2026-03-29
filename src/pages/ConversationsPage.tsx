@@ -581,7 +581,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 return (
                   <button
                     key={contact.id}
-                    onClick={() => setSelectedContact(contact)}
+                    onClick={() => { setSelectedContact(contact); if (showArchived) setShowArchived(false); }}
                     className={`w-full flex items-center gap-3 px-3 py-3 text-left transition-colors ${
                       isActive ? 'bg-accent' : 'hover:bg-secondary/60'
                     }`}
@@ -589,23 +589,45 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     <Avatar contact={contact} size="md" />
                     <div className="min-w-0 flex-1">
                       <div className="flex justify-between items-baseline">
-                        <p className={`text-[15px] truncate ${isActive ? 'text-foreground font-semibold' : 'text-foreground font-medium'}`}>
+                        <p className={`text-[15px] truncate ${(contact.unread_count ?? 0) > 0 ? 'text-foreground font-bold' : isActive ? 'text-foreground font-semibold' : 'text-foreground font-medium'}`}>
                           {getContactDisplayName(contact)}
                         </p>
                         <span className={`text-[11px] flex-shrink-0 ml-2 ${
-                          isActive ? 'text-foreground/70' : 'text-muted-foreground'
+                          (contact.unread_count ?? 0) > 0 ? 'text-primary font-medium' : isActive ? 'text-foreground/70' : 'text-muted-foreground'
                         }`}>
                           {contact.last_timestamp ? formatDate(contact.last_timestamp) : ''}
                         </span>
                       </div>
-                      <p className="text-[13px] text-muted-foreground truncate mt-0.5">
-                        {contact.last_type === 'voice' ? '🎤 Voice note' : contact.last_message || getContactDisplayMeta(contact)}
-                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <p className={`text-[13px] truncate flex-1 ${(contact.unread_count ?? 0) > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                          {contact.last_type === 'voice' ? '🎤 Voice note' : contact.last_message || getContactDisplayMeta(contact)}
+                        </p>
+                        {(contact.unread_count ?? 0) > 0 && (
+                          <span className="flex-shrink-0 min-w-[20px] h-5 rounded-full bg-primary text-primary-foreground text-[11px] font-bold flex items-center justify-center px-1.5">
+                            {contact.unread_count}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </button>
                 );
               })
             )}
+              {/* Archived count at bottom of list */}
+              {!showArchived && archivedConversations.length > 0 && !search && (
+                <button
+                  onClick={() => setShowArchived(true)}
+                  className="w-full flex items-center gap-3 px-3 py-3 text-left text-muted-foreground hover:bg-secondary/60 transition-colors"
+                >
+                  <div className="w-[46px] h-[46px] rounded-full flex items-center justify-center bg-muted flex-shrink-0">
+                    <Archive className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-[15px] font-medium">Archived</p>
+                    <p className="text-[13px]">{archivedConversations.length} chat{archivedConversations.length !== 1 ? 's' : ''}</p>
+                  </div>
+                </button>
+              )}
           </div>
         </div>
 
