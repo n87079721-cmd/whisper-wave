@@ -590,6 +590,24 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     return groups;
   }, [messages]);
 
+  const handleEditMessage = useCallback(async (messageId: string) => {
+    if (!editingText.trim()) return;
+    setSavingEdit(true);
+    try {
+      const res = await api.editMessage(messageId, editingText.trim());
+      if (res.success) {
+        setMessages(prev => prev.map(m => m.id === messageId ? { ...m, content: editingText.trim(), is_edited: 1 } : m));
+        toast.success('Message edited');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to edit message');
+    } finally {
+      setSavingEdit(false);
+      setEditingMsgId(null);
+      setEditingText('');
+    }
+  }, [editingText]);
+
   const renderMessageContent = (msg: Message) => {
     // Deleted message placeholder
     if (msg.is_deleted) {
@@ -606,6 +624,31 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         <Eye className="w-3 h-3" /> View once
       </span>
     ) : null;
+
+    const editedLabel = msg.is_edited ? (
+      <span className="text-[10px] text-muted-foreground italic ml-1">edited</span>
+    ) : null;
+
+    // Inline editing
+    if (editingMsgId === msg.id) {
+      return (
+        <div className="flex items-center gap-2 min-w-[200px]">
+          <input
+            value={editingText}
+            onChange={(e) => setEditingText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleEditMessage(msg.id); if (e.key === 'Escape') { setEditingMsgId(null); setEditingText(''); } }}
+            className="flex-1 px-2 py-1 rounded-md bg-background text-sm text-foreground focus:outline-none border border-border min-w-0"
+            autoFocus
+          />
+          <button onClick={() => handleEditMessage(msg.id)} disabled={savingEdit} className="text-primary hover:text-primary/80">
+            {savingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+          </button>
+          <button onClick={() => { setEditingMsgId(null); setEditingText(''); }} className="text-muted-foreground hover:text-foreground">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      );
+    }
 
     if (msg.type === 'voice') {
       const voiceUrl = msg.media_path ? api.getVoiceMediaUrl(msg.media_path) : null;
@@ -627,7 +670,29 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>Voice note</span>
             {msg.duration ? <span>• 0:{String(msg.duration).padStart(2, '0')}</span> : null}
+            {editedLabel}
           </div>
+        </div>
+      );
+    }
+
+    if (msg.type === 'sticker') {
+      const stickerUrl = msg.media_path ? api.getMessageMediaUrl(msg.media_path) : null;
+      return (
+        <div className="space-y-1">
+          {stickerUrl ? (
+            <img
+              src={stickerUrl}
+              alt="Sticker"
+              loading="lazy"
+              className="max-w-[180px] max-h-[180px] object-contain"
+            />
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>🎭 Sticker</span>
+            </div>
+          )}
+          {editedLabel}
         </div>
       );
     }
@@ -653,6 +718,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             </div>
           )}
           {msg.content ? <p className="whitespace-pre-wrap break-words">{msg.content}</p> : null}
+          {editedLabel}
         </div>
       );
     }
@@ -676,6 +742,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             </div>
           )}
           {msg.content ? <p className="whitespace-pre-wrap break-words">{msg.content}</p> : null}
+          {editedLabel}
         </div>
       );
     }
@@ -708,6 +775,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             </div>
           )}
           {msg.content && msg.content !== documentLabel ? <p className="whitespace-pre-wrap break-words">{msg.content}</p> : null}
+          {editedLabel}
         </div>
       );
     }
@@ -716,6 +784,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       <>
         {viewOnceBadge}
         <span className="whitespace-pre-wrap break-words">{msg.content}</span>
+        {editedLabel}
       </>
     );
   };
