@@ -406,8 +406,8 @@ const StatusPage = () => {
   }
 
   return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
+    <div className="h-full flex flex-col">
+      <div className="mb-4 flex items-center justify-between flex-shrink-0">
         <h1 className="text-xl font-semibold text-foreground">Status</h1>
         <button
           onClick={fetchStatuses}
@@ -419,15 +419,21 @@ const StatusPage = () => {
         </button>
       </div>
 
+      {loading && groups.length === 0 && (
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      )}
+
       {groups.length === 0 && !loading && (
-        <div className="py-16 text-center text-muted-foreground">
-          <Eye className="mx-auto mb-3 h-12 w-12 opacity-40" />
+        <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
+          <Eye className="mb-3 h-12 w-12 opacity-40" />
           <p className="text-sm">No status updates yet</p>
           <p className="mt-1 text-xs">Status updates from your contacts will appear here</p>
         </div>
       )}
 
-      <div className="space-y-1">
+      <div className="flex-1 overflow-y-auto space-y-1">
         {groups.map((group) => {
           const lastStatus = group.statuses[group.statuses.length - 1];
           const count = group.statuses.length;
@@ -437,9 +443,9 @@ const StatusPage = () => {
             <button
               key={group.senderJid}
               onClick={() => openViewer(group)}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-accent/50"
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-accent/50 active:bg-accent/70"
             >
-              <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-primary bg-muted">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-primary bg-muted flex-shrink-0">
                 <span className="text-sm font-medium text-muted-foreground">{(displayName || '?')[0].toUpperCase()}</span>
               </div>
               <div className="min-w-0 flex-1">
@@ -448,7 +454,7 @@ const StatusPage = () => {
                   {count} update{count > 1 ? 's' : ''} · {formatDistanceToNow(new Date(lastStatus.timestamp), { addSuffix: true })}
                 </p>
               </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             </button>
           );
         })}
