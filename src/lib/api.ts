@@ -211,11 +211,20 @@ export const api = {
   },
 
   // Send
-  sendText(contactId: string, message: string) {
+  sendText(contactId: string, message: string, quotedMessageId?: string) {
     return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/text', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contactId, message }),
+      body: JSON.stringify({ contactId, message, quotedMessageId }),
+    });
+  },
+
+  sendTextToPhone(phone: string, message: string, quotedMessageId?: string) {
+    const jid = toPhoneJid(phone);
+    return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jid, message, quotedMessageId }),
     });
   },
 
