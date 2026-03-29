@@ -62,6 +62,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     kind: 'image' | 'video' | 'document';
     viewOnce: boolean;
   } | null>(null);
+  const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
+  const [profileMedia, setProfileMedia] = useState<Message[]>([]);
+  const [profileMediaLoading, setProfileMediaLoading] = useState(false);
+  const swipeRef = useRef<{ startX: number; msgId: string } | null>(null);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
