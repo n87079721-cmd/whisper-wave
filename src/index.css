@@ -3,106 +3,106 @@
 @tailwind utilities;
 
 @layer base {
-  /* ===== LIGHT MODE — Refined Teal ===== */
+  /* ===== LIGHT MODE — iMessage ===== */
   :root {
-    --background: 210 20% 98%;
-    --foreground: 210 11% 15%;
+    --background: 0 0% 100%;
+    --foreground: 0 0% 0%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 210 11% 15%;
+    --card: 0 0% 97%;
+    --card-foreground: 0 0% 0%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 210 11% 15%;
+    --popover-foreground: 0 0% 0%;
 
-    --primary: 162 63% 41%;
+    --primary: 211 100% 50%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 14% 95%;
-    --secondary-foreground: 210 11% 30%;
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 0 0% 25%;
 
-    --muted: 210 14% 93%;
-    --muted-foreground: 210 8% 50%;
+    --muted: 240 5% 96%;
+    --muted-foreground: 0 0% 45%;
 
-    --accent: 162 40% 93%;
-    --accent-foreground: 162 63% 28%;
+    --accent: 211 100% 95%;
+    --accent-foreground: 211 100% 35%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 210 14% 89%;
-    --input: 210 14% 89%;
-    --ring: 162 63% 41%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 211 100% 50%;
 
     --radius: 0.75rem;
 
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 210 8% 46%;
-    --sidebar-primary: 162 63% 41%;
+    --sidebar-background: 240 5% 97%;
+    --sidebar-foreground: 0 0% 40%;
+    --sidebar-primary: 211 100% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 210 14% 95%;
-    --sidebar-accent-foreground: 210 11% 15%;
-    --sidebar-border: 210 14% 91%;
-    --sidebar-ring: 162 63% 41%;
+    --sidebar-accent: 240 5% 93%;
+    --sidebar-accent-foreground: 0 0% 0%;
+    --sidebar-border: 0 0% 91%;
+    --sidebar-ring: 211 100% 50%;
 
     --success: 142 71% 45%;
     --warning: 38 92% 50%;
-    --info: 199 89% 48%;
+    --info: 211 100% 50%;
 
-    --bubble-out: 162 56% 40%;
+    --bubble-out: 211 100% 50%;
     --bubble-out-foreground: 0 0% 100%;
-    --bubble-in: 0 0% 100%;
-    --bubble-in-foreground: 210 11% 15%;
-    --chat-bg: 210 20% 96%;
+    --bubble-in: 240 5% 91%;
+    --bubble-in-foreground: 0 0% 0%;
+    --chat-bg: 0 0% 100%;
   }
 
-  /* ===== DARK MODE — Refined Teal ===== */
+  /* ===== DARK MODE — iMessage ===== */
   .dark {
-    --background: 200 12% 8%;
-    --foreground: 210 14% 89%;
+    --background: 0 0% 0%;
+    --foreground: 0 0% 93%;
 
-    --card: 200 12% 11%;
-    --card-foreground: 210 14% 89%;
+    --card: 0 0% 11%;
+    --card-foreground: 0 0% 93%;
 
-    --popover: 200 12% 11%;
-    --popover-foreground: 210 14% 89%;
+    --popover: 0 0% 11%;
+    --popover-foreground: 0 0% 93%;
 
-    --primary: 162 63% 41%;
+    --primary: 211 100% 50%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 200 10% 16%;
-    --secondary-foreground: 210 14% 80%;
+    --secondary: 0 0% 17%;
+    --secondary-foreground: 0 0% 80%;
 
-    --muted: 200 10% 14%;
-    --muted-foreground: 210 8% 50%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 50%;
 
-    --accent: 162 30% 16%;
-    --accent-foreground: 162 50% 75%;
+    --accent: 211 60% 20%;
+    --accent-foreground: 0 0% 95%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 200 10% 18%;
-    --input: 200 10% 18%;
-    --ring: 162 63% 41%;
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 211 100% 50%;
 
-    --sidebar-background: 200 12% 7%;
-    --sidebar-foreground: 210 8% 55%;
-    --sidebar-primary: 162 63% 41%;
+    --sidebar-background: 0 0% 7%;
+    --sidebar-foreground: 0 0% 60%;
+    --sidebar-primary: 211 100% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 200 10% 14%;
-    --sidebar-accent-foreground: 210 14% 89%;
-    --sidebar-border: 200 10% 14%;
-    --sidebar-ring: 162 63% 41%;
+    --sidebar-accent: 0 0% 14%;
+    --sidebar-accent-foreground: 0 0% 93%;
+    --sidebar-border: 0 0% 14%;
+    --sidebar-ring: 211 100% 50%;
 
     --success: 142 71% 45%;
     --warning: 38 92% 50%;
-    --info: 199 89% 48%;
+    --info: 211 100% 50%;
 
-    --bubble-out: 162 45% 28%;
+    --bubble-out: 211 100% 50%;
     --bubble-out-foreground: 0 0% 100%;
-    --bubble-in: 200 10% 16%;
-    --bubble-in-foreground: 210 14% 89%;
-    --chat-bg: 200 12% 6%;
+    --bubble-in: 0 0% 17%;
+    --bubble-in-foreground: 0 0% 93%;
+    --chat-bg: 0 0% 0%;
   }
 }
 
@@ -119,7 +119,7 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
     /* Prevent text size adjustment on orientation change */
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
@@ -164,15 +164,6 @@
     * {
       scrollbar-width: none;
     }
-  }
-  .chat-wallpaper {
-    background-color: hsl(var(--chat-bg));
-    background-image: url('/images/chat-wallpaper-light.jpg');
-    background-size: 512px 512px;
-    background-repeat: repeat;
-  }
-  .dark .chat-wallpaper {
-    background-image: url('/images/chat-wallpaper-dark.jpg');
   }
 }
 
