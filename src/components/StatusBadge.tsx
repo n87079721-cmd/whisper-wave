@@ -10,6 +10,7 @@ function getSyncLabel(syncPhase?: string): string | null {
   switch (syncPhase) {
     case 'waiting_history': return 'Syncing…';
     case 'importing': return 'Importing history…';
+    case 'recovering': return 'Recovering chats…';
     case 'partial': return 'Partial sync';
     case 'ready': return 'Synced';
     default: return null;
@@ -19,7 +20,7 @@ function getSyncLabel(syncPhase?: string): string | null {
 const StatusBadge = forwardRef<HTMLSpanElement, StatusBadgeProps>(({ connected, label, syncPhase }, ref) => {
   const syncLabel = getSyncLabel(syncPhase);
   const isPartial = syncPhase === 'partial';
-  const isSyncing = syncPhase === 'waiting_history' || syncPhase === 'importing';
+  const isSyncing = syncPhase === 'waiting_history' || syncPhase === 'importing' || syncPhase === 'recovering';
 
   const displayLabel = label ?? (
     connected

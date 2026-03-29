@@ -182,8 +182,12 @@ export const api = {
     return requestJson<Contact[]>('/api/conversations');
   },
 
-  getMessages(contactId: string) {
-    return requestJson<Message[]>(`/api/messages/${contactId}`);
+  getMessages(contactId: string, options?: { limit?: number; before?: string }) {
+    const params = new URLSearchParams();
+    if (options?.limit) params.set('limit', String(options.limit));
+    if (options?.before) params.set('before', options.before);
+    const qs = params.toString();
+    return requestJson<{ messages: Message[]; hasMore: boolean }>(`/api/messages/${contactId}${qs ? '?' + qs : ''}`);
   },
 
   // Send

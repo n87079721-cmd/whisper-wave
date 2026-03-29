@@ -165,7 +165,7 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
             <div className="rounded-lg bg-secondary/60 p-3">
               <p className="text-xs text-muted-foreground">History</p>
               <p className="text-sm font-medium text-foreground mt-0.5">
-                {syncState.phase === 'ready' ? 'Synced' : syncState.phase === 'partial' ? 'Partial' : syncState.phase === 'importing' ? 'Importing...' : 'Idle'}
+                {syncState.phase === 'ready' ? 'Synced' : syncState.phase === 'partial' ? 'Partial' : syncState.phase === 'importing' ? 'Importing...' : syncState.phase === 'recovering' ? 'Recovering...' : 'Idle'}
               </p>
             </div>
             <div className="rounded-lg bg-secondary/60 p-3 flex items-center justify-between">

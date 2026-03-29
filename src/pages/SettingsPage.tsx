@@ -96,7 +96,7 @@ const SettingsPage = () => {
     setSyncing(true);
     try {
       await api.triggerSync();
-      toast.success('Sync started — contacts and messages are being refreshed');
+      toast.success('Recovery sync started — fetching missing chats & contacts');
     } catch { toast.error('Failed to start sync'); }
     finally { setSyncing(false); }
   };
@@ -125,14 +125,14 @@ const SettingsPage = () => {
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center"><RefreshCw className="w-5 h-5 text-primary" /></div>
             <div>
-              <h3 className="font-semibold text-foreground text-sm">Sync</h3>
-              <p className="text-xs text-muted-foreground">Re-sync contacts and messages from WhatsApp</p>
+              <h3 className="font-semibold text-foreground text-sm">Recovery Sync</h3>
+              <p className="text-xs text-muted-foreground">Fetch missing chats & contacts from WhatsApp</p>
             </div>
           </div>
           <button onClick={handleSync} disabled={syncing || !isConnected}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40">
             {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            {syncing ? 'Syncing...' : 'Sync Now'}
+            {syncing ? 'Recovering...' : 'Recover Chats'}
           </button>
         </div>
 
@@ -149,6 +149,7 @@ const SettingsPage = () => {
                 {syncState.phase === 'ready' ? '✓ Complete' :
                  syncState.phase === 'partial' ? '⚠ Partial' :
                  syncState.phase === 'importing' ? '⏳ Importing…' :
+                 syncState.phase === 'recovering' ? '🔄 Recovering…' :
                  syncState.phase === 'waiting_history' ? '⏳ Waiting…' : '—'}
               </span>
             </div>
