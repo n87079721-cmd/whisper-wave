@@ -323,6 +323,14 @@ export const api = {
     return requestJson<{ success: boolean }>(`/api/messages/${messageId}?mode=${mode}`, { method: 'DELETE' });
   },
 
+  // Edit
+  editMessage(messageId: string, newContent: string) {
+    return requestJson<{ success: boolean }>('/api/edit/message', {
+      method: 'POST',
+      body: JSON.stringify({ messageId, newContent }),
+    });
+  },
+
   deleteConversation(contactId: string) {
     return requestJson<{ success: boolean; deletedMessages?: number }>(`/api/conversations/${contactId}`, { method: 'DELETE' });
   },
