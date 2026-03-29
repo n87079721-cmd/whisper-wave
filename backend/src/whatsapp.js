@@ -340,10 +340,18 @@ function getDefaultMediaName(msgType, extension) {
   return `attachment${ext || '.bin'}`;
 }
 
-function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce }) {
+function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce, isEdited }) {
+  // Ensure is_edited column exists
+  try {
+    const cols = db.prepare("PRAGMA table_info(messages)").all().map(c => c.name);
+    if (!cols.includes('is_edited')) {
+      db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
+    }
+  } catch {}
+
   db.prepare(`
-    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once, is_edited)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       contact_id = excluded.contact_id,
       jid = excluded.jid,
@@ -362,8 +370,35 @@ function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, di
       media_path = COALESCE(excluded.media_path, messages.media_path),
       media_name = COALESCE(excluded.media_name, messages.media_name),
       media_mime = COALESCE(excluded.media_mime, messages.media_mime),
-      is_view_once = COALESCE(excluded.is_view_once, messages.is_view_once)
-  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0);
+      is_view_once = COALESCE(excluded.is_view_once, messages.is_view_once),
+      is_edited = CASE WHEN excluded.is_edited = 1 THEN 1 ELSE messages.is_edited END
+  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0, isEdited ? 1 : 0);
+}
+
+async function editMessage(userId, db, messageId, newContent) {
+  const inst = getInstance(userId);
+  if (!inst.client || inst.connectionStatus !== 'connected') {
+    throw new Error('WhatsApp not connected');
+  }
+
+  // Get the message from DB
+  const row = db.prepare('SELECT * FROM messages WHERE id = ? AND user_id = ? AND direction = ?').get(messageId, userId, 'sent');
+  if (!row) throw new Error('Message not found or not editable');
+  if (row.type !== 'text') throw new Error('Only text messages can be edited');
+
+  // Try to edit via whatsapp-web.js
+  try {
+    const msg = await inst.client.getMessageById(messageId);
+    if (!msg) throw new Error('Message not found in WhatsApp');
+    await msg.edit(newContent);
+  } catch (err) {
+    throw new Error(`Failed to edit message: ${err?.message || err}`);
+  }
+
+  // Update in DB
+  db.prepare('UPDATE messages SET content = ?, is_edited = 1 WHERE id = ? AND user_id = ?').run(newContent, messageId, userId);
+  emit(userId, 'message_edited', { messageId, newContent });
+  return { success: true };
 }
 
 function isUuidLike(value) {

@@ -71,6 +71,7 @@ function ensureCurrentTables(db) {
       media_path TEXT,
        media_name TEXT,
        media_mime TEXT,
+      is_edited INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (contact_id) REFERENCES contacts(id)
