@@ -972,7 +972,7 @@ async function startConnection(userId, db, options = {}) {
             { pushName: msg.pushName || null }
           );
 
-          const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
+          const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup, toIsoTimestamp(msg.messageTimestamp));
           if (!contactId) continue; // Skip unresolved @lid contacts
 
           const payload = getMessagePayload(msg.message);
@@ -1037,7 +1037,7 @@ async function startConnection(userId, db, options = {}) {
           rememberChat(inst, chat, resolved.jid);
           const phone = '+' + resolved.phone;
           const isGroup = jid.endsWith('@g.us');
-          getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup);
+          getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup, getChatActivityTimestamp(chat));
           created++;
         } catch {}
       }
@@ -1048,12 +1048,18 @@ async function startConnection(userId, db, options = {}) {
     });
 
     inst.sock.ev.on('chats.update', (updates) => {
+      let changed = 0;
       for (const chat of updates) {
         try {
           const jid = chat.id;
           if (!jid || jid === 'status@broadcast') continue;
           const resolved = resolveLidPhone(inst, jid);
           rememberChat(inst, chat, resolved.jid);
+          const phone = '+' + resolved.phone;
+          const isGroup = jid.endsWith('@g.us');
+
+          getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup, getChatActivityTimestamp(chat));
+          changed++;
 
           // Sync archive status from WhatsApp
           if (typeof chat.archive === 'boolean' || typeof chat.archived === 'boolean') {
@@ -1072,6 +1078,7 @@ async function startConnection(userId, db, options = {}) {
           }
         } catch {}
       }
+      if (changed > 0) emit(userId, 'contacts_sync', { count: changed });
     });
 
     inst.sock.ev.on('messaging-history.set', async ({ chats, contacts: syncedContacts, messages: historyMsgs, syncType }) => {
@@ -1139,7 +1146,7 @@ async function startConnection(userId, db, options = {}) {
             rememberChat(inst, chat, resolved.jid);
             const phone = '+' + resolved.phone;
             const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup);
+            getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup, getChatActivityTimestamp(chat));
             contactChanges++;
           } catch {}
         }
@@ -1181,7 +1188,7 @@ async function startConnection(userId, db, options = {}) {
               { pushName: msg.pushName || null }
             );
 
-            const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
+            const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup, toIsoTimestamp(msg.messageTimestamp));
             if (!contactId) continue; // Skip unresolved @lid contacts
 
             const payload = getMessagePayload(msg.message);
@@ -1556,7 +1563,7 @@ async function recoverSync(userId, db) {
       if (!existing || existing.count === 0) {
         const phone = '+' + resolved.phone;
         const contact = storeContacts[jid] || storeChats[jid] || storeChats[resolved.jid];
-        getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(contact), false);
+        getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(contact), false, getChatActivityTimestamp(storeChats[jid] || storeChats[resolved.jid] || contact));
         chatsToRecover.push({ jid: resolved.jid, contactDbId: existing?.id || null });
         recovered++;
       }
