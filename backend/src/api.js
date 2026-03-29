@@ -152,13 +152,27 @@ export function createApiRouter(db) {
     return cleaned || fallback;
   }
 
-  // No longer persist outgoing voice notes to disk (stream-only mode)
+  // Save outgoing voice notes to disk for reliable playback
   function persistOutgoingVoiceNote(messageId, audioBuffer) {
-    return {
-      mediaPath: `wa:${messageId}`,
-      mediaName: 'voice-note.ogg',
-      mediaMime: 'audio/ogg; codecs=opus',
-    };
+    try {
+      const mediaDir = path.join(__dirname, '..', 'data', 'message-media');
+      if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+      const safeId = String(messageId).replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+      const filename = `${safeId}.ogg`;
+      fs.writeFileSync(path.join(mediaDir, filename), audioBuffer);
+      return {
+        mediaPath: filename,
+        mediaName: 'voice-note.ogg',
+        mediaMime: 'audio/ogg; codecs=opus',
+      };
+    } catch (err) {
+      console.log('⚠️ Failed to cache outgoing VN, using wa: ref:', err?.message);
+      return {
+        mediaPath: `wa:${messageId}`,
+        mediaName: 'voice-note.ogg',
+        mediaMime: 'audio/ogg; codecs=opus',
+      };
+    }
   }
 
   function getSentMessageId(sendResult) {
@@ -173,14 +187,28 @@ export function createApiRouter(db) {
     return 'document';
   }
 
-  // No longer persist outgoing media to disk (stream-only mode)
+  // Save outgoing media to disk for reliable access
   function persistOutgoingMedia(messageId, base64Data, mimeType, fileName) {
     const extension = getMediaExtension(mimeType, fileName);
-    return {
-      mediaPath: `wa:${messageId}`,
-      mediaName: sanitizeDownloadName(fileName, `attachment.${extension}`),
-      mediaMime: mimeType || detectMimeTypeFromFilename(fileName),
-    };
+    try {
+      const mediaDir = path.join(__dirname, '..', 'data', 'message-media');
+      if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+      const safeId = String(messageId).replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+      const filename = `${safeId}.${extension}`;
+      fs.writeFileSync(path.join(mediaDir, filename), Buffer.from(base64Data, 'base64'));
+      return {
+        mediaPath: filename,
+        mediaName: sanitizeDownloadName(fileName, `attachment.${extension}`),
+        mediaMime: mimeType || detectMimeTypeFromFilename(fileName),
+      };
+    } catch (err) {
+      console.log('⚠️ Failed to cache outgoing media, using wa: ref:', err?.message);
+      return {
+        mediaPath: `wa:${messageId}`,
+        mediaName: sanitizeDownloadName(fileName, `attachment.${extension}`),
+        mediaMime: mimeType || detectMimeTypeFromFilename(fileName),
+      };
+    }
   }
 
   function getBrowserPlayableAudioPath(filePath) {

@@ -1222,19 +1222,46 @@ function getMessagePayload(msg) {
 // ── Voice media download ──
 
 async function saveMessageMedia(userId, msg, msgId, options = {}) {
-  // Stream-only mode: don't save media to disk, just store metadata
-  // The media will be fetched on-demand from WhatsApp when requested
+  // Hybrid mode: try to download and cache media to disk at receive time
+  // Fall back to wa: reference for on-demand streaming if download fails
   try {
     const resolvedMime = options.mimetype || msg.mimetype || 'application/octet-stream';
     const resolvedName = sanitizeStoredFilename(msg.filename || msg._data?.filename || options.mediaName || null);
     const extension = getMediaFileExtension(resolvedMime, resolvedName || '');
+    const defaultName = resolvedName || getDefaultMediaName(options.msgType, extension);
 
-    // Use message ID as the media_path marker for on-demand download
+    // Try to download media now and save to disk
+    try {
+      if (msg.hasMedia) {
+        const media = await msg.downloadMedia();
+        if (media?.data) {
+          const mediaDir = path.join(__dirname, '..', 'data', 'message-media');
+          if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+
+          const safeId = String(msgId).replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+          const ext = extension ? `.${extension}` : '';
+          const filename = `${safeId}${ext}`;
+          const filePath = path.join(mediaDir, filename);
+
+          fs.writeFileSync(filePath, Buffer.from(media.data, 'base64'));
+          console.log(`📦 [${userId}] Cached media to disk: ${filename} (${options.msgType || msg.type})`);
+
+          return {
+            mediaPath: filename,
+            mediaName: defaultName,
+            mediaMime: media.mimetype || resolvedMime,
+          };
+        }
+      }
+    } catch (dlErr) {
+      console.log(`📦 [${userId}] Media download failed, using wa: ref (${options.msgType || msg.type}): ${dlErr?.message}`);
+    }
+
+    // Fallback: store wa: reference for on-demand streaming
     const mediaRef = `wa:${msgId}`;
-
     return {
       mediaPath: mediaRef,
-      mediaName: resolvedName || getDefaultMediaName(options.msgType, extension),
+      mediaName: defaultName,
       mediaMime: resolvedMime,
     };
   } catch (err) {
