@@ -225,6 +225,15 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     refreshMessages(selectedContact.id, { forceScroll: true });
   }, [selectedContact?.id, refreshMessages]);
 
+  // Mark chat as read when opened
+  useEffect(() => {
+    if (!selectedContact?.id) return;
+    if ((selectedContact.unread_count ?? 0) > 0) {
+      api.markChatRead(selectedContact.id).catch(() => {});
+      setConversations(prev => prev.map(c => c.id === selectedContact.id ? { ...c, unread_count: 0 } : c));
+    }
+  }, [selectedContact?.id]);
+
   const normalizePhoneDigits = (value: string) => value.replace(/\D/g, '');
   const formatPhoneDraft = (value: string) => {
     const trimmed = value.trim();
