@@ -1030,22 +1030,59 @@ RULES:
       if (!senderJid || !message) return res.status(400).json({ error: 'Missing senderJid or message' });
 
       const wa = getWA(req);
-      let sendResult;
+      const client = wa.getSocket();
+      if (!client) return res.status(503).json({ error: 'WhatsApp not connected' });
 
-      // Try to quote the original status message
+      let sendResult = null;
+
+      // Try to quote the original status message using whatsapp-web.js
       if (statusId) {
         try {
-          const statusMsg = await wa.getMessageById(statusId);
+          // First try direct getMessageById
+          let statusMsg = null;
+          try {
+            statusMsg = await client.getMessageById(statusId);
+          } catch {}
+
+          // If not found, try searching in status@broadcast chat
+          if (!statusMsg) {
+            try {
+              const statusChat = await client.getChatById('status@broadcast');
+              const msgs = await statusChat.fetchMessages({ limit: 50 });
+              statusMsg = msgs.find(m => {
+                const sid = m.id?._serialized || m.id?.id;
+                return sid === statusId;
+              });
+            } catch (err2) {
+              console.log('Could not fetch status chat messages:', err2?.message);
+            }
+          }
+
           if (statusMsg) {
-            // reply() quotes the original status and sends to the status author's chat
+            // Use reply() which quotes the original status and sends to the author's chat
             sendResult = await statusMsg.reply(message);
+          } else {
+            // If we can't find the status, send as a quoted-context message
+            // to the sender's chat with context indicating it's a status reply
+            const targetChatId = senderJid.replace(/@s\.whatsapp\.net$/, '@c.us');
+            try {
+              const chat = await client.getChatById(targetChatId);
+              sendResult = await chat.sendMessage(message, { quotedMessageId: statusId });
+            } catch {
+              // Final fallback: send with status reply indicator
+              const statusRow = db.prepare('SELECT content, media_type FROM statuses WHERE id = ? AND user_id = ?').get(statusId, req.userId);
+              const contextNote = statusRow
+                ? `↩️ Replying to status: ${statusRow.media_type !== 'text' ? `[${statusRow.media_type}]` : (statusRow.content || '').slice(0, 50)}\n\n${message}`
+                : message;
+              sendResult = await client.sendMessage(targetChatId, contextNote);
+            }
           }
         } catch (err) {
           console.log('Could not quote status, falling back to DM:', err?.message);
         }
       }
 
-      // Fallback: send as quoted-context DM
+      // Fallback: send as regular DM
       if (!sendResult) {
         sendResult = await wa.sendTextMessage(senderJid, message);
       }
