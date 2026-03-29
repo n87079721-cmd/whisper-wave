@@ -72,7 +72,7 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
       )}
 
       {/* Connection + Status */}
-      <div className="grid gap-4 lg:grid-cols-[1fr,1fr]">
+      <div className="grid gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-[1fr,1fr]">
         {/* Connection card */}
         <div className="rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between gap-4">
@@ -192,7 +192,7 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
         {statCards.map((stat) => (
           <div key={stat.label} className="rounded-xl bg-card border border-border p-4">
             <div className="flex items-center gap-2 mb-2">

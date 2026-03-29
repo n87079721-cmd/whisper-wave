@@ -857,10 +857,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   };
 
   return (
-    <div className="h-[calc(100dvh-6rem)] md:h-[calc(100dvh-2.5rem)] flex flex-col">
+    <div className="h-[calc(100dvh-5.5rem)] sm:h-[calc(100dvh-6rem)] md:h-[calc(100dvh-2.5rem)] flex flex-col">
       <div className="flex-1 flex min-h-0 rounded-xl overflow-hidden border border-border bg-card">
         {/* ===== LEFT: Conversation list ===== */}
-        <div className={`${showChatOnMobile ? 'hidden md:flex' : 'flex'} w-full md:w-[340px] lg:w-[380px] flex-shrink-0 flex-col border-r border-border bg-background`}>
+        <div className={`${showChatOnMobile ? 'hidden md:flex' : 'flex'} w-full md:w-[300px] lg:w-[360px] xl:w-[380px] flex-shrink-0 flex-col border-r border-border bg-background`}>
           {/* Header */}
           <div className="px-4 py-3 flex items-center justify-between">
             <h1 className="text-lg font-bold text-foreground">{showArchived ? 'Archived' : 'Chats'}</h1>
@@ -1133,7 +1133,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                             onTouchEnd={(e) => handleSwipeEnd(e, msg)}
                           >
                             <div
-                              className={`group max-w-[85%] md:max-w-[65%] ${
+                              className={`group max-w-[88%] sm:max-w-[80%] md:max-w-[65%] ${
                                 msg.type === 'call'
                                   ? 'bg-muted/50 px-4 py-2 rounded-xl text-[13px]'
                                   : msg.type === 'sticker'
