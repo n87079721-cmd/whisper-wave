@@ -543,6 +543,23 @@ async function startConnection(userId, db, options = {}) {
       inst.store = { contacts: {} };
     }
 
+    // Pre-populate contact store from DB on reconnect to prevent empty name lookups
+    try {
+      const dbContacts = db.prepare(
+        "SELECT jid, name, phone FROM contacts WHERE user_id = ? AND is_group = 0 AND jid LIKE '%@s.whatsapp.net'"
+      ).all(userId);
+      for (const c of dbContacts) {
+        if (c.jid && !inst.store.contacts[c.jid]) {
+          inst.store.contacts[c.jid] = { id: c.jid, name: c.name, notify: c.name };
+        }
+      }
+      if (dbContacts.length > 0) {
+        console.log(`📇 [${userId}] Pre-populated store with ${dbContacts.length} contacts from DB`);
+      }
+    } catch (err) {
+      console.error(`Store pre-population error [${userId}]:`, err?.message || err);
+    }
+
     // Populate contact cache from socket events and build LID mappings
     inst.sock.ev.on('contacts.update', (updates) => {
       for (const u of updates) {
@@ -1189,56 +1206,52 @@ function syncContacts(userId, db) {
 async function recoverSync(userId, db) {
   const inst = getInstance(userId);
   if (!inst.sock || inst.connectionStatus !== 'connected') {
-    // Fallback to basic contact sync if not connected
     syncContacts(userId, db);
     return;
   }
 
   console.log(`🔄 [${userId}] Recovery sync started`);
-  updateSyncState(userId, db, { phase: 'importing' });
+  updateSyncState(userId, db, { phase: 'recovering' });
   emit(userId, 'sync_state', inst.syncState);
 
-  // Step 1: Sync contacts from store (same as before)
+  // Step 1: Sync contacts from store
   syncContacts(userId, db);
 
-  // Step 2: Fetch chat list from the live socket
+  // Step 2: Fetch group info
   try {
-    const chats = await inst.sock.groupFetchAllParticipating?.() || {};
-    // groupFetchAllParticipating only gets groups; for 1:1 chats we rely on store
+    await inst.sock.groupFetchAllParticipating?.();
   } catch (err) {
     console.log(`📇 [${userId}] Group fetch skipped: ${err?.message}`);
   }
 
-  // Step 3: For each contact in store, check if we have messages locally
-  // If not, try to fetch recent messages via chatModify/fetchMessageHistory
+  // Step 3: Create missing contact entries + collect chats needing history
+  const chatsToRecover = [];
   try {
     const storeContacts = inst.store?.contacts || {};
     const contactJids = Object.keys(storeContacts).filter(
       jid => jid.endsWith('@s.whatsapp.net') && jid !== 'status@broadcast'
     );
 
-    // Get all contacts that exist in DB with message counts
     const dbContacts = db.prepare(`
-      SELECT c.jid, COUNT(m.id) as msg_count
+      SELECT c.jid, c.id, COUNT(m.id) as msg_count
       FROM contacts c
       LEFT JOIN messages m ON m.contact_id = c.id AND m.user_id = ?
       WHERE c.user_id = ? AND c.is_group = 0
       GROUP BY c.jid
     `).all(userId, userId);
 
-    const dbContactMap = new Map(dbContacts.map(c => [c.jid, c.msg_count]));
+    const dbContactMap = new Map(dbContacts.map(c => [c.jid, { id: c.id, count: c.msg_count }]));
 
     let recovered = 0;
     for (const jid of contactJids) {
       const resolved = resolveLidPhone(inst, jid);
-      const existingCount = dbContactMap.get(resolved.jid) || dbContactMap.get(jid) || 0;
+      const existing = dbContactMap.get(resolved.jid) || dbContactMap.get(jid);
 
-      if (existingCount === 0) {
-        // This contact exists in WA but has no messages locally
-        // Create the contact entry at minimum
+      if (!existing || existing.count === 0) {
         const phone = '+' + resolved.phone;
         const contact = storeContacts[jid];
         getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(contact), false);
+        chatsToRecover.push(resolved.jid);
         recovered++;
       }
     }
@@ -1251,13 +1264,126 @@ async function recoverSync(userId, db) {
     console.error(`Recovery sync contacts error [${userId}]:`, err?.message || err);
   }
 
-  // Step 4: Run LID sweep
+  // Step 4: On-demand history fetch for chats with 0 messages (limit 20)
+  const fetchTargets = chatsToRecover.slice(0, 20);
+  if (fetchTargets.length > 0 && typeof inst.sock.fetchMessageHistory === 'function') {
+    console.log(`🔄 [${userId}] Requesting on-demand history for ${fetchTargets.length} chats`);
+    for (const jid of fetchTargets) {
+      try {
+        // fetchMessageHistory(count, oldestMsgKey, oldestTimestamp)
+        // Use a dummy key from the chat to request recent messages
+        await inst.sock.fetchMessageHistory(50, { remoteJid: jid, fromMe: false, id: '' }, undefined);
+        // Small delay between requests to avoid rate-limiting
+        await new Promise(r => setTimeout(r, 500));
+      } catch (err) {
+        console.log(`📜 [${userId}] fetchMessageHistory for ${jid} failed: ${err?.message}`);
+      }
+    }
+  } else if (fetchTargets.length > 0) {
+    console.log(`📜 [${userId}] fetchMessageHistory not available in this Baileys version`);
+  }
+
+  // Step 5: Enrich unnamed contacts
+  await enrichUnnamedContacts(userId, db, inst);
+
+  // Step 6: Run LID sweep
   runLidSweep(userId, db, inst);
 
-  // Step 5: Update sync state
+  // Step 7: Update sync state
   const phase = (inst.syncState.totalDbMessages > 10 && inst.syncState.totalDbContacts > 0) ? 'ready' : 'partial';
   updateSyncState(userId, db, { phase });
   console.log(`🔄 [${userId}] Recovery sync complete — phase: ${phase}`);
+}
+
+// ── Enrich unnamed contacts using onWhatsApp + store lookups ──
+async function enrichUnnamedContacts(userId, db, inst) {
+  try {
+    // Find contacts with phone-like names or placeholder names
+    const unnamed = db.prepare(`
+      SELECT id, jid, name, phone FROM contacts
+      WHERE user_id = ? AND is_group = 0
+        AND jid LIKE '%@s.whatsapp.net'
+        AND (name IS NULL OR name = '' OR name LIKE '+%' OR name LIKE 'WhatsApp contact%' OR name GLOB '[0-9]*')
+      LIMIT 50
+    `).all(userId);
+
+    if (unnamed.length === 0) return;
+    console.log(`📇 [${userId}] Enriching ${unnamed.length} unnamed contacts`);
+
+    let enriched = 0;
+    for (const contact of unnamed) {
+      // Check store for updated name
+      const storeContact = inst.store?.contacts?.[contact.jid];
+      const candidate = getNameCandidate(storeContact);
+      const phone = contact.phone || '+' + contact.jid.replace('@s.whatsapp.net', '');
+
+      if (candidate.name && !isPhoneLikeName(candidate.name, phone)) {
+        db.prepare("UPDATE contacts SET name = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+          .run(candidate.name, contact.id, userId);
+        enriched++;
+        continue;
+      }
+
+      // Try onWhatsApp lookup for pushName
+      if (typeof inst.sock?.onWhatsApp === 'function') {
+        try {
+          const results = await inst.sock.onWhatsApp(contact.jid.replace('@s.whatsapp.net', ''));
+          if (results?.[0]?.exists) {
+            // onWhatsApp doesn't return pushName directly, but the contact may now be in store
+            const refreshed = inst.store?.contacts?.[contact.jid];
+            const refreshedCandidate = getNameCandidate(refreshed);
+            if (refreshedCandidate.name && !isPhoneLikeName(refreshedCandidate.name, phone)) {
+              db.prepare("UPDATE contacts SET name = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+                .run(refreshedCandidate.name, contact.id, userId);
+              enriched++;
+            }
+          }
+          await new Promise(r => setTimeout(r, 300));
+        } catch {}
+      }
+    }
+
+    if (enriched > 0) {
+      console.log(`📇 [${userId}] Enriched ${enriched} contact names`);
+      emit(userId, 'contacts_sync', { count: enriched });
+    }
+  } catch (err) {
+    console.error(`enrichUnnamedContacts error [${userId}]:`, err?.message || err);
+  }
+}
+
+// ── Recover a single chat's history on demand ──
+export async function recoverSingleChat(userId, db, contactId) {
+  const inst = getInstance(userId);
+  if (!inst.sock || inst.connectionStatus !== 'connected') {
+    throw new Error('WhatsApp not connected');
+  }
+
+  const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+  if (!contact) throw new Error('Contact not found');
+
+  const jid = contact.jid;
+  if (!jid.endsWith('@s.whatsapp.net')) {
+    throw new Error('Can only recover history for individual chats');
+  }
+
+  console.log(`📜 [${userId}] On-demand history request for ${jid}`);
+
+  if (typeof inst.sock.fetchMessageHistory === 'function') {
+    try {
+      await inst.sock.fetchMessageHistory(50, { remoteJid: jid, fromMe: false, id: '' }, undefined);
+      return { success: true, message: 'History request sent. Messages will appear shortly.' };
+    } catch (err) {
+      console.error(`fetchMessageHistory error for ${jid}:`, err?.message);
+      throw new Error(`Failed to fetch history: ${err?.message}`);
+    }
+  } else {
+    // Fallback: try chatModify to mark chat as read (may trigger sync)
+    try {
+      await inst.sock.chatModify({ markRead: false, lastMessages: [] }, jid);
+    } catch {}
+    return { success: true, message: 'History recovery requested. Results depend on WhatsApp availability.' };
+  }
 }
 
 // ─── Human-like timing helpers ───
