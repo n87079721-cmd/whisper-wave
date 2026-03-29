@@ -1062,16 +1062,30 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                             className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                           >
                             <div
-                              className={`group max-w-[85%] md:max-w-[65%] px-3 py-2 rounded-2xl text-[14px] ${
-                                msg.direction === 'sent'
-                                  ? 'bg-bubble-out text-bubble-out-foreground rounded-br-md'
-                                  : 'bg-bubble-in text-bubble-in-foreground rounded-bl-md'
+                              className={`group max-w-[85%] md:max-w-[65%] ${
+                                msg.type === 'sticker'
+                                  ? 'bg-transparent'
+                                  : `px-3 py-2 rounded-2xl text-[14px] ${
+                                      msg.direction === 'sent'
+                                        ? 'bg-bubble-out text-bubble-out-foreground rounded-br-md'
+                                        : 'bg-bubble-in text-bubble-in-foreground rounded-bl-md'
+                                    }`
                               } ${isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''}`}
                             >
                               {renderMessageContent(msg)}
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
                                 <span className={`text-[10px] ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
                                 {msg.direction === 'sent' && <StatusLabel status={msg.status} />}
+                                {/* Edit button for sent text messages */}
+                                {msg.direction === 'sent' && msg.type === 'text' && !msg.is_deleted && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setEditingMsgId(msg.id); setEditingText(msg.content || ''); }}
+                                    className="opacity-70 md:opacity-0 md:group-hover:opacity-100 hover:text-primary text-muted-foreground transition-all ml-0.5"
+                                    title="Edit message"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                )}
                                 <div className="relative ml-1">
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setDeleteMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
