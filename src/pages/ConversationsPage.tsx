@@ -51,6 +51,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
   const [deletingMessage, setDeletingMessage] = useState<string | null>(null);
   const [deletingConversation, setDeletingConversation] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
