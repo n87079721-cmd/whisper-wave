@@ -67,6 +67,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [profileMedia, setProfileMedia] = useState<Message[]>([]);
   const [profileMediaLoading, setProfileMediaLoading] = useState(false);
   const swipeRef = useRef<{ startX: number; msgId: string } | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -467,6 +473,135 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     if (!audioRef.current) return;
     if (isPlaying) { audioRef.current.pause(); setIsPlaying(false); }
     else { audioRef.current.play(); setIsPlaying(true); }
+  };
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      recordingChunksRef.current = [];
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+          ? 'audio/ogg;codecs=opus'
+          : 'audio/webm';
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordingChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        recordingStreamRef.current = null;
+
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+
+        const blob = new Blob(recordingChunksRef.current, { type: mimeType });
+        recordingChunksRef.current = [];
+
+        if (blob.size < 1000) {
+          setIsRecording(false);
+          setRecordingDuration(0);
+          return;
+        }
+
+        // Send the recording
+        const activeContact = selectedContactRef.current;
+        if (!activeContact) {
+          setIsRecording(false);
+          setRecordingDuration(0);
+          return;
+        }
+
+        setSending(true);
+        try {
+          const reader = new FileReader();
+          const base64 = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => {
+              const result = String(reader.result || '');
+              resolve(result.includes(',') ? result.split(',').pop() || '' : result);
+            };
+            reader.onerror = () => reject(new Error('Failed to read recording'));
+            reader.readAsDataURL(blob);
+          });
+
+          const isTemp = activeContact.id.startsWith('temp-');
+          const res = isTemp
+            ? await api.sendVoiceRecordingToPhone(activeContact.phone || '', base64)
+            : await api.sendVoiceRecording(activeContact.id, base64);
+
+          if (res.error) throw new Error(res.error);
+          toast.success('Voice note sent');
+
+          const refreshedConversations = await api.getConversations();
+          setConversations(refreshedConversations);
+
+          const nextContact = (res.contactId && refreshedConversations.find(c => c.id === res.contactId))
+            || refreshedConversations.find(c => c.id === activeContact.id)
+            || null;
+
+          if (selectedContactRef.current?.id === activeContact.id && nextContact) {
+            setSelectedContact(nextContact);
+            await refreshMessages(nextContact.id, { forceScroll: true });
+          }
+        } catch (err: any) {
+          toast.error(err.message || 'Failed to send voice note');
+        } finally {
+          setSending(false);
+        }
+
+        setIsRecording(false);
+        setRecordingDuration(0);
+      };
+
+      recorder.start(250);
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      toast.error('Microphone access denied');
+      setIsRecording(false);
+    }
+  }, [refreshMessages]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+  }, []);
+
+  const cancelRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.ondataavailable = null;
+      mediaRecorderRef.current.onstop = () => {
+        recordingStreamRef.current?.getTracks().forEach(t => t.stop());
+        recordingStreamRef.current = null;
+      };
+      mediaRecorderRef.current.stop();
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setIsRecording(false);
+    setRecordingDuration(0);
+    recordingChunksRef.current = [];
+  }, []);
+
+  const formatRecordingTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
   const handleStartNewChat = async (contact?: Contact) => {
@@ -1339,70 +1474,110 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   </div>
                 )}
 
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => { setReplyMode('text'); setPreviewUrl(null); }}
-                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                      replyMode === 'text' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
-                    }`}
-                  >Text</button>
-                  <button
-                    onClick={() => setReplyMode('voice')}
-                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                      replyMode === 'voice' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
-                    }`}
-                  >🎤 Voice</button>
-                  {replyMode === 'voice' && voices.length > 0 && (
-                    <select
-                      value={selectedVoice}
-                      onChange={(e) => setSelectedVoice(e.target.value)}
-                      className="ml-auto px-2 py-1 rounded-full bg-secondary border border-border text-xs text-foreground max-w-[120px]"
+                {/* Recording UI */}
+                {isRecording ? (
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={cancelRecording}
+                      className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center text-destructive hover:bg-destructive/20 transition-colors flex-shrink-0"
+                      title="Cancel recording"
                     >
-                      {voices.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                    </select>
-                  )}
-                </div>
+                      <X className="w-4 h-4" />
+                    </button>
+                    <div className="flex-1 flex items-center gap-2 px-4 py-2.5 rounded-full bg-destructive/5 border border-destructive/20">
+                      <div className="w-2.5 h-2.5 rounded-full bg-destructive animate-pulse" />
+                      <span className="text-sm font-medium text-destructive">{formatRecordingTime(recordingDuration)}</span>
+                      <span className="text-xs text-muted-foreground">Recording...</span>
+                    </div>
+                    <button
+                      onClick={stopRecording}
+                      disabled={sending}
+                      className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
+                      title="Send voice note"
+                    >
+                      {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => { setReplyMode('text'); setPreviewUrl(null); }}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                          replyMode === 'text' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
+                        }`}
+                      >Text</button>
+                      <button
+                        onClick={() => setReplyMode('voice')}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                          replyMode === 'voice' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
+                        }`}
+                      >🎤 AI Voice</button>
+                      {replyMode === 'voice' && voices.length > 0 && (
+                        <select
+                          value={selectedVoice}
+                          onChange={(e) => setSelectedVoice(e.target.value)}
+                          className="ml-auto px-2 py-1 rounded-full bg-secondary border border-border text-xs text-foreground max-w-[120px]"
+                        >
+                          {voices.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                        </select>
+                      )}
+                    </div>
 
-                <div className="flex gap-2">
-                  {replyMode === 'text' && (
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors flex-shrink-0"
-                      title="Attach photo or file"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                  )}
-                  <input
-                    value={replyText}
-                    onChange={(e) => {
-                      const nextValue = e.target.value;
-                      setReplyText(nextValue);
-                      if (selectedContact?.id) replyDraftsRef.current[selectedContact.id] = nextValue;
-                      setPreviewUrl(null);
-                    }}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
-                    placeholder={replyMode === 'voice' ? 'Text to voice...' : pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
-                    className="flex-1 px-4 py-2.5 rounded-full bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
-                  />
-                  {replyMode === 'voice' && (
-                    <button
-                      onClick={handlePreviewVoice}
-                      disabled={!replyText.trim() || previewing}
-                      className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors disabled:opacity-40 flex-shrink-0"
-                    >
-                      {previewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Volume2 className="w-4 h-4" />}
-                    </button>
-                  )}
-                  <button
-                    onClick={handleSendReply}
-                    disabled={replyMode === 'voice' ? !replyText.trim() || sending : (!replyText.trim() && !pendingAttachment) || sending}
-                    className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
-                  >
-                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  </button>
-                </div>
+                    <div className="flex gap-2">
+                      {replyMode === 'text' && (
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors flex-shrink-0"
+                          title="Attach photo or file"
+                        >
+                          <Plus className="w-4 h-4" />
+                        </button>
+                      )}
+                      <input
+                        value={replyText}
+                        onChange={(e) => {
+                          const nextValue = e.target.value;
+                          setReplyText(nextValue);
+                          if (selectedContact?.id) replyDraftsRef.current[selectedContact.id] = nextValue;
+                          setPreviewUrl(null);
+                        }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
+                        placeholder={replyMode === 'voice' ? 'Text to voice...' : pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
+                        className="flex-1 px-4 py-2.5 rounded-full bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
+                      />
+                      {replyMode === 'voice' && (
+                        <button
+                          onClick={handlePreviewVoice}
+                          disabled={!replyText.trim() || previewing}
+                          className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors disabled:opacity-40 flex-shrink-0"
+                        >
+                          {previewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Volume2 className="w-4 h-4" />}
+                        </button>
+                      )}
+                      {/* Mic button for live recording (only in text mode when no text typed) */}
+                      {replyMode === 'text' && !replyText.trim() && !pendingAttachment ? (
+                        <button
+                          onMouseDown={startRecording}
+                          onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
+                          className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 active:bg-primary active:text-primary-foreground transition-colors flex-shrink-0"
+                          title="Hold to record voice note"
+                        >
+                          <Mic className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleSendReply}
+                          disabled={replyMode === 'voice' ? !replyText.trim() || sending : (!replyText.trim() && !pendingAttachment) || sending}
+                          className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
+                        >
+                          {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             </>
           ) : null}

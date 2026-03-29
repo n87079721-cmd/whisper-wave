@@ -4,7 +4,7 @@ import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
-import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation } from './whatsapp.js';
+import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation, streamMediaForMessage } from './whatsapp.js';
 import { initWhatsApp } from './whatsapp.js';
 import { archiveChat, markChatRead, syncArchiveStates } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
@@ -151,16 +151,10 @@ export function createApiRouter(db) {
     return cleaned || fallback;
   }
 
+  // No longer persist outgoing voice notes to disk (stream-only mode)
   function persistOutgoingVoiceNote(messageId, audioBuffer) {
-    const mediaDir = path.join(__dirname, '..', 'data', 'message-media');
-    if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
-
-    const filename = `${messageId}.ogg`;
-    const filePath = path.join(mediaDir, filename);
-    fs.writeFileSync(filePath, audioBuffer);
-
     return {
-      mediaPath: filename,
+      mediaPath: `wa:${messageId}`,
       mediaName: 'voice-note.ogg',
       mediaMime: 'audio/ogg; codecs=opus',
     };
@@ -178,18 +172,11 @@ export function createApiRouter(db) {
     return 'document';
   }
 
+  // No longer persist outgoing media to disk (stream-only mode)
   function persistOutgoingMedia(messageId, base64Data, mimeType, fileName) {
-    const mediaDir = path.join(__dirname, '..', 'data', 'message-media');
-    if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
-
     const extension = getMediaExtension(mimeType, fileName);
-    const filename = `${messageId}.${extension}`;
-    const filePath = path.join(mediaDir, filename);
-    const normalizedBase64 = String(base64Data || '').replace(/^data:[^;]+;base64,/, '');
-    fs.writeFileSync(filePath, Buffer.from(normalizedBase64, 'base64'));
-
     return {
-      mediaPath: filename,
+      mediaPath: `wa:${messageId}`,
       mediaName: sanitizeDownloadName(fileName, `attachment.${extension}`),
       mediaMime: mimeType || detectMimeTypeFromFilename(fileName),
     };
@@ -763,7 +750,45 @@ export function createApiRouter(db) {
     }
   });
 
-  // ── Preview voice ──────────────────────────────────────
+  // ── Send Live Voice Recording ────────────────────────────
+  router.post('/send/voice-recording', async (req, res) => {
+    try {
+      const { contactId, jid, data: audioData } = req.body;
+      if (!audioData || (!contactId && !jid)) return res.status(400).json({ error: 'Missing target or audio data' });
+
+      const wa = getWA(req);
+      const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId, jid });
+
+      // Convert base64 audio to buffer
+      const normalizedBase64 = String(audioData).replace(/^data:[^;]+;base64,/, '');
+      const audioBuffer = Buffer.from(normalizedBase64, 'base64');
+
+      const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
+      const msgId = getSentMessageId(sendResult);
+
+      // Don't persist to disk - use wa: reference
+      const mediaRef = `wa:${msgId}`;
+
+      db.prepare(`
+        INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
+        VALUES (?, ?, ?, ?, ?, 'voice', 'sent', ?, 'sent', ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          content = excluded.content,
+          timestamp = excluded.timestamp,
+          status = excluded.status,
+          media_path = COALESCE(excluded.media_path, messages.media_path),
+          media_name = COALESCE(excluded.media_name, messages.media_name),
+          media_mime = COALESCE(excluded.media_mime, messages.media_mime)
+      `).run(msgId, req.userId, contactRow.id, targetJid, '🎤 Voice note', new Date().toISOString(), mediaRef, 'voice-note.ogg', 'audio/ogg; codecs=opus');
+      db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(req.userId);
+
+      res.json({ success: true, messageId: msgId, contactId: contactRow.id });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+
   router.post('/voice/preview', async (req, res) => {
     try {
       const { text, voiceId, modelId, backgroundSound } = req.body;
@@ -949,19 +974,66 @@ RULES:
     }
   });
 
-  router.get('/message-media/:filename', (req, res) => {
+  router.get('/message-media/:filename', async (req, res) => {
     try {
       const safeFilename = path.basename(req.params.filename);
-      const filePath = resolveMessageMediaPath(safeFilename);
-      if (!filePath) return res.status(404).json({ error: 'Media not found' });
 
+      // Check if this is an on-demand WhatsApp media reference (wa:messageId format)
+      const mediaRef = safeFilename.startsWith('wa:') ? safeFilename : null;
+      const messageId = mediaRef ? safeFilename.slice(3) : null;
+
+      // Look up the media_path in DB (could be wa:msgId or legacy filename)
       const mediaRow = db.prepare(`
-        SELECT media_mime, media_name, type
+        SELECT id, media_mime, media_name, media_path, type
         FROM messages
         WHERE user_id = ? AND media_path = ?
         ORDER BY timestamp DESC
         LIMIT 1
       `).get(req.userId, safeFilename);
+
+      // If media_path starts with wa: or we have a wa: reference, stream from WhatsApp
+      const resolvedMediaPath = mediaRow?.media_path || safeFilename;
+      if (resolvedMediaPath.startsWith('wa:')) {
+        const waMessageId = resolvedMediaPath.slice(3);
+        try {
+          const streamed = await streamMediaForMessage(req.userId, waMessageId);
+          let responseMime = streamed.mimetype || mediaRow?.media_mime || 'application/octet-stream';
+          let responseData = streamed.data;
+
+          // Convert audio to mp3 for browser compatibility if requested
+          if (req.query.format === 'mp3' && String(responseMime).startsWith('audio/') && !responseMime.includes('mpeg')) {
+            try {
+              const tmpIn = path.join('/tmp', `wa_${waMessageId}_in.ogg`);
+              const tmpOut = path.join('/tmp', `wa_${waMessageId}_out.mp3`);
+              fs.writeFileSync(tmpIn, responseData);
+              execFileSync('ffmpeg', ['-y', '-i', tmpIn, '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', tmpOut], { stdio: 'ignore' });
+              if (fs.existsSync(tmpOut) && fs.statSync(tmpOut).size > 0) {
+                responseData = fs.readFileSync(tmpOut);
+                responseMime = 'audio/mpeg';
+              }
+              try { fs.unlinkSync(tmpIn); } catch {}
+              try { fs.unlinkSync(tmpOut); } catch {}
+            } catch {}
+          }
+
+          res.set('Content-Type', responseMime);
+          res.set('Content-Length', String(responseData.length));
+
+          if (req.query.download === '1') {
+            const downloadName = sanitizeDownloadName(mediaRow?.media_name || streamed.filename || 'attachment', 'attachment');
+            res.set('Content-Disposition', `attachment; filename="${downloadName}"`);
+          }
+
+          return res.send(responseData);
+        } catch (streamErr) {
+          console.log(`⚠️ On-demand media stream failed for ${waMessageId}: ${streamErr?.message}`);
+          return res.status(404).json({ error: 'Media no longer available from WhatsApp' });
+        }
+      }
+
+      // Legacy: try to serve from local file system (for any previously saved files)
+      const filePath = resolveMessageMediaPath(safeFilename);
+      if (!filePath) return res.status(404).json({ error: 'Media not found' });
 
       let responsePath = filePath;
       let responseMime = mediaRow?.media_mime || detectMimeTypeFromFilename(filePath);
