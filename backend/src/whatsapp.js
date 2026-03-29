@@ -535,6 +535,7 @@ async function startConnection(userId, db, options = {}) {
         const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
         const direction = isFromMe ? 'sent' : 'received';
         const msgId = msg.id?._serialized || msg.id?.id || uuid();
+        const isViewOnce = !!(msg.isViewOnce || msg._data?.isViewOnce);
 
         let mediaPath = null;
         let resolvedMediaName = mediaName;
@@ -564,6 +565,7 @@ async function startConnection(userId, db, options = {}) {
           mediaPath,
           mediaName: resolvedMediaName,
           mediaMime: resolvedMediaMime,
+          isViewOnce,
         });
 
         emit(userId, 'message', { contactId, msgId });
