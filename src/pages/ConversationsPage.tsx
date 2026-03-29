@@ -394,11 +394,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             ? await api.sendMediaToPhone(activeContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
             : await api.sendMedia(activeContactId, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
           : isTemp
-            ? await api.sendTextToPhone(activeContact.phone || '', trimmedReply)
-            : await api.sendText(activeContactId, trimmedReply);
+            ? await api.sendTextToPhone(activeContact.phone || '', trimmedReply, quotedMessage?.id)
+            : await api.sendText(activeContactId, trimmedReply, quotedMessage?.id);
 
         if (res.error) throw new Error(res.error);
         toast.success(pendingAttachment ? 'Attachment sent' : 'Message sent');
+        setQuotedMessage(null);
 
         replyDraftsRef.current[activeContactId] = '';
         setReplyText('');
