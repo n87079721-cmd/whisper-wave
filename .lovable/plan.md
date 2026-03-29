@@ -1,70 +1,111 @@
 
+Goal: fix three related reliability problems: voice notes getting stuck as “waiting for message,” chats not appearing even though WhatsApp Web has them, and slow/incomplete syncing/loading.
 
-# iMessage Theme Transformation
+What I found
+- Voice notes are sent as `audio/ogg; codecs=opus` with `ptt: true`, which is correct in principle, but the current flow does not validate delivery or retry on failure. It also stores the outgoing voice note immediately in SQLite before confirming WhatsApp accepted it.
+- History sync currently depends heavily on Baileys’ `messaging-history.set` event. That event is often incomplete or one-time-only after pairing, so if it misses older chats, the app stays partial while WhatsApp Web still shows them.
+- “Sync Now” currently only re-runs local contact sync from the in-memory store; it does not fetch missing chats/messages from the live socket, so it cannot truly recover missing history.
+- The conversations UI loads whole message lists per chat and refreshes often via SSE + polling. That is workable for small data, but it makes the app feel slow when the database grows.
+- The sync state logic can mark the app as “ready” too early just because some history arrived, even if many chats are still missing.
 
-Restyle the entire app to look and feel like Apple's iMessage, while keeping all WhatsApp backend functionality intact.
+Likely root causes
+1. Voice note pipeline reliability
+- ElevenLabs output + ffmpeg conversion may produce files WhatsApp accepts inconsistently on some recipients/devices.
+- No send acknowledgement/retry/failure tracking.
+- No fallback path when PTT send fails.
 
-## What Changes
+2. Incomplete history import
+- The app relies on passive history events instead of doing an active recovery pass.
+- If the session was paired before full history came in, the local DB can remain permanently incomplete.
 
-### 1. Color Palette (src/index.css)
-Replace the WhatsApp green theme with iMessage colors:
-- **Light mode**: White/gray backgrounds, blue (#007AFF) as primary, sent bubbles in iMessage blue with white text, received bubbles in light gray (#E9E9EB)
-- **Dark mode**: True black/dark gray backgrounds (#000/#1C1C1E), blue primary, sent bubbles in blue, received bubbles in dark gray (#2C2C2E)
-- Remove WhatsApp-specific variables (`wa-teal-dark`), repurpose `wa-bubble-out` to iMessage blue and `wa-bubble-in` to gray
+3. Perceived slowness
+- Frequent conversation/message refreshes.
+- Full message list fetch for active chats.
+- No pagination/windowing for large conversations.
+- SSE events trigger list reloads broadly.
 
-### 2. Typography (src/index.css)
-Switch font from Inter to SF Pro Display / system Apple fonts:
+Implementation plan
+
+1. Harden voice note sending on the backend
+- Update `backend/src/elevenlabs.js` to generate more WhatsApp-safe Opus output:
+  - ensure mono, 48kHz, Opus in OGG, consistent bitrate/frame settings
+  - optionally add duration probing after conversion
+- Update `backend/src/whatsapp.js` `sendVoiceNote()` to:
+  - wrap send in a robust try/catch
+  - return/send the WhatsApp message key when successful
+  - add a fallback send mode if PTT fails once (regular audio or regenerated opus payload)
+- Update `backend/src/api.js` `/send/voice` route so the DB insert reflects the real WhatsApp send result, not just local optimism.
+- Store richer message status for outgoing voice notes: `pending`, `sent`, `failed`.
+
+2. Add a real recovery sync path instead of only store sync
+- Extend `backend/src/whatsapp.js` with a true “recovery sync” flow that:
+  - reads current chats from the live socket/store after connection
+  - backfills recent messages for chats that exist in WhatsApp but are missing locally
+  - reconciles contacts and chat rows even when `messaging-history.set` was incomplete
+- Keep existing LID reconciliation, but run it after recovery import too.
+- Make `triggerSync()` call this stronger recovery path, not just `syncContacts()`.
+
+3. Make sync state honest and actionable
+- Refine sync phases in `backend/src/whatsapp.js`:
+  - stay `partial` when only contacts exist but conversation/message totals are still low
+  - only mark `ready` after recovery pass completes and minimum chat/message thresholds are met
+- Emit more precise SSE sync progress so the frontend can show “Recovering chats…” vs “Connected only”.
+
+4. Improve conversations loading performance
+- Update `backend/src/api.js` message endpoints to support pagination for chat messages instead of always loading the full thread.
+- Keep the optimized conversations query, but make sure refreshes happen only when the changed contact is affected.
+- Reduce unnecessary full refresh behavior triggered from SSE.
+
+5. Update chat UI to handle large histories better
+- Refactor `src/pages/ConversationsPage.tsx` to:
+  - load initial recent messages only
+  - add “load older messages” / infinite scroll upward
+  - avoid re-fetching the entire chat on every event
+  - refresh only the active chat when relevant
+- Keep the current search UI, but scope it to loaded messages unless expanded later to server search.
+
+6. Improve recovery visibility in the UI
+- Update `src/hooks/useWhatsAppStatus.ts`, `src/pages/SettingsPage.tsx`, `src/pages/DashboardPage.tsx`, and `src/components/SyncBanner.tsx` to show:
+  - connected but still recovering history
+  - partial sync warning with clearer guidance
+  - better “Sync Now” wording so users know it fetches missing chats/messages
+
+Files to change
+- `backend/src/whatsapp.js`
+- `backend/src/api.js`
+- `backend/src/elevenlabs.js`
+- `src/pages/ConversationsPage.tsx`
+- `src/hooks/useWhatsAppStatus.ts`
+- `src/pages/SettingsPage.tsx`
+- `src/pages/DashboardPage.tsx`
+- `src/components/SyncBanner.tsx`
+
+Expected outcome
+- Voice notes should stop randomly hanging for recipients as often, and failures will be visible/recoverable.
+- “Sync Now” will actually recover missing chats/messages already visible in WhatsApp Web.
+- The app will feel faster because chats won’t fully reload so aggressively and large histories won’t be fetched all at once.
+
+Technical details
+```text
+Current weak point:
+Connect -> wait for messaging-history.set -> maybe partial DB forever
+
+Proposed:
+Connect
+  -> passive history import if available
+  -> active recovery sync pass
+  -> reconcile contacts/LIDs
+  -> mark ready only after recovery completes
 ```
-font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
+
+```text
+Current voice send:
+generate ogg -> send -> insert local message
+
+Proposed:
+generate validated ogg
+  -> send
+  -> confirm success / capture key
+  -> insert with real status
+  -> fallback/retry if ptt send fails
 ```
-
-### 3. Chat Bubbles (src/pages/ConversationsPage.tsx)
-- Sent messages: Blue background (#007AFF), white text, rounded with tail on right
-- Received messages: Light gray background, dark text, rounded with tail on left
-- Remove the `wa-pattern` background, use flat white/dark background instead
-- Status ticks: Use "Delivered"/"Read" text labels like iMessage instead of checkmark icons
-- Remove green accent from voice note waveforms, use blue
-
-### 4. Navigation - Sidebar (src/components/DashboardSidebar.tsx)
-- Rename "WA Controller" to "Messages" with a blue chat bubble icon
-- Use iOS-style active states (blue highlight, SF-style icons)
-- Clean white/dark sidebar with subtle separators
-
-### 5. Navigation - Mobile Bottom Nav (src/components/MobileBottomNav.tsx)
-- iOS tab bar style: thin top border, frosted glass background
-- Blue active tab color, gray inactive
-
-### 6. Dashboard (src/pages/DashboardPage.tsx)
-- Replace "WA Controller" branding with "Messages"
-- Use blue accent color for stat cards and connection status
-- Rounded iOS-style cards with subtle shadows
-
-### 7. Chat List (ConversationsPage.tsx - left panel)
-- iOS-style row layout with slightly larger avatars
-- Blue unread indicators instead of green
-- Swipe-friendly styling, clean dividers between rows
-
-### 8. Empty State (ConversationsPage.tsx)
-- Replace WhatsApp pattern with flat background
-- Blue message icon, "Messages" title
-
-### 9. Reply Box (ConversationsPage.tsx)
-- iOS-style input with rounded capsule shape
-- Blue send arrow button
-- Voice mode toggle in blue
-
-### 10. Other Pages
-- **CallsPage**: Blue missed call indicators (red stays for missed, blue for other calls)
-- **ContactsPage**: iOS-style contact list with alphabet sidebar
-- **StatusPage**: Keep as-is but with blue accents
-- **VoiceStudioPage**: Blue accents throughout
-
-## Files to Modify
-1. `src/index.css` — Full color palette + font swap + remove wa-pattern
-2. `src/pages/ConversationsPage.tsx` — Bubble colors, status labels, flat chat background
-3. `src/components/DashboardSidebar.tsx` — Branding + blue active states
-4. `src/components/MobileBottomNav.tsx` — iOS tab bar styling
-5. `src/pages/DashboardPage.tsx` — Branding update
-6. `src/pages/CallsPage.tsx` — Blue accent colors
-7. `tailwind.config.ts` — No structural changes needed (uses CSS variables)
-
