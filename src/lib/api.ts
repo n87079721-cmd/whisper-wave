@@ -344,7 +344,11 @@ export const api = {
     });
   },
 
-  markChatRead(contactId: string) {
+  syncArchives() {
+    return requestJson<{ synced: number }>('/api/sync-archives', { method: 'POST' });
+  },
+
+
     return requestJson<{ success: boolean }>(`/api/mark-read/${contactId}`, { method: 'POST' });
   },
 
