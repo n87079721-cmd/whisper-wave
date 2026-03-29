@@ -520,7 +520,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     setDeletingMessage(messageId);
     try {
       await api.deleteMessage(messageId, mode);
-      setMessages(prev => prev.filter(m => m.id !== messageId));
+      if (mode === 'everyone') {
+        // Show deleted placeholder instead of removing
+        setMessages(prev => prev.map(m => m.id === messageId ? { ...m, is_deleted: 1, content: '🚫 You deleted this message', media_path: null, type: 'text' as const } : m));
+      } else {
+        setMessages(prev => prev.filter(m => m.id !== messageId));
+      }
       toast.success(mode === 'everyone' ? 'Deleted for everyone' : 'Deleted for you');
       refreshConversations();
     } catch (err: any) { toast.error(err.message || 'Failed to delete'); }
@@ -1059,6 +1064,22 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                         {formatFileSize(pendingAttachment.file.size)} • {pendingAttachment.kind === 'document' ? 'File' : pendingAttachment.kind}
                       </p>
                     </div>
+                    {/* View-once toggle for images/videos */}
+                    {(pendingAttachment.kind === 'image' || pendingAttachment.kind === 'video') && (
+                      <button
+                        type="button"
+                        onClick={() => setPendingAttachment(prev => prev ? { ...prev, viewOnce: !prev.viewOnce } : null)}
+                        className={`flex h-8 items-center gap-1 rounded-full px-2 text-xs font-medium transition-colors ${
+                          pendingAttachment.viewOnce
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                        }`}
+                        title={pendingAttachment.viewOnce ? 'View once ON' : 'View once OFF'}
+                      >
+                        {pendingAttachment.viewOnce ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                        <span className="hidden sm:inline">{pendingAttachment.viewOnce ? '1' : '∞'}</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={clearPendingAttachment}
