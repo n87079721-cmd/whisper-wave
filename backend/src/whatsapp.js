@@ -85,14 +85,14 @@ function getInstance(userId) {
       connectionStatus: 'disconnected',
       eventListeners: [],
       reconnectTimer: null,
+      heartbeatTimer: null,
       isConnecting: false,
       reconnectAttempt: 0,
       connectionGeneration: 0,
       autoReplyCooldowns: new Map(),
       messageBatchBuffers: new Map(),
-      contactCache: new Map(), // phone/jid -> contact info
+      contactCache: new Map(),
       archiveSyncTimer: null,
-      // Sync state tracking
       syncState: {
         phase: 'idle',
         connectedAt: null,
@@ -497,6 +497,74 @@ export function getOrInitWhatsApp(userId, db) {
   };
 }
 
+// ── Reconnect & Heartbeat helpers ────────────────────────
+
+function scheduleReconnect(userId, db, generation) {
+  const inst = getInstance(userId);
+  if (inst.reconnectTimer) clearTimeout(inst.reconnectTimer);
+  const delays = [3000, 5000, 10000, 15000, 30000, 60000];
+  const delay = delays[Math.min(inst.reconnectAttempt, delays.length - 1)];
+  inst.reconnectAttempt++;
+  console.log(`🔁 [${userId}] Reconnect attempt #${inst.reconnectAttempt} in ${delay / 1000}s`);
+  inst.reconnectTimer = setTimeout(() => {
+    if (generation !== inst.connectionGeneration) return;
+    inst.reconnectTimer = null;
+    startConnection(userId, db, { force: true });
+  }, delay);
+}
+
+function startHeartbeat(userId, db) {
+  const inst = getInstance(userId);
+  stopHeartbeat(userId);
+  inst.heartbeatTimer = setInterval(async () => {
+    if (inst.connectionStatus !== 'connected' || !inst.client) {
+      stopHeartbeat(userId);
+      return;
+    }
+    try {
+      const state = await inst.client.getState();
+      if (state !== 'CONNECTED') {
+        console.warn(`💔 [${userId}] Heartbeat detected state: ${state}, triggering reconnect`);
+        inst.connectionStatus = 'reconnecting';
+        emit(userId, 'status', { status: 'reconnecting' });
+        stopHeartbeat(userId);
+        scheduleReconnect(userId, db, inst.connectionGeneration);
+      }
+    } catch (err) {
+      console.warn(`💔 [${userId}] Heartbeat failed: ${err?.message}, triggering reconnect`);
+      inst.connectionStatus = 'reconnecting';
+      emit(userId, 'status', { status: 'reconnecting' });
+      stopHeartbeat(userId);
+      scheduleReconnect(userId, db, inst.connectionGeneration);
+    }
+  }, 30000); // Check every 30s
+}
+
+function stopHeartbeat(userId) {
+  const inst = userInstances.get(userId);
+  if (inst?.heartbeatTimer) {
+    clearInterval(inst.heartbeatTimer);
+    inst.heartbeatTimer = null;
+  }
+}
+
+// ── Auto-reconnect all users on server start ─────────────
+
+export function autoReconnectAll(db) {
+  try {
+    const users = db.prepare('SELECT id, username FROM users').all();
+    for (const user of users) {
+      const sessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${user.id}`);
+      if (fs.existsSync(sessionDir)) {
+        console.log(`🔄 Auto-reconnecting user: ${user.username} (${user.id})`);
+        startConnection(user.id, db);
+      }
+    }
+  } catch (err) {
+    console.error('Auto-reconnect error:', err?.message);
+  }
+}
+
 // ── Connection ──────────────────────────────────────────
 
 async function startConnection(userId, db, options = {}) {
@@ -563,6 +631,7 @@ async function startConnection(userId, db, options = {}) {
       inst.pendingPairingPhone = null;
       inst.connectionStatus = 'connected';
       inst.reconnectAttempt = 0;
+      startHeartbeat(userId, db);
 
       inst.syncState = {
         phase: 'waiting_history',
@@ -609,9 +678,32 @@ async function startConnection(userId, db, options = {}) {
     });
 
     // ── Disconnected ──
+    // ── Connection state changes (detects silent drops) ──
+    client.on('change_state', (state) => {
+      if (generation !== inst.connectionGeneration) return;
+      console.log(`🔄 [${userId}] Connection state changed: ${state}`);
+      if (state === 'CONFLICT' || state === 'UNLAUNCHED' || state === 'UNPAIRED') {
+        // Don't auto-reconnect for these — user action needed
+      } else if (state === 'TIMEOUT' || state === 'PAIRING') {
+        if (inst.connectionStatus === 'connected') {
+          inst.connectionStatus = 'reconnecting';
+          emit(userId, 'status', { status: 'reconnecting' });
+          scheduleReconnect(userId, db, generation);
+        }
+      }
+    });
+
+    // ── Authenticated (session restored, before ready) ──
+    client.on('authenticated', () => {
+      if (generation !== inst.connectionGeneration) return;
+      console.log(`🔑 [${userId}] WhatsApp authenticated (session restored)`);
+    });
+
+    // ── Disconnected ──
     client.on('disconnected', (reason) => {
       if (generation !== inst.connectionGeneration) return;
       console.warn(`⚠️ [${userId}] WhatsApp disconnected: ${reason}`);
+      stopHeartbeat(userId);
 
       if (reason === 'LOGOUT' || reason === 'CONFLICT') {
         if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
@@ -621,15 +713,7 @@ async function startConnection(userId, db, options = {}) {
       } else {
         inst.connectionStatus = 'reconnecting';
         emit(userId, 'status', { status: 'reconnecting' });
-        if (inst.reconnectTimer) clearTimeout(inst.reconnectTimer);
-        const delays = [3000, 5000, 10000];
-        const delay = delays[Math.min(inst.reconnectAttempt, delays.length - 1)];
-        inst.reconnectAttempt++;
-        inst.reconnectTimer = setTimeout(() => {
-          if (generation !== inst.connectionGeneration) return;
-          inst.reconnectTimer = null;
-          startConnection(userId, db, { force: true });
-        }, delay);
+        scheduleReconnect(userId, db, generation);
       }
     });
 
@@ -839,7 +923,7 @@ async function startConnection(userId, db, options = {}) {
     console.error(`startConnection error [${userId}]:`, err?.message || err);
     inst.connectionStatus = 'reconnecting';
     emit(userId, 'status', { status: 'reconnecting' });
-    inst.reconnectTimer = setTimeout(() => startConnection(userId, db), 3000);
+    scheduleReconnect(userId, db, inst.connectionGeneration);
   } finally {
     inst.isConnecting = false;
   }
@@ -1532,6 +1616,7 @@ async function sendVoiceNote(userId, jid, audioBuffer) {
 async function clearSession(userId, db) {
   const inst = getInstance(userId);
   inst.connectionGeneration++;
+  stopHeartbeat(userId);
   inst.connectionStatus = 'disconnected';
   inst.qrCode = null;
   inst.pairingCode = null;

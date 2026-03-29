@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { initDatabase } from './db.js';
 import { createApiRouter } from './api.js';
+import { autoReconnectAll } from './whatsapp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,4 +38,6 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 WA Controller running on port ${PORT}`);
+  // Auto-reconnect all users who had active sessions
+  setTimeout(() => autoReconnectAll(db), 3000);
 });
