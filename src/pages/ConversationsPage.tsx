@@ -367,8 +367,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       if (replyMode === 'text') {
         const res = pendingAttachment
           ? isTemp
-            ? await api.sendMediaToPhone(selectedContact.phone || '', pendingAttachment.file, trimmedReply)
-            : await api.sendMedia(selectedContact.id, pendingAttachment.file, trimmedReply)
+            ? await api.sendMediaToPhone(selectedContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
+            : await api.sendMedia(selectedContact.id, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
           : isTemp
             ? await api.sendTextToPhone(selectedContact.phone || '', trimmedReply)
             : await api.sendText(selectedContact.id, trimmedReply);
