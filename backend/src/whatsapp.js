@@ -1088,83 +1088,125 @@ async function syncChats(userId, db) {
 
     let contactChanges = 0;
     let messageCount = 0;
+    let skippedChats = 0;
 
-    for (const chat of chats) {
-      try {
-        const jid = toJid(chat.id._serialized);
-        if (jid === 'status@broadcast') continue;
-        const phone = '+' + phoneFromJid(jid);
-        const isGroup = chat.isGroup;
-        const candidate = getNameCandidate({ name: chat.name, pushName: chat.name });
+    // Sort chats by most recent activity first
+    const sortedChats = chats.sort((a, b) => {
+      const aTime = a.timestamp || 0;
+      const bTime = b.timestamp || 0;
+      return bTime - aTime;
+    });
 
-        const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
-        if (!contactId) continue;
-        contactChanges++;
+    // Process in batches to avoid blocking
+    const BATCH_SIZE = 10;
+    const MSG_LIMIT_PER_CHAT = 25; // Reduced from 50 for large accounts
 
-        // Sync archive status
-        if (chat.archived) {
-          try {
-            db.prepare("UPDATE contacts SET is_archived = 1 WHERE id = ? AND user_id = ?").run(contactId, userId);
-          } catch {}
-        }
+    for (let i = 0; i < sortedChats.length; i += BATCH_SIZE) {
+      if (inst.connectionStatus !== 'connected') break;
 
-        // Sync unread count
-        if (chat.unreadCount > 0) {
-          try {
-            db.prepare("UPDATE contacts SET unread_count = ? WHERE id = ? AND user_id = ?").run(chat.unreadCount, contactId, userId);
-          } catch {}
-        }
+      const batch = sortedChats.slice(i, i + BATCH_SIZE);
 
-        // Fetch recent messages for this chat
+      for (const chat of batch) {
         try {
-          const messages = await chat.fetchMessages({ limit: 50 });
-          for (const msg of messages) {
+          const jid = toJid(chat.id._serialized);
+          if (jid === 'status@broadcast') continue;
+          const phone = '+' + phoneFromJid(jid);
+          const isGroup = chat.isGroup;
+          const candidate = getNameCandidate({ name: chat.name, pushName: chat.name });
+
+          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
+          if (!contactId) continue;
+          contactChanges++;
+
+          // Sync archive status
+          if (chat.archived) {
             try {
-              if (!msg.body && !msg.hasMedia) continue;
-
-              const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
-              const msgId = msg.id?._serialized || msg.id?.id || uuid();
-              const direction = msg.fromMe ? 'sent' : 'received';
-
-              let mediaPath = null;
-              let resolvedMediaName = mediaName;
-              let resolvedMediaMime = mimetype;
-              if (msg.hasMedia && ['voice', 'image', 'video', 'document', 'sticker'].includes(msgType)) {
-                const savedMedia = await saveMessageMedia(userId, msg, msgId, {
-                  msgType,
-                  mimetype,
-                  mediaName,
-                });
-                mediaPath = savedMedia?.mediaPath || null;
-                resolvedMediaName = savedMedia?.mediaName || mediaName || null;
-                resolvedMediaMime = savedMedia?.mediaMime || mimetype || null;
-              }
-
-              upsertMessageRecord(db, {
-                id: msgId,
-                userId,
-                contactId,
-                jid,
-                content,
-                type: msgType,
-                direction,
-                timestamp: new Date(msg.timestamp * 1000).toISOString(),
-                status: msg.fromMe ? 'sent' : 'delivered',
-                duration,
-                mediaPath,
-                mediaName: resolvedMediaName,
-                mediaMime: resolvedMediaMime,
-              });
-              messageCount++;
+              db.prepare("UPDATE contacts SET is_archived = 1 WHERE id = ? AND user_id = ?").run(contactId, userId);
             } catch {}
           }
-        } catch (err) {
-          console.log(`📜 [${userId}] Failed to fetch messages for ${jid}: ${err?.message}`);
-        }
-      } catch {}
+
+          // Sync unread count
+          if (chat.unreadCount > 0) {
+            try {
+              db.prepare("UPDATE contacts SET unread_count = ? WHERE id = ? AND user_id = ?").run(chat.unreadCount, contactId, userId);
+            } catch {}
+          }
+
+          // Check if we already have messages for this chat — skip if we do
+          const existingCount = db.prepare('SELECT COUNT(*) as c FROM messages WHERE contact_id = ? AND user_id = ?').get(contactId, userId)?.c || 0;
+          if (existingCount >= MSG_LIMIT_PER_CHAT) {
+            skippedChats++;
+            continue;
+          }
+
+          // Fetch recent messages for this chat
+          try {
+            const messages = await chat.fetchMessages({ limit: MSG_LIMIT_PER_CHAT });
+            for (const msg of messages) {
+              try {
+                if (!msg.body && !msg.hasMedia) continue;
+
+                const msgId = msg.id?._serialized || msg.id?.id || uuid();
+
+                // Skip if message already exists in DB
+                const exists = db.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(msgId, userId);
+                if (exists) continue;
+
+                const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
+                const direction = msg.fromMe ? 'sent' : 'received';
+
+                let mediaPath = null;
+                let resolvedMediaName = mediaName;
+                let resolvedMediaMime = mimetype;
+                if (msg.hasMedia && ['voice', 'image', 'video', 'document', 'sticker'].includes(msgType)) {
+                  const savedMedia = await saveMessageMedia(userId, msg, msgId, {
+                    msgType,
+                    mimetype,
+                    mediaName,
+                  });
+                  mediaPath = savedMedia?.mediaPath || null;
+                  resolvedMediaName = savedMedia?.mediaName || mediaName || null;
+                  resolvedMediaMime = savedMedia?.mediaMime || mimetype || null;
+                }
+
+                upsertMessageRecord(db, {
+                  id: msgId,
+                  userId,
+                  contactId,
+                  jid,
+                  content,
+                  type: msgType,
+                  direction,
+                  timestamp: new Date(msg.timestamp * 1000).toISOString(),
+                  status: msg.fromMe ? 'sent' : 'delivered',
+                  duration,
+                  mediaPath,
+                  mediaName: resolvedMediaName,
+                  mediaMime: resolvedMediaMime,
+                });
+                messageCount++;
+              } catch {}
+            }
+          } catch (err) {
+            console.log(`📜 [${userId}] Failed to fetch messages for ${jid}: ${err?.message}`);
+          }
+        } catch {}
+      }
+
+      // Emit progress after each batch
+      updateSyncState(userId, db, {
+        historyContacts: contactChanges,
+        historyMessages: messageCount,
+        lastProgressAt: new Date().toISOString(),
+      });
+
+      // Small delay between batches to prevent overwhelming
+      if (i + BATCH_SIZE < sortedChats.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     }
 
-    console.log(`📇 [${userId}] Synced ${contactChanges} chats, ${messageCount} messages`);
+    console.log(`📇 [${userId}] Synced ${contactChanges} chats, ${messageCount} messages (${skippedChats} skipped - already synced)`);
     updateSyncState(userId, db, {
       phase: 'ready',
       historyContacts: contactChanges,
