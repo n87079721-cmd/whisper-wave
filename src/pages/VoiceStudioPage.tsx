@@ -155,7 +155,8 @@ const VoiceStudioPage = () => {
     setIsGenerating(true);
     setAudioUrl(null);
     try {
-      const blob = await api.previewVoice(text, selectedVoice, selectedModel);
+      const bg = backgroundSound !== 'none' ? backgroundSound : undefined;
+      const blob = await api.previewVoice(text, selectedVoice, selectedModel, bg, bg ? bgVolume : undefined);
       const url = URL.createObjectURL(blob);
       setAudioUrl(url);
     } catch (err: any) {
@@ -180,7 +181,8 @@ const VoiceStudioPage = () => {
     if (!selectedContact || !text) return;
     setSending(true);
     try {
-      const res = await api.sendVoice(selectedContact, text, selectedVoice, selectedModel);
+      const bg = backgroundSound !== 'none' ? backgroundSound : undefined;
+      const res = await api.sendVoice(selectedContact, text, selectedVoice, selectedModel, bg, bg ? bgVolume : undefined);
       if (res.error) throw new Error(res.error);
       toast.success('Voice note sent as PTT!');
     } catch (err: any) {
