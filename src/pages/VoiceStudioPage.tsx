@@ -758,7 +758,6 @@ const VoiceStudioPage = () => {
           </motion.div>
         )}
       </motion.div>
-    </div>
 
       {/* Trim Modal */}
       <Dialog open={!!trimSound} onOpenChange={(open) => { if (!open) { setTrimSound(null); trimAudioRef.current?.pause(); setIsTrimPlaying(false); } }}>
