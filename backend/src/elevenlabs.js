@@ -190,7 +190,7 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgrou
 
     if (bgPath) {
       // Mix voice with background and output as OGG
-      mixAudioWithBackground(ffmpeg, mp3Path, bgPath, mixedOggPath, 'ogg');
+      mixAudioWithBackground(ffmpeg, mp3Path, bgPath, mixedOggPath, 'ogg', bgVolume);
       const oggBuffer = fs.readFileSync(mixedOggPath);
       return oggBuffer;
     } else {
@@ -215,7 +215,7 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgrou
 }
 
 // Generate MP3 preview (not converted to OGG, for browser playback)
-export async function generatePreviewAudio(apiKey, text, voiceId, modelId, backgroundSound) {
+export async function generatePreviewAudio(apiKey, text, voiceId, modelId, backgroundSound, bgVolume = 0.15) {
   if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
   const ffmpeg = getFfmpeg();
@@ -258,7 +258,7 @@ export async function generatePreviewAudio(apiKey, text, voiceId, modelId, backg
     if (bgPath) {
       // Write voice to temp file for mixing
       fs.writeFileSync(voiceMp3Path, audioBuffer);
-      mixAudioWithBackground(ffmpeg, voiceMp3Path, bgPath, mixedMp3Path, 'mp3');
+      mixAudioWithBackground(ffmpeg, voiceMp3Path, bgPath, mixedMp3Path, 'mp3', bgVolume);
       return fs.readFileSync(mixedMp3Path);
     } else {
       return audioBuffer;
