@@ -58,7 +58,7 @@ export function useWhatsAppStatus() {
         setQr(null);
         return;
       }
-      setStatus((prev) => (prev === 'qr_waiting' ? prev : 'reconnecting'));
+      // Don't change status on network errors — keep showing last known state
     }
   }, []);
 
@@ -102,7 +102,7 @@ export function useWhatsAppStatus() {
           setQr(null);
           return;
         }
-        setStatus((prev) => (prev === 'qr_waiting' ? prev : 'reconnecting'));
+        // Don't set status to reconnecting on SSE errors — just retry polling
         setTimeout(refresh, 5000);
       };
     } catch {}
