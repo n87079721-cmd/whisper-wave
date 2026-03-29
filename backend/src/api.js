@@ -82,6 +82,51 @@ export function createApiRouter(db) {
     return raw;
   }
 
+  function detectMimeTypeFromFilename(filename) {
+    const ext = path.extname(filename || '').toLowerCase();
+    const mimeMap = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.mp4': 'video/mp4',
+      '.mov': 'video/quicktime',
+      '.webm': 'video/webm',
+      '.ogg': 'audio/ogg',
+      '.mp3': 'audio/mpeg',
+      '.m4a': 'audio/mp4',
+      '.wav': 'audio/wav',
+      '.pdf': 'application/pdf',
+      '.doc': 'application/msword',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xls': 'application/vnd.ms-excel',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.txt': 'text/plain',
+      '.zip': 'application/zip',
+    };
+    return mimeMap[ext] || 'application/octet-stream';
+  }
+
+  function resolveMessageMediaPath(filename) {
+    const safeName = path.basename(String(filename || ''));
+    const candidates = [
+      path.join(__dirname, '..', 'data', 'message-media', safeName),
+      path.join(__dirname, '..', 'data', 'voice-media', safeName),
+    ];
+    return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+  }
+
+  function sanitizeDownloadName(value, fallback = 'attachment') {
+    const cleaned = String(value || fallback)
+      .replace(/[\r\n"]/g, '')
+      .replace(/[\\/]/g, '_')
+      .trim();
+    return cleaned || fallback;
+  }
+
   function mergeContactRows(userId, sourceContactId, targetContactId, targetJid) {
     if (!sourceContactId || !targetContactId || sourceContactId === targetContactId) return;
 
@@ -353,9 +398,8 @@ export function createApiRouter(db) {
 
       if (!targetJid) return res.status(400).json({ error: 'Invalid WhatsApp number' });
 
-      await wa.sendTextMessage(targetJid, message);
-
-      const msgId = uuid();
+      const sendResult = await wa.sendTextMessage(targetJid, message);
+      const msgId = sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id || uuid();
 
       if (!contactRow) {
         contactRow = db.prepare('SELECT id, jid, phone FROM contacts WHERE jid = ? AND user_id = ?').get(targetJid, req.userId);
@@ -400,6 +444,13 @@ export function createApiRouter(db) {
       db.prepare(`
         INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
         VALUES (?, ?, ?, ?, ?, 'text', 'sent', ?, 'sent')
+        ON CONFLICT(id) DO UPDATE SET
+          contact_id = excluded.contact_id,
+          jid = excluded.jid,
+          content = excluded.content,
+          direction = excluded.direction,
+          timestamp = excluded.timestamp,
+          status = excluded.status
       `).run(msgId, req.userId, contactRow.id, targetJid, message, new Date().toISOString());
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
 
@@ -622,6 +673,34 @@ RULES:
               : 'audio/ogg';
       res.set('Content-Type', type);
       res.set('Accept-Ranges', 'bytes');
+      res.sendFile(filePath);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/message-media/:filename', (req, res) => {
+    try {
+      const safeFilename = path.basename(req.params.filename);
+      const filePath = resolveMessageMediaPath(safeFilename);
+      if (!filePath) return res.status(404).json({ error: 'Media not found' });
+
+      const mediaRow = db.prepare(`
+        SELECT media_mime, media_name, type
+        FROM messages
+        WHERE user_id = ? AND media_path = ?
+        ORDER BY timestamp DESC
+        LIMIT 1
+      `).get(req.userId, safeFilename);
+
+      res.set('Content-Type', mediaRow?.media_mime || detectMimeTypeFromFilename(filePath));
+      res.set('Accept-Ranges', 'bytes');
+
+      if (req.query.download === '1') {
+        const downloadName = sanitizeDownloadName(mediaRow?.media_name, safeFilename);
+        res.set('Content-Disposition', `attachment; filename="${downloadName}"`);
+      }
+
       res.sendFile(filePath);
     } catch (err) {
       res.status(500).json({ error: err.message });

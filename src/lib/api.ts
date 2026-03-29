@@ -55,6 +55,14 @@ const toUrl = (path: string) => {
   return base ? `${base}${path}` : path;
 };
 
+const withTokenQuery = (path: string, params?: Record<string, string>) => {
+  const search = new URLSearchParams(params);
+  const token = getAuthToken();
+  if (token) search.set('token', token);
+  const qs = search.toString();
+  return toUrl(path) + (qs ? `?${qs}` : '');
+};
+
 function normalizePhoneDigits(value: string): string {
   return String(value || '').replace(/\D/g, '');
 }
@@ -255,9 +263,11 @@ export const api = {
 
   // Voice media playback URL
   getVoiceMediaUrl(filename: string) {
-    const token = getAuthToken();
-    const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
-    return toUrl(`/api/voice-media/${encodeURIComponent(filename)}`) + suffix;
+    return withTokenQuery(`/api/message-media/${encodeURIComponent(filename)}`);
+  },
+
+  getMessageMediaUrl(filename: string, options?: { download?: boolean }) {
+    return withTokenQuery(`/api/message-media/${encodeURIComponent(filename)}`, options?.download ? { download: '1' } : undefined);
   },
 
   // Delete
@@ -351,6 +361,8 @@ export interface Message {
   status: string;
   duration: number | null;
   media_path: string | null;
+  media_name?: string | null;
+  media_mime?: string | null;
 }
 
 export interface Stats {

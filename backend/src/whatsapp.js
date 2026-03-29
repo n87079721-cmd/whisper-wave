@@ -10,6 +10,7 @@ import { generateReply, shouldReact, shouldAlsoReplyAfterReaction } from './ai.j
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const VOICE_MEDIA_DIR = path.join(DATA_DIR, 'voice-media');
+const MESSAGE_MEDIA_DIR = path.join(DATA_DIR, 'message-media');
 const STATUS_MEDIA_DIR = path.join(DATA_DIR, 'status-media');
 
 // Per-user instance store
@@ -139,7 +140,7 @@ function getAudioFileExtension(mimetype) {
   return 'ogg';
 }
 
-function hasSavedVoiceFile(filePath) {
+function hasSavedMediaFile(filePath) {
   try {
     return fs.existsSync(filePath) && fs.statSync(filePath).size > 0;
   } catch {
@@ -147,10 +148,53 @@ function hasSavedVoiceFile(filePath) {
   }
 }
 
-function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath }) {
+function sanitizeStoredFilename(value) {
+  const cleaned = String(value || '')
+    .replace(/[\\/]/g, '_')
+    .replace(/[^a-zA-Z0-9._ -]/g, '')
+    .trim();
+  return cleaned || null;
+}
+
+function getMediaFileExtension(mimetype, fallbackName = '') {
+  const extFromName = path.extname(fallbackName || '').replace(/^\./, '').toLowerCase();
+  if (extFromName) return extFromName;
+
+  const normalized = String(mimetype || '').toLowerCase();
+  if (!normalized) return 'bin';
+  if (normalized.includes('jpeg')) return 'jpg';
+  if (normalized.includes('png')) return 'png';
+  if (normalized.includes('webp')) return 'webp';
+  if (normalized.includes('gif')) return 'gif';
+  if (normalized.includes('mpeg')) return 'mp3';
+  if (normalized.includes('ogg')) return 'ogg';
+  if (normalized.includes('webm')) return 'webm';
+  if (normalized.includes('wav')) return 'wav';
+  if (normalized.includes('mp4')) return 'mp4';
+  if (normalized.includes('quicktime')) return 'mov';
+  if (normalized.includes('pdf')) return 'pdf';
+  if (normalized.includes('word')) return 'docx';
+  if (normalized.includes('excel') || normalized.includes('spreadsheet')) return 'xlsx';
+  if (normalized.includes('powerpoint') || normalized.includes('presentation')) return 'pptx';
+  if (normalized.includes('zip')) return 'zip';
+  if (normalized.includes('json')) return 'json';
+  if (normalized.includes('plain')) return 'txt';
+  return 'bin';
+}
+
+function getDefaultMediaName(msgType, extension) {
+  const ext = extension ? `.${extension}` : '';
+  if (msgType === 'voice') return `voice-note${ext || '.ogg'}`;
+  if (msgType === 'image') return `image${ext || '.jpg'}`;
+  if (msgType === 'video') return `video${ext || '.mp4'}`;
+  if (msgType === 'document') return `document${ext || '.bin'}`;
+  return `attachment${ext || '.bin'}`;
+}
+
+function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime }) {
   db.prepare(`
-    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       contact_id = excluded.contact_id,
       jid = excluded.jid,
@@ -166,8 +210,10 @@ function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, di
       timestamp = excluded.timestamp,
       status = excluded.status,
       duration = COALESCE(excluded.duration, messages.duration),
-      media_path = COALESCE(excluded.media_path, messages.media_path)
-  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath);
+      media_path = COALESCE(excluded.media_path, messages.media_path),
+      media_name = COALESCE(excluded.media_name, messages.media_name),
+      media_mime = COALESCE(excluded.media_mime, messages.media_mime)
+  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime);
 }
 
 function isUuidLike(value) {
@@ -415,14 +461,22 @@ async function startConnection(userId, db, options = {}) {
         if (!contactId) return;
 
         // Determine message type and content
-        const { msgType, content, duration, mimetype } = getMessagePayload(msg);
+        const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
         const direction = isFromMe ? 'sent' : 'received';
         const msgId = msg.id?._serialized || msg.id?.id || uuid();
 
-        // Save voice media
         let mediaPath = null;
-        if (msgType === 'voice' && msg.hasMedia) {
-          mediaPath = await saveVoiceMedia(userId, msg, msgId, mimetype);
+        let resolvedMediaName = mediaName;
+        let resolvedMediaMime = mimetype;
+        if (msg.hasMedia && ['voice', 'image', 'video', 'document'].includes(msgType)) {
+          const savedMedia = await saveMessageMedia(userId, msg, msgId, {
+            msgType,
+            mimetype,
+            mediaName,
+          });
+          mediaPath = savedMedia?.mediaPath || null;
+          resolvedMediaName = savedMedia?.mediaName || mediaName || null;
+          resolvedMediaMime = savedMedia?.mediaMime || mimetype || null;
         }
 
         upsertMessageRecord(db, {
@@ -437,6 +491,8 @@ async function startConnection(userId, db, options = {}) {
           status: isFromMe ? 'sent' : 'delivered',
           duration,
           mediaPath,
+          mediaName: resolvedMediaName,
+          mediaMime: resolvedMediaMime,
         });
 
         emit(userId, 'message', { contactId, msgId });
@@ -505,51 +561,106 @@ async function startConnection(userId, db, options = {}) {
 
 function getMessagePayload(msg) {
   let msgType = 'text';
-  let content = msg.body || '';
+  let content = msg.body || msg.caption || '';
   let duration = null;
-  let mimetype = null;
+  let mimetype = msg.mimetype || null;
+  let mediaName = sanitizeStoredFilename(msg.filename || msg._data?.filename || null);
 
-  if (msg.type === 'ptt' || msg.type === 'audio') {
+  const rawType = String(msg.type || '').toLowerCase();
+
+  if (rawType === 'ptt' || rawType === 'audio') {
     msgType = 'voice';
     content = msg.body || '🎤 Voice message';
     duration = msg.duration || null;
     mimetype = msg.mimetype || 'audio/ogg; codecs=opus';
-  } else if (msg.type === 'image') {
+    mediaName = mediaName || 'voice-note.ogg';
+  } else if (rawType === 'image' || rawType === 'sticker') {
     msgType = 'image';
     content = msg.body || msg.caption || '';
-  } else if (msg.type === 'video') {
+  } else if (rawType === 'video' || rawType === 'gif') {
     msgType = 'video';
     content = msg.body || msg.caption || '';
-  } else if (msg.type === 'document') {
+  } else if (rawType === 'document') {
     msgType = 'document';
-    content = msg.body || msg.caption || '';
+    content = msg.body || msg.caption || mediaName || 'Document';
+  } else if (msg.hasMedia) {
+    if (String(mimetype || '').startsWith('image/')) {
+      msgType = 'image';
+    } else if (String(mimetype || '').startsWith('video/')) {
+      msgType = 'video';
+    } else if (String(mimetype || '').startsWith('audio/')) {
+      msgType = 'voice';
+      duration = msg.duration || null;
+      content = msg.body || '🎤 Voice message';
+      mediaName = mediaName || 'voice-note.ogg';
+    } else {
+      msgType = 'document';
+      content = msg.body || msg.caption || mediaName || 'Attachment';
+    }
   }
 
-  return { msgType, content, duration, mimetype, isVoice: msgType === 'voice' };
+  if (msgType === 'document' && !content) {
+    content = mediaName || 'Document';
+  }
+
+  return { msgType, content, duration, mimetype, mediaName, isVoice: msgType === 'voice' };
 }
 
 // ── Voice media download ──
 
-async function saveVoiceMedia(userId, msg, msgId, mimetype) {
+async function saveMessageMedia(userId, msg, msgId, options = {}) {
   try {
-    if (!fs.existsSync(VOICE_MEDIA_DIR)) fs.mkdirSync(VOICE_MEDIA_DIR, { recursive: true });
-    const filename = `${msgId}.${getAudioFileExtension(mimetype)}`;
-    const filePath = path.join(VOICE_MEDIA_DIR, filename);
+    if (!fs.existsSync(MESSAGE_MEDIA_DIR)) fs.mkdirSync(MESSAGE_MEDIA_DIR, { recursive: true });
 
-    if (hasSavedVoiceFile(filePath)) return filename;
+    const downloaded = await msg.downloadMedia();
+    if (!downloaded?.data) {
+      return {
+        mediaPath: null,
+        mediaName: options.mediaName || null,
+        mediaMime: options.mimetype || msg.mimetype || null,
+      };
+    }
 
-    const media = await msg.downloadMedia();
-    if (!media?.data) return null;
+    const resolvedMime = downloaded.mimetype || options.mimetype || msg.mimetype || 'application/octet-stream';
+    const resolvedName = sanitizeStoredFilename(downloaded.filename || options.mediaName || msg.filename || msg._data?.filename || null);
+    const extension = getMediaFileExtension(resolvedMime, resolvedName || '');
+    const filename = `${msgId}.${extension}`;
+    const filePath = path.join(MESSAGE_MEDIA_DIR, filename);
 
-    const buffer = Buffer.from(media.data, 'base64');
-    if (buffer.length === 0) return null;
+    if (!hasSavedMediaFile(filePath)) {
+      const buffer = Buffer.from(downloaded.data, 'base64');
+      if (buffer.length === 0) {
+        return {
+          mediaPath: null,
+          mediaName: resolvedName || getDefaultMediaName(options.msgType, extension),
+          mediaMime: resolvedMime,
+        };
+      }
+      fs.writeFileSync(filePath, buffer);
+    }
 
-    fs.writeFileSync(filePath, buffer);
-    return filename;
+    return {
+      mediaPath: filename,
+      mediaName: resolvedName || getDefaultMediaName(options.msgType, extension),
+      mediaMime: resolvedMime,
+    };
   } catch (err) {
-    console.log(`🎤 [${userId}] Voice download failed: ${err?.message}`);
-    return null;
+    console.log(`📦 [${userId}] Media download failed (${options.msgType || msg.type}): ${err?.message}`);
+    return {
+      mediaPath: null,
+      mediaName: options.mediaName || null,
+      mediaMime: options.mimetype || msg.mimetype || null,
+    };
   }
+}
+
+async function saveVoiceMedia(userId, msg, msgId, mimetype) {
+  const savedMedia = await saveMessageMedia(userId, msg, msgId, {
+    msgType: 'voice',
+    mimetype,
+    mediaName: `voice-note.${getAudioFileExtension(mimetype)}`,
+  });
+  return savedMedia?.mediaPath || null;
 }
 
 // ── Contact management ──
@@ -714,13 +825,22 @@ async function syncChats(userId, db) {
             try {
               if (!msg.body && !msg.hasMedia) continue;
 
-              const { msgType, content, duration, mimetype } = getMessagePayload(msg);
+              const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
               const msgId = msg.id?._serialized || msg.id?.id || uuid();
               const direction = msg.fromMe ? 'sent' : 'received';
 
               let mediaPath = null;
-              if (msgType === 'voice' && msg.hasMedia) {
-                mediaPath = await saveVoiceMedia(userId, msg, msgId, mimetype);
+              let resolvedMediaName = mediaName;
+              let resolvedMediaMime = mimetype;
+              if (msg.hasMedia && ['voice', 'image', 'video', 'document'].includes(msgType)) {
+                const savedMedia = await saveMessageMedia(userId, msg, msgId, {
+                  msgType,
+                  mimetype,
+                  mediaName,
+                });
+                mediaPath = savedMedia?.mediaPath || null;
+                resolvedMediaName = savedMedia?.mediaName || mediaName || null;
+                resolvedMediaMime = savedMedia?.mediaMime || mimetype || null;
               }
 
               upsertMessageRecord(db, {
@@ -735,6 +855,8 @@ async function syncChats(userId, db) {
                 status: msg.fromMe ? 'sent' : 'delivered',
                 duration,
                 mediaPath,
+                mediaName: resolvedMediaName,
+                mediaMime: resolvedMediaMime,
               });
               messageCount++;
             } catch {}
@@ -802,12 +924,21 @@ export async function recoverSingleChat(userId, db, contactId) {
     for (const msg of messages) {
       try {
         if (!msg.body && !msg.hasMedia) continue;
-        const { msgType, content, duration, mimetype } = getMessagePayload(msg);
+        const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
         const msgId = msg.id?._serialized || msg.id?.id || uuid();
 
         let mediaPath = null;
-        if (msgType === 'voice' && msg.hasMedia) {
-          mediaPath = await saveVoiceMedia(userId, msg, msgId, mimetype);
+        let resolvedMediaName = mediaName;
+        let resolvedMediaMime = mimetype;
+        if (msg.hasMedia && ['voice', 'image', 'video', 'document'].includes(msgType)) {
+          const savedMedia = await saveMessageMedia(userId, msg, msgId, {
+            msgType,
+            mimetype,
+            mediaName,
+          });
+          mediaPath = savedMedia?.mediaPath || null;
+          resolvedMediaName = savedMedia?.mediaName || mediaName || null;
+          resolvedMediaMime = savedMedia?.mediaMime || mimetype || null;
         }
 
         upsertMessageRecord(db, {
@@ -822,6 +953,8 @@ export async function recoverSingleChat(userId, db, contactId) {
           status: msg.fromMe ? 'sent' : 'delivered',
           duration,
           mediaPath,
+          mediaName: resolvedMediaName,
+          mediaMime: resolvedMediaMime,
         });
         count++;
       } catch {}

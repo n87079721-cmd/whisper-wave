@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Pause, Archive, ArchiveRestore } from 'lucide-react';
+import { Search, Mic, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Pause, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
@@ -265,6 +265,21 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     } catch { return ''; }
   };
 
+  const getConversationPreview = (contact: Contact) => {
+    switch (contact.last_type) {
+      case 'voice':
+        return '🎤 Voice note';
+      case 'image':
+        return '📷 Photo';
+      case 'video':
+        return '🎬 Video';
+      case 'document':
+        return '📄 Document';
+      default:
+        return contact.last_message || getContactDisplayMeta(contact);
+    }
+  };
+
   const StatusLabel = ({ status }: { status: string }) => {
     if (status === 'read') return <span className="text-[10px] text-primary font-medium">Read</span>;
     if (status === 'delivered') return <span className="text-[10px] text-muted-foreground">Delivered</span>;
@@ -511,6 +526,113 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     return groups;
   }, [messages]);
 
+  const renderMessageContent = (msg: Message) => {
+    if (msg.type === 'voice') {
+      return (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handlePlayVoice(msg)}
+            className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 hover:bg-primary/30 transition-colors"
+          >
+            {playingVoiceId === msg.id ? (
+              <Pause className="w-3.5 h-3.5 text-primary" />
+            ) : (
+              <Play className="w-3.5 h-3.5 text-primary ml-0.5" />
+            )}
+          </button>
+          <div className="flex gap-0.5 items-center">
+            {Array.from({ length: 20 }).map((_, j) => (
+              <div key={j} className={`w-0.5 rounded-full transition-colors ${playingVoiceId === msg.id ? 'bg-primary' : 'bg-primary/60'}`} style={{ height: `${Math.random() * 16 + 4}px` }} />
+            ))}
+          </div>
+          <span className="text-xs text-muted-foreground ml-1">
+            {msg.duration ? `0:${String(msg.duration).padStart(2, '0')}` : ''}
+          </span>
+          {!msg.media_path && <span className="text-[9px] text-muted-foreground/60">no audio</span>}
+        </div>
+      );
+    }
+
+    if (msg.type === 'image') {
+      const imageUrl = msg.media_path ? api.getMessageMediaUrl(msg.media_path) : null;
+      return (
+        <div className="space-y-2">
+          {imageUrl ? (
+            <a href={imageUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl bg-muted/60">
+              <img
+                src={imageUrl}
+                alt={msg.content || msg.media_name || 'Shared image'}
+                loading="lazy"
+                className="max-h-80 w-full object-cover"
+              />
+            </a>
+          ) : (
+            <div className="flex items-center gap-2 rounded-xl border border-border/50 bg-background/30 px-3 py-2 text-xs text-muted-foreground">
+              <ImageIcon className="w-4 h-4" />
+              <span>Image unavailable</span>
+            </div>
+          )}
+          {msg.content ? <p className="whitespace-pre-wrap break-words">{msg.content}</p> : null}
+        </div>
+      );
+    }
+
+    if (msg.type === 'video') {
+      const videoUrl = msg.media_path ? api.getMessageMediaUrl(msg.media_path) : null;
+      return (
+        <div className="space-y-2">
+          {videoUrl ? (
+            <video
+              src={videoUrl}
+              controls
+              preload="metadata"
+              className="max-h-80 w-full rounded-xl bg-muted/60"
+            />
+          ) : (
+            <div className="flex items-center gap-2 rounded-xl border border-border/50 bg-background/30 px-3 py-2 text-xs text-muted-foreground">
+              <Film className="w-4 h-4" />
+              <span>Video unavailable</span>
+            </div>
+          )}
+          {msg.content ? <p className="whitespace-pre-wrap break-words">{msg.content}</p> : null}
+        </div>
+      );
+    }
+
+    if (msg.type === 'document') {
+      const downloadUrl = msg.media_path ? api.getMessageMediaUrl(msg.media_path, { download: true }) : null;
+      const documentLabel = msg.media_name || msg.content || 'Document';
+      return (
+        <div className="space-y-2">
+          {downloadUrl ? (
+            <a
+              href={downloadUrl}
+              download={msg.media_name || true}
+              className="flex items-center gap-3 rounded-xl border border-border/50 bg-background/30 px-3 py-3 hover:bg-background/50 transition-colors"
+            >
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/15 text-primary flex-shrink-0">
+                <FileText className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{documentLabel}</p>
+                <p className="text-xs text-muted-foreground truncate">{msg.media_mime || 'Tap to download'}</p>
+              </div>
+              <Download className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+            </a>
+          ) : (
+            <div className="flex items-center gap-2 rounded-xl border border-border/50 bg-background/30 px-3 py-2 text-xs text-muted-foreground">
+              <FileText className="w-4 h-4" />
+              <span>Document unavailable</span>
+            </div>
+          )}
+          {msg.content && msg.content !== documentLabel ? <p className="whitespace-pre-wrap break-words">{msg.content}</p> : null}
+        </div>
+      );
+    }
+
+    return <span className="whitespace-pre-wrap break-words">{msg.content}</span>;
+  };
+
   return (
     <div className="h-[calc(100dvh-5rem)] md:h-[calc(100vh-2.5rem)] flex flex-col">
       <div className="flex-1 flex min-h-0 rounded-xl overflow-hidden border border-border bg-card">
@@ -600,7 +722,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <p className={`text-[13px] truncate flex-1 ${(contact.unread_count ?? 0) > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
-                          {contact.last_type === 'voice' ? '🎤 Voice note' : contact.last_message || getContactDisplayMeta(contact)}
+                          {getConversationPreview(contact)}
                         </p>
                         {(contact.unread_count ?? 0) > 0 && (
                           <span className="flex-shrink-0 min-w-[20px] h-5 rounded-full bg-primary text-primary-foreground text-[11px] font-bold flex items-center justify-center px-1.5">
@@ -790,31 +912,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                   : 'bg-bubble-in text-bubble-in-foreground rounded-bl-md'
                               } ${isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''}`}
                             >
-                              {msg.type === 'voice' ? (
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    onClick={() => handlePlayVoice(msg)}
-                                    className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 hover:bg-primary/30 transition-colors"
-                                  >
-                                    {playingVoiceId === msg.id ? (
-                                      <Pause className="w-3.5 h-3.5 text-primary" />
-                                    ) : (
-                                      <Play className="w-3.5 h-3.5 text-primary ml-0.5" />
-                                    )}
-                                  </button>
-                                  <div className="flex gap-0.5 items-center">
-                                    {Array.from({ length: 20 }).map((_, j) => (
-                                      <div key={j} className={`w-0.5 rounded-full transition-colors ${playingVoiceId === msg.id ? 'bg-primary' : 'bg-primary/60'}`} style={{ height: `${Math.random() * 16 + 4}px` }} />
-                                    ))}
-                                  </div>
-                                  <span className="text-xs text-muted-foreground ml-1">
-                                    {msg.duration ? `0:${String(msg.duration).padStart(2, '0')}` : ''}
-                                  </span>
-                                  {!msg.media_path && <span className="text-[9px] text-muted-foreground/60">no audio</span>}
-                                </div>
-                              ) : (
-                                <span className="whitespace-pre-wrap break-words">{msg.content}</span>
-                              )}
+                              {renderMessageContent(msg)}
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
                                 <span className={`text-[10px] ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
                                 {msg.direction === 'sent' && <StatusLabel status={msg.status} />}
@@ -923,7 +1021,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
               </div>
               <h2 className="text-xl font-semibold text-foreground mb-1">Messages</h2>
               <p className="text-sm text-muted-foreground max-w-sm">
-                Send and receive messages, voice notes, and manage conversations. Select a chat to get started.
+                Send texts and handle voice notes, photos, videos, and documents from one chat view. Select a chat to get started.
               </p>
             </div>
           )}
