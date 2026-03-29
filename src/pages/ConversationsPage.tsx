@@ -20,14 +20,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [loading, setLoading] = useState(true);
 
   const [replyText, setReplyText] = useState('');
-  const [replyMode, setReplyMode] = useState<'text' | 'voice'>('text');
   const [sending, setSending] = useState(false);
-  const [voices, setVoices] = useState<Voice[]>([]);
-  const [selectedVoice, setSelectedVoice] = useState('JBFqnCBsd6RMkjVDRZzb');
 
-  const [previewing, setPreviewing] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
@@ -167,7 +161,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     // Sync archive states from WhatsApp then refresh conversations
     api.syncArchives().catch(() => {});
     refreshConversations().then(() => setLoading(false));
-    api.getVoices().then(setVoices).catch(() => {});
+    // voices removed — AI voice mode moved to Voice Studio
   }, [refreshConversations]);
 
   useEffect(() => {
@@ -256,7 +250,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     shouldAutoScrollRef.current = true;
     setShowScrollDown(false);
     setReplyText(replyDraftsRef.current[selectedContact.id] ?? '');
-    setPreviewUrl(null);
+    // voice preview removed
     setQuotedMessage(null);
     setShowProfile(false);
     setEditingMsgId(null);
@@ -390,62 +384,38 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     const activeContactId = activeContact?.id;
     const trimmedReply = replyText.trim();
     if (!activeContact || !activeContactId) return;
-    if (replyMode === 'text' && !trimmedReply && !pendingAttachment) return;
-    if (replyMode === 'voice' && !trimmedReply) return;
+    if (!trimmedReply && !pendingAttachment) return;
 
     setSending(true);
     try {
       const isTemp = activeContactId.startsWith('temp-');
 
-      if (replyMode === 'text') {
-        const res = pendingAttachment
-          ? isTemp
-            ? await api.sendMediaToPhone(activeContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
-            : await api.sendMedia(activeContactId, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
-          : isTemp
-            ? await api.sendTextToPhone(activeContact.phone || '', trimmedReply, quotedMessage?.id)
-            : await api.sendText(activeContactId, trimmedReply, quotedMessage?.id);
+      const res = pendingAttachment
+        ? isTemp
+          ? await api.sendMediaToPhone(activeContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
+          : await api.sendMedia(activeContactId, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
+        : isTemp
+          ? await api.sendTextToPhone(activeContact.phone || '', trimmedReply, quotedMessage?.id)
+          : await api.sendText(activeContactId, trimmedReply, quotedMessage?.id);
 
-        if (res.error) throw new Error(res.error);
-        toast.success(pendingAttachment ? 'Attachment sent' : 'Message sent');
-        setQuotedMessage(null);
+      if (res.error) throw new Error(res.error);
+      toast.success(pendingAttachment ? 'Attachment sent' : 'Message sent');
+      setQuotedMessage(null);
 
-        replyDraftsRef.current[activeContactId] = '';
-        setReplyText('');
-        setPreviewUrl(null);
-        if (pendingAttachment) clearPendingAttachment();
+      replyDraftsRef.current[activeContactId] = '';
+      setReplyText('');
+      if (pendingAttachment) clearPendingAttachment();
 
-        const refreshedConversations = await api.getConversations();
-        setConversations(refreshedConversations);
+      const refreshedConversations = await api.getConversations();
+      setConversations(refreshedConversations);
 
-        const nextContact = (res.contactId && refreshedConversations.find(c => c.id === res.contactId))
-          || refreshedConversations.find(c => c.id === activeContactId)
-          || null;
+      const nextContact = (res.contactId && refreshedConversations.find(c => c.id === res.contactId))
+        || refreshedConversations.find(c => c.id === activeContactId)
+        || null;
 
-        if (selectedContactRef.current?.id === activeContactId && nextContact) {
-          setSelectedContact(nextContact);
-          await refreshMessages(nextContact.id, { forceScroll: true });
-        }
-      } else {
-        if (isTemp) {
-          toast.error('Send a text message first to start this conversation');
-          setSending(false);
-          return;
-        }
-        const res = await api.sendVoice(activeContactId, trimmedReply, selectedVoice);
-        if (res.error) throw new Error(res.error);
-        toast.success('Voice note sent');
-
-        replyDraftsRef.current[activeContactId] = '';
-        setReplyText('');
-        setPreviewUrl(null);
-
-        if (selectedContactRef.current?.id === activeContactId) {
-          const result = await api.getMessages(activeContactId, { limit: 100 });
-          setMessages(result.messages);
-          setHasMoreMessages(result.hasMore);
-          await refreshConversations();
-        }
+      if (selectedContactRef.current?.id === activeContactId && nextContact) {
+        setSelectedContact(nextContact);
+        await refreshMessages(nextContact.id, { forceScroll: true });
       }
 
       scrollMessagesToBottom('smooth');
@@ -456,24 +426,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     }
   };
 
-  const handlePreviewVoice = async () => {
-    if (!replyText.trim()) return;
-    setPreviewing(true);
-    try {
-      const blob = await api.previewVoice(replyText, selectedVoice);
-      setPreviewUrl(URL.createObjectURL(blob));
-    } catch (err: any) {
-      toast.error(err.message || 'Preview failed');
-    } finally {
-      setPreviewing(false);
-    }
-  };
-
-  const togglePlay = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) { audioRef.current.pause(); setIsPlaying(false); }
-    else { audioRef.current.play(); setIsPlaying(true); }
-  };
+  // Voice preview removed — AI voice is in Voice Studio page
 
   const startRecording = useCallback(async () => {
     try {
@@ -1476,20 +1429,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   </div>
                 )}
 
-                {previewUrl && (
-                  <div className="flex items-center gap-2 bg-secondary rounded-lg p-2">
-                    <button onClick={togglePlay} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
-                      {isPlaying ? <Square className="w-3 h-3 text-primary-foreground" /> : <Play className="w-3 h-3 text-primary-foreground ml-0.5" />}
-                    </button>
-                    <div className="flex-1 flex gap-0.5 items-center">
-                      {Array.from({ length: 30 }).map((_, i) => (
-                        <div key={i} className="w-0.5 bg-primary/50 rounded-full" style={{ height: `${Math.random() * 14 + 4}px` }} />
-                      ))}
-                    </div>
-                    <audio ref={audioRef} src={previewUrl} onEnded={() => setIsPlaying(false)} />
-                    <button onClick={() => setPreviewUrl(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
-                  </div>
-                )}
+                {/* Voice preview removed */}
 
                 {/* Recording UI */}
                 {isRecording ? (
@@ -1517,64 +1457,30 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   </div>
                 ) : (
                   <>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => { setReplyMode('text'); setPreviewUrl(null); }}
-                        className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                          replyMode === 'text' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
-                        }`}
-                      >Text</button>
-                      <button
-                        onClick={() => setReplyMode('voice')}
-                        className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                          replyMode === 'voice' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
-                        }`}
-                      >🎤 AI Voice</button>
-                      {replyMode === 'voice' && voices.length > 0 && (
-                        <select
-                          value={selectedVoice}
-                          onChange={(e) => setSelectedVoice(e.target.value)}
-                          className="ml-auto px-2 py-1 rounded-full bg-secondary border border-border text-xs text-foreground max-w-[120px]"
-                        >
-                          {voices.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                        </select>
-                      )}
-                    </div>
-
                     <div className="flex gap-2">
-                      {replyMode === 'text' && (
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors flex-shrink-0"
-                          title="Attach photo or file"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      )}
+                      {/* Attach photo/file */}
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors flex-shrink-0"
+                        title="Attach photo or file"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
                       <input
                         value={replyText}
                         onChange={(e) => {
                           const nextValue = e.target.value;
                           setReplyText(nextValue);
                           if (selectedContact?.id) replyDraftsRef.current[selectedContact.id] = nextValue;
-                          setPreviewUrl(null);
+                          // preview removed
                         }}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
-                        placeholder={replyMode === 'voice' ? 'Text to voice...' : pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
+                        placeholder={pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
                         className="flex-1 px-4 py-2.5 rounded-full bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
                       />
-                      {replyMode === 'voice' && (
-                        <button
-                          onClick={handlePreviewVoice}
-                          disabled={!replyText.trim() || previewing}
-                          className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors disabled:opacity-40 flex-shrink-0"
-                        >
-                          {previewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Volume2 className="w-4 h-4" />}
-                        </button>
-                      )}
-                      {/* Mic button for live recording (only in text mode when no text typed) */}
-                      {replyMode === 'text' && !replyText.trim() && !pendingAttachment ? (
+                      {/* Mic button for live recording (only when no text typed) */}
+                      {!replyText.trim() && !pendingAttachment ? (
                         <button
                           onMouseDown={startRecording}
                           onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
@@ -1586,7 +1492,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       ) : (
                         <button
                           onClick={handleSendReply}
-                          disabled={replyMode === 'voice' ? !replyText.trim() || sending : (!replyText.trim() && !pendingAttachment) || sending}
+                          disabled={(!replyText.trim() && !pendingAttachment) || sending}
                           className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
                         >
                           {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
