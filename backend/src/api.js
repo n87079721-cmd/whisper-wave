@@ -18,14 +18,30 @@ export function createApiRouter(db) {
   const auth = authMiddleware(db);
 
   // ── Public: Auth endpoints ───────────────────────────────
-  router.post('/auth/register', (req, res) => {
+  router.post('/auth/register', (_req, res) => {
+    res.status(403).json({ error: 'Registration is closed. Please contact the admin for an account.' });
+  });
+
+  // Password reset (admin-less: user provides username + new password, must know current password)
+  router.post('/auth/reset-password', (req, res) => {
     try {
-      const { username, password, displayName } = req.body;
-      if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
-      if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
-      const user = registerUser(db, username, password, displayName);
-      const token = createToken(user.id);
-      res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName } });
+      const { username, currentPassword, newPassword } = req.body;
+      if (!username || !currentPassword || !newPassword) {
+        return res.status(400).json({ error: 'All fields are required' });
+      }
+      if (newPassword.length < 6) {
+        return res.status(400).json({ error: 'New password must be at least 6 characters' });
+      }
+      // Verify current credentials first
+      const user = db.prepare('SELECT id, password_hash FROM users WHERE username = ?').get(username);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      const { verifyPassword, hashPassword } = await import('./auth.js');
+      if (!verifyPassword(currentPassword, user.password_hash)) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+      const newHash = hashPassword(newPassword);
+      db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, user.id);
+      res.json({ message: 'Password updated successfully' });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
