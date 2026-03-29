@@ -161,7 +161,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     // Sync archive states from WhatsApp then refresh conversations
     api.syncArchives().catch(() => {});
     refreshConversations().then(() => setLoading(false));
-    api.getVoices().then(setVoices).catch(() => {});
+    // voices removed — AI voice mode moved to Voice Studio
   }, [refreshConversations]);
 
   useEffect(() => {
@@ -250,7 +250,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     shouldAutoScrollRef.current = true;
     setShowScrollDown(false);
     setReplyText(replyDraftsRef.current[selectedContact.id] ?? '');
-    setPreviewUrl(null);
+    // voice preview removed
     setQuotedMessage(null);
     setShowProfile(false);
     setEditingMsgId(null);
@@ -426,24 +426,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     }
   };
 
-  const handlePreviewVoice = async () => {
-    if (!replyText.trim()) return;
-    setPreviewing(true);
-    try {
-      const blob = await api.previewVoice(replyText, selectedVoice);
-      setPreviewUrl(URL.createObjectURL(blob));
-    } catch (err: any) {
-      toast.error(err.message || 'Preview failed');
-    } finally {
-      setPreviewing(false);
-    }
-  };
-
-  const togglePlay = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) { audioRef.current.pause(); setIsPlaying(false); }
-    else { audioRef.current.play(); setIsPlaying(true); }
-  };
+  // Voice preview removed — AI voice is in Voice Studio page
 
   const startRecording = useCallback(async () => {
     try {
@@ -1446,20 +1429,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   </div>
                 )}
 
-                {previewUrl && (
-                  <div className="flex items-center gap-2 bg-secondary rounded-lg p-2">
-                    <button onClick={togglePlay} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
-                      {isPlaying ? <Square className="w-3 h-3 text-primary-foreground" /> : <Play className="w-3 h-3 text-primary-foreground ml-0.5" />}
-                    </button>
-                    <div className="flex-1 flex gap-0.5 items-center">
-                      {Array.from({ length: 30 }).map((_, i) => (
-                        <div key={i} className="w-0.5 bg-primary/50 rounded-full" style={{ height: `${Math.random() * 14 + 4}px` }} />
-                      ))}
-                    </div>
-                    <audio ref={audioRef} src={previewUrl} onEnded={() => setIsPlaying(false)} />
-                    <button onClick={() => setPreviewUrl(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
-                  </div>
-                )}
+                {/* Voice preview removed */}
 
                 {/* Recording UI */}
                 {isRecording ? (
@@ -1503,7 +1473,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                           const nextValue = e.target.value;
                           setReplyText(nextValue);
                           if (selectedContact?.id) replyDraftsRef.current[selectedContact.id] = nextValue;
-                          setPreviewUrl(null);
+                          // preview removed
                         }}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
                         placeholder={pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
