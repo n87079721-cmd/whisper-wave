@@ -416,6 +416,21 @@ function getAudioFileExtension(mimetype) {
   return 'ogg';
 }
 
+function hasSavedVoiceFile(filePath) {
+  try {
+    return fs.existsSync(filePath) && fs.statSync(filePath).size > 0;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeMessageForMediaDownload(msg) {
+  if (!msg?.message) return msg;
+  const innerMessage = unwrapMessageContent(msg.message);
+  if (innerMessage === msg.message) return msg;
+  return { ...msg, message: innerMessage };
+}
+
 async function saveVoiceMedia(userId, inst, msg, msgId, mimetype) {
   if (!inst.sock) return null;
 
@@ -424,9 +439,10 @@ async function saveVoiceMedia(userId, inst, msg, msgId, mimetype) {
     const filename = `${msgId}.${getAudioFileExtension(mimetype)}`;
     const filePath = path.join(VOICE_MEDIA_DIR, filename);
 
-    if (fs.existsSync(filePath)) return filename;
+    if (hasSavedVoiceFile(filePath)) return filename;
 
-    const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: inst.sock.updateMediaMessage });
+    const normalizedMsg = normalizeMessageForMediaDownload(msg);
+    const buffer = await downloadMediaMessage(normalizedMsg, 'buffer', {}, { logger, reuploadRequest: inst.sock.updateMediaMessage });
     if (!buffer?.length) return null;
     fs.writeFileSync(filePath, buffer);
     return filename;
@@ -504,6 +520,14 @@ function buildHistoryAnchorFromChat(jid, chat) {
     },
     timestamp,
   };
+}
+
+function getChatActivityTimestamp(chat) {
+  const timestamp = toEpochSeconds(
+    chat?.lastMessage?.messageTimestamp || chat?.conversationTimestamp || chat?.lastMessageRecvTimestamp
+  );
+
+  return timestamp ? new Date(timestamp * 1000).toISOString() : null;
 }
 
 function rememberChat(inst, chat, resolvedJid = null) {
@@ -948,7 +972,7 @@ async function startConnection(userId, db, options = {}) {
             { pushName: msg.pushName || null }
           );
 
-          const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
+          const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup, toIsoTimestamp(msg.messageTimestamp));
           if (!contactId) continue; // Skip unresolved @lid contacts
 
           const payload = getMessagePayload(msg.message);
@@ -1013,7 +1037,7 @@ async function startConnection(userId, db, options = {}) {
           rememberChat(inst, chat, resolved.jid);
           const phone = '+' + resolved.phone;
           const isGroup = jid.endsWith('@g.us');
-          getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup);
+          getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup, getChatActivityTimestamp(chat));
           created++;
         } catch {}
       }
@@ -1024,12 +1048,18 @@ async function startConnection(userId, db, options = {}) {
     });
 
     inst.sock.ev.on('chats.update', (updates) => {
+      let changed = 0;
       for (const chat of updates) {
         try {
           const jid = chat.id;
           if (!jid || jid === 'status@broadcast') continue;
           const resolved = resolveLidPhone(inst, jid);
           rememberChat(inst, chat, resolved.jid);
+          const phone = '+' + resolved.phone;
+          const isGroup = jid.endsWith('@g.us');
+
+          getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup, getChatActivityTimestamp(chat));
+          changed++;
 
           // Sync archive status from WhatsApp
           if (typeof chat.archive === 'boolean' || typeof chat.archived === 'boolean') {
@@ -1048,6 +1078,7 @@ async function startConnection(userId, db, options = {}) {
           }
         } catch {}
       }
+      if (changed > 0) emit(userId, 'contacts_sync', { count: changed });
     });
 
     inst.sock.ev.on('messaging-history.set', async ({ chats, contacts: syncedContacts, messages: historyMsgs, syncType }) => {
@@ -1115,7 +1146,7 @@ async function startConnection(userId, db, options = {}) {
             rememberChat(inst, chat, resolved.jid);
             const phone = '+' + resolved.phone;
             const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup);
+            getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup, getChatActivityTimestamp(chat));
             contactChanges++;
           } catch {}
         }
@@ -1157,7 +1188,7 @@ async function startConnection(userId, db, options = {}) {
               { pushName: msg.pushName || null }
             );
 
-            const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
+            const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup, toIsoTimestamp(msg.messageTimestamp));
             if (!contactId) continue; // Skip unresolved @lid contacts
 
             const payload = getMessagePayload(msg.message);
@@ -1371,7 +1402,7 @@ function mergeContactRecords(db, userId, sourceContactId, targetContactId, targe
   db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(sourceContactId, userId);
 }
 
-function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false) {
+function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, activityAt = null) {
   const isUnresolvedLid = jid.endsWith('@lid');
   const safePhone = !isUnresolvedLid && phone && phone !== '+' ? phone : null;
   const existing = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
@@ -1417,8 +1448,8 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false) 
     const nextName = shouldUpdateName ? resolvedName : target.name;
     const nextJid = isUnresolvedLid ? target.jid : jid;
 
-    db.prepare("UPDATE contacts SET jid = ?, name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = datetime('now') WHERE id = ?")
-      .run(nextJid, nextName, safePhone, isGroup ? 1 : 0, target.id);
+    db.prepare("UPDATE contacts SET jid = ?, name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = COALESCE(?, datetime('now')) WHERE id = ?")
+      .run(nextJid, nextName, safePhone, isGroup ? 1 : 0, activityAt, target.id);
 
     if (!isUnresolvedLid && target.jid !== nextJid) {
       db.prepare('UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?')
@@ -1430,8 +1461,8 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false) 
 
   const id = uuid();
   db.prepare(`
-    INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, userId, jid, resolvedName, safePhone, isGroup ? 1 : 0);
+    INSERT INTO contacts (id, user_id, jid, name, phone, is_group, updated_at) VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+  `).run(id, userId, jid, resolvedName, safePhone, isGroup ? 1 : 0, activityAt);
   return id;
 }
 
@@ -1532,7 +1563,7 @@ async function recoverSync(userId, db) {
       if (!existing || existing.count === 0) {
         const phone = '+' + resolved.phone;
         const contact = storeContacts[jid] || storeChats[jid] || storeChats[resolved.jid];
-        getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(contact), false);
+        getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(contact), false, getChatActivityTimestamp(storeChats[jid] || storeChats[resolved.jid] || contact));
         chatsToRecover.push({ jid: resolved.jid, contactDbId: existing?.id || null });
         recovered++;
       }

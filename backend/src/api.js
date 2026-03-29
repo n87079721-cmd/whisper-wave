@@ -306,9 +306,9 @@ export function createApiRouter(db) {
       SELECT c.*, rm.content as last_message, rm.type as last_type, rm.timestamp as last_timestamp,
              COALESCE(c.is_archived, 0) as is_archived, COALESCE(c.unread_count, 0) as unread_count
       FROM contacts c
-      INNER JOIN ranked_messages rm ON rm.contact_id = c.id AND rm.rn = 1
+      LEFT JOIN ranked_messages rm ON rm.contact_id = c.id AND rm.rn = 1
       WHERE c.user_id = ? AND c.is_group = 0
-      ORDER BY rm.timestamp DESC
+      ORDER BY COALESCE(rm.timestamp, c.updated_at) DESC
     `).all(req.userId, req.userId);
     res.json(conversations);
   });
