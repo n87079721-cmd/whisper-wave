@@ -357,27 +357,33 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   };
 
   const handleSendReply = async () => {
+    const activeContact = selectedContact;
+    const activeContactId = activeContact?.id;
     const trimmedReply = replyText.trim();
-    if (!selectedContact) return;
+    if (!activeContact || !activeContactId) return;
     if (replyMode === 'text' && !trimmedReply && !pendingAttachment) return;
     if (replyMode === 'voice' && !trimmedReply) return;
 
     setSending(true);
     try {
-      const activeContactId = selectedContact.id;
-      const isTemp = selectedContact.id.startsWith('temp-');
+      const isTemp = activeContactId.startsWith('temp-');
 
       if (replyMode === 'text') {
         const res = pendingAttachment
           ? isTemp
-            ? await api.sendMediaToPhone(selectedContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
-            : await api.sendMedia(selectedContact.id, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
+            ? await api.sendMediaToPhone(activeContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
+            : await api.sendMedia(activeContactId, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
           : isTemp
-            ? await api.sendTextToPhone(selectedContact.phone || '', trimmedReply)
-            : await api.sendText(selectedContact.id, trimmedReply);
+            ? await api.sendTextToPhone(activeContact.phone || '', trimmedReply)
+            : await api.sendText(activeContactId, trimmedReply);
 
         if (res.error) throw new Error(res.error);
         toast.success(pendingAttachment ? 'Attachment sent' : 'Message sent');
+
+        replyDraftsRef.current[activeContactId] = '';
+        setReplyText('');
+        setPreviewUrl(null);
+        if (pendingAttachment) clearPendingAttachment();
 
         const refreshedConversations = await api.getConversations();
         setConversations(refreshedConversations);
@@ -386,7 +392,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
           || refreshedConversations.find(c => c.id === activeContactId)
           || null;
 
-        if (nextContact) {
+        if (selectedContactRef.current?.id === activeContactId && nextContact) {
           setSelectedContact(nextContact);
           await refreshMessages(nextContact.id, { forceScroll: true });
         }
@@ -396,20 +402,22 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
           setSending(false);
           return;
         }
-        const res = await api.sendVoice(selectedContact.id, replyText, selectedVoice);
+        const res = await api.sendVoice(activeContactId, trimmedReply, selectedVoice);
         if (res.error) throw new Error(res.error);
         toast.success('Voice note sent');
+
+        replyDraftsRef.current[activeContactId] = '';
+        setReplyText('');
+        setPreviewUrl(null);
+
+        if (selectedContactRef.current?.id === activeContactId) {
+          const result = await api.getMessages(activeContactId, { limit: 100 });
+          setMessages(result.messages);
+          setHasMoreMessages(result.hasMore);
+          await refreshConversations();
+        }
       }
 
-      setReplyText('');
-      setPreviewUrl(null);
-      if (pendingAttachment) clearPendingAttachment();
-      if (replyMode === 'voice' && !selectedContact.id.startsWith('temp-')) {
-        const result = await api.getMessages(selectedContact.id, { limit: 100 });
-        setMessages(result.messages);
-        setHasMoreMessages(result.hasMore);
-        await refreshConversations();
-      }
       scrollMessagesToBottom('smooth');
     } catch (err: any) {
       toast.error(err.message || 'Failed to send');
