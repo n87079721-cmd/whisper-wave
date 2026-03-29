@@ -16,6 +16,7 @@ import { generateReply, shouldReact, shouldAlsoReplyAfterReaction } from './ai.j
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, '..', 'data');
+const VOICE_MEDIA_DIR = path.join(DATA_DIR, 'voice-media');
 const logger = pino({ level: 'silent' });
 
 // Per-user instance store
@@ -348,6 +349,170 @@ function resolveLidPhone(inst, jid) {
 
   // Unknown format fallback
   return { phone: jid.replace(/@.*$/, ''), jid };
+}
+
+function unwrapMessageContent(message) {
+  let current = message;
+  let depth = 0;
+
+  while (current && depth < 10) {
+    const next = current?.ephemeralMessage?.message
+      || current?.viewOnceMessage?.message
+      || current?.viewOnceMessageV2?.message
+      || current?.viewOnceMessageV2Extension?.message
+      || current?.deviceSentMessage?.message
+      || current?.documentWithCaptionMessage?.message
+      || current?.editedMessage?.message?.protocolMessage?.editedMessage;
+
+    if (!next) break;
+    current = next;
+    depth += 1;
+  }
+
+  return current || message;
+}
+
+function extractMessageContent(message) {
+  return message?.conversation
+    || message?.extendedTextMessage?.text
+    || message?.imageMessage?.caption
+    || message?.videoMessage?.caption
+    || message?.documentMessage?.caption
+    || message?.buttonsResponseMessage?.selectedDisplayText
+    || message?.listResponseMessage?.title
+    || message?.templateButtonReplyMessage?.selectedDisplayText
+    || '';
+}
+
+function getMessagePayload(message) {
+  const innerMessage = unwrapMessageContent(message);
+  const audioMessage = innerMessage?.audioMessage || null;
+  const isVoice = !!audioMessage;
+  const isImage = !!innerMessage?.imageMessage;
+  const isVideo = !!innerMessage?.videoMessage;
+  const isDocument = !!innerMessage?.documentMessage;
+
+  let msgType = 'text';
+  if (isVoice) msgType = 'voice';
+  else if (isImage) msgType = 'image';
+  else if (isVideo) msgType = 'video';
+  else if (isDocument) msgType = 'document';
+
+  return {
+    msgType,
+    isVoice,
+    content: extractMessageContent(innerMessage),
+    duration: audioMessage?.seconds || null,
+    mimetype: audioMessage?.mimetype || null,
+  };
+}
+
+function getAudioFileExtension(mimetype) {
+  const normalized = String(mimetype || '').toLowerCase();
+  if (normalized.includes('mpeg')) return 'mp3';
+  if (normalized.includes('mp4') || normalized.includes('aac') || normalized.includes('m4a')) return 'm4a';
+  if (normalized.includes('webm')) return 'webm';
+  if (normalized.includes('wav')) return 'wav';
+  return 'ogg';
+}
+
+async function saveVoiceMedia(userId, inst, msg, msgId, mimetype) {
+  if (!inst.sock) return null;
+
+  try {
+    if (!fs.existsSync(VOICE_MEDIA_DIR)) fs.mkdirSync(VOICE_MEDIA_DIR, { recursive: true });
+    const filename = `${msgId}.${getAudioFileExtension(mimetype)}`;
+    const filePath = path.join(VOICE_MEDIA_DIR, filename);
+
+    if (fs.existsSync(filePath)) return filename;
+
+    const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: inst.sock.updateMediaMessage });
+    if (!buffer?.length) return null;
+    fs.writeFileSync(filePath, buffer);
+    return filename;
+  } catch (err) {
+    console.log(`🎤 [${userId}] Voice download failed: ${err?.message}`);
+    return null;
+  }
+}
+
+function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath }) {
+  db.prepare(`
+    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      contact_id = excluded.contact_id,
+      jid = excluded.jid,
+      content = CASE
+        WHEN COALESCE(messages.content, '') = '' AND COALESCE(excluded.content, '') <> '' THEN excluded.content
+        ELSE messages.content
+      END,
+      type = CASE
+        WHEN COALESCE(messages.type, 'text') = 'text' AND excluded.type <> 'text' THEN excluded.type
+        ELSE messages.type
+      END,
+      direction = excluded.direction,
+      timestamp = excluded.timestamp,
+      status = excluded.status,
+      duration = COALESCE(excluded.duration, messages.duration),
+      media_path = COALESCE(excluded.media_path, messages.media_path)
+  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath);
+}
+
+function isUuidLike(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
+}
+
+function toEpochSeconds(value) {
+  if (typeof value === 'bigint') return Number(value);
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value && typeof value === 'object') {
+    if (typeof value.toNumber === 'function') return value.toNumber();
+    if (typeof value.low === 'number') return value.low;
+  }
+  if (typeof value === 'string' && value) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+    const asDate = Date.parse(value);
+    if (!Number.isNaN(asDate)) return Math.floor(asDate / 1000);
+  }
+  return null;
+}
+
+function buildHistoryAnchorFromDbRow(row, jid) {
+  if (!row?.id || isUuidLike(row.id)) return null;
+  const timestamp = Math.floor(new Date(row.timestamp).getTime() / 1000);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
+  return {
+    key: { remoteJid: jid, fromMe: row.direction === 'sent', id: row.id },
+    timestamp,
+  };
+}
+
+function buildHistoryAnchorFromChat(jid, chat) {
+  const lastMessage = chat?.lastMessage;
+  const keyId = lastMessage?.key?.id;
+  const timestamp = toEpochSeconds(lastMessage?.messageTimestamp || chat?.conversationTimestamp || chat?.lastMessageRecvTimestamp);
+  if (!keyId || !timestamp) return null;
+
+  return {
+    key: {
+      remoteJid: jid,
+      fromMe: !!lastMessage?.key?.fromMe,
+      id: keyId,
+      participant: lastMessage?.key?.participant,
+    },
+    timestamp,
+  };
+}
+
+function rememberChat(inst, chat, resolvedJid = null) {
+  if (!chat?.id) return;
+  if (!inst.store?.chats) inst.store.chats = {};
+  inst.store.chats[chat.id] = { ...inst.store.chats[chat.id], ...chat };
+  if (resolvedJid && resolvedJid !== chat.id) {
+    inst.store.chats[resolvedJid] = { ...inst.store.chats[resolvedJid], ...chat, id: resolvedJid };
+  }
 }
 
 export function getWhatsAppState(userId) {
