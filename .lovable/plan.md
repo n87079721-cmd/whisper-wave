@@ -1,111 +1,59 @@
 
-Goal: fix three related reliability problems: voice notes getting stuck as “waiting for message,” chats not appearing even though WhatsApp Web has them, and slow/incomplete syncing/loading.
 
-What I found
-- Voice notes are sent as `audio/ogg; codecs=opus` with `ptt: true`, which is correct in principle, but the current flow does not validate delivery or retry on failure. It also stores the outgoing voice note immediately in SQLite before confirming WhatsApp accepted it.
-- History sync currently depends heavily on Baileys’ `messaging-history.set` event. That event is often incomplete or one-time-only after pairing, so if it misses older chats, the app stays partial while WhatsApp Web still shows them.
-- “Sync Now” currently only re-runs local contact sync from the in-memory store; it does not fetch missing chats/messages from the live socket, so it cannot truly recover missing history.
-- The conversations UI loads whole message lists per chat and refreshes often via SSE + polling. That is workable for small data, but it makes the app feel slow when the database grows.
-- The sync state logic can mark the app as “ready” too early just because some history arrived, even if many chats are still missing.
+# Fix Chat History & Contact Names
 
-Likely root causes
-1. Voice note pipeline reliability
-- ElevenLabs output + ffmpeg conversion may produce files WhatsApp accepts inconsistently on some recipients/devices.
-- No send acknowledgement/retry/failure tracking.
-- No fallback path when PTT send fails.
+## Root Causes Found
 
-2. Incomplete history import
-- The app relies on passive history events instead of doing an active recovery pass.
-- If the session was paired before full history came in, the local DB can remain permanently incomplete.
+### 1. Recovery sync doesn't fetch messages
+The `recoverSync()` function (line 1189-1261) only creates empty contact entries for missing chats — it never fetches actual messages. Baileys supports **on-demand history sync** via `sock.fetchMessageHistory(count, oldestMsgKey, oldestMsgTimestamp)` which can pull older messages for specific chats. This is not being used at all.
 
-3. Perceived slowness
-- Frequent conversation/message refreshes.
-- Full message list fetch for active chats.
-- No pagination/windowing for large conversations.
-- SSE events trigger list reloads broadly.
+### 2. Contact names are lost because the store is too minimal
+The in-memory contact store (`inst.store = { contacts: {} }`) only populates from live `contacts.update`/`contacts.upsert` events. If those events don't fire (common after reconnect without re-pairing), the store stays empty and all name lookups fail — contacts show as phone numbers or "WhatsApp contact • XXXX".
 
-Implementation plan
+### 3. No `onWhatsApp` validation for contact names
+Baileys has `sock.onWhatsApp(...jids)` which can verify if numbers exist on WhatsApp. Combined with store lookups, this could help populate names, but it's never called.
 
-1. Harden voice note sending on the backend
-- Update `backend/src/elevenlabs.js` to generate more WhatsApp-safe Opus output:
-  - ensure mono, 48kHz, Opus in OGG, consistent bitrate/frame settings
-  - optionally add duration probing after conversion
-- Update `backend/src/whatsapp.js` `sendVoiceNote()` to:
-  - wrap send in a robust try/catch
-  - return/send the WhatsApp message key when successful
-  - add a fallback send mode if PTT fails once (regular audio or regenerated opus payload)
-- Update `backend/src/api.js` `/send/voice` route so the DB insert reflects the real WhatsApp send result, not just local optimism.
-- Store richer message status for outgoing voice notes: `pending`, `sent`, `failed`.
+### 4. History sync fires once, then never again
+`messaging-history.set` typically fires only after initial pairing. On reconnect, it usually doesn't re-fire, so if the initial sync was partial, the DB stays incomplete forever. The on-demand fetch API exists to solve exactly this.
 
-2. Add a real recovery sync path instead of only store sync
-- Extend `backend/src/whatsapp.js` with a true “recovery sync” flow that:
-  - reads current chats from the live socket/store after connection
-  - backfills recent messages for chats that exist in WhatsApp but are missing locally
-  - reconciles contacts and chat rows even when `messaging-history.set` was incomplete
-- Keep existing LID reconciliation, but run it after recovery import too.
-- Make `triggerSync()` call this stronger recovery path, not just `syncContacts()`.
+## Plan
 
-3. Make sync state honest and actionable
-- Refine sync phases in `backend/src/whatsapp.js`:
-  - stay `partial` when only contacts exist but conversation/message totals are still low
-  - only mark `ready` after recovery pass completes and minimum chat/message thresholds are met
-- Emit more precise SSE sync progress so the frontend can show “Recovering chats…” vs “Connected only”.
+### 1. Use on-demand history fetch in recovery sync (`backend/src/whatsapp.js`)
+- In `recoverSync()`, for contacts that exist in the WA store but have 0 messages locally, call `sock.fetchMessageHistory(50, oldestMsgKey, oldestMsgTimestamp)` to request recent messages from the phone
+- Handle the response in the existing `messaging-history.set` handler (Baileys delivers on-demand results there with `syncType === ON_DEMAND`)
+- Limit to ~20 chats per recovery pass to avoid rate-limiting
+- Add a small delay between requests (500ms)
 
-4. Improve conversations loading performance
-- Update `backend/src/api.js` message endpoints to support pagination for chat messages instead of always loading the full thread.
-- Keep the optimized conversations query, but make sure refreshes happen only when the changed contact is affected.
-- Reduce unnecessary full refresh behavior triggered from SSE.
+### 2. Actively fetch contact profiles for unnamed contacts (`backend/src/whatsapp.js`)
+- After sync, query the DB for contacts with phone-like names or "WhatsApp contact" placeholder names
+- For those contacts, check `inst.store.contacts[jid]` for any name updates
+- For contacts still unnamed, use `sock.onWhatsApp(phone)` to verify the number exists and check if pushName is available from the response
+- Update DB contact names when better names are discovered
 
-5. Update chat UI to handle large histories better
-- Refactor `src/pages/ConversationsPage.tsx` to:
-  - load initial recent messages only
-  - add “load older messages” / infinite scroll upward
-  - avoid re-fetching the entire chat on every event
-  - refresh only the active chat when relevant
-- Keep the current search UI, but scope it to loaded messages unless expanded later to server search.
+### 3. Persist contact store across reconnects (`backend/src/whatsapp.js`)
+- On `contacts.upsert`/`contacts.update`, also write a lightweight contact cache to SQLite (reuse existing `contacts` table — already happens)
+- On reconnect, pre-populate `inst.store.contacts` from the DB contacts table so name lookups work even before new events arrive
+- This prevents the "empty store after reconnect" problem
 
-6. Improve recovery visibility in the UI
-- Update `src/hooks/useWhatsAppStatus.ts`, `src/pages/SettingsPage.tsx`, `src/pages/DashboardPage.tsx`, and `src/components/SyncBanner.tsx` to show:
-  - connected but still recovering history
-  - partial sync warning with clearer guidance
-  - better “Sync Now” wording so users know it fetches missing chats/messages
+### 4. Trigger on-demand history for active chats opened in UI (`backend/src/api.js`)
+- Add a new API endpoint `POST /api/recover-chat/:contactId` 
+- When a user opens a chat that has 0 or very few messages, the frontend can call this to request on-demand history for that specific chat
+- Backend calls `sock.fetchMessageHistory()` for the chat's JID
 
-Files to change
-- `backend/src/whatsapp.js`
-- `backend/src/api.js`
-- `backend/src/elevenlabs.js`
-- `src/pages/ConversationsPage.tsx`
-- `src/hooks/useWhatsAppStatus.ts`
-- `src/pages/SettingsPage.tsx`
-- `src/pages/DashboardPage.tsx`
-- `src/components/SyncBanner.tsx`
+### 5. Frontend: add "Fetch History" button for empty chats (`src/pages/ConversationsPage.tsx`)
+- When a chat is opened and has 0 messages, show a "Fetch chat history" button
+- Calls the new recover-chat endpoint
+- Shows a loading spinner while fetching
 
-Expected outcome
-- Voice notes should stop randomly hanging for recipients as often, and failures will be visible/recoverable.
-- “Sync Now” will actually recover missing chats/messages already visible in WhatsApp Web.
-- The app will feel faster because chats won’t fully reload so aggressively and large histories won’t be fetched all at once.
+### 6. Add `api.recoverChat` method (`src/lib/api.ts`)
+- Add the API call method for the new endpoint
 
-Technical details
-```text
-Current weak point:
-Connect -> wait for messaging-history.set -> maybe partial DB forever
+## Files to Change
+1. `backend/src/whatsapp.js` — On-demand history fetch, store pre-population from DB, contact name enrichment
+2. `backend/src/api.js` — New `/recover-chat/:contactId` endpoint
+3. `src/pages/ConversationsPage.tsx` — "Fetch chat history" button for empty chats
+4. `src/lib/api.ts` — New API method
 
-Proposed:
-Connect
-  -> passive history import if available
-  -> active recovery sync pass
-  -> reconcile contacts/LIDs
-  -> mark ready only after recovery completes
-```
+## How it works vs WhatsApp Web
+WhatsApp Web gets a complete history dump on first pair because it uses the official protocol. Baileys (being reverse-engineered) gets a partial dump. The on-demand history API lets us request specific chat histories after the fact — this is the same mechanism WhatsApp Web uses when you scroll up in old chats. This plan brings the app closer to WhatsApp Web behavior by actively requesting missing data instead of passively waiting for it.
 
-```text
-Current voice send:
-generate ogg -> send -> insert local message
-
-Proposed:
-generate validated ogg
-  -> send
-  -> confirm success / capture key
-  -> insert with real status
-  -> fallback/retry if ptt send fails
-```
