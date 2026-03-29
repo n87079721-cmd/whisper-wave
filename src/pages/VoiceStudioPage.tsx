@@ -409,7 +409,131 @@ const VoiceStudioPage = () => {
           </div>
         </div>
 
-        {/* Generate */}
+        {/* Background Sound */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Volume2 className="w-4 h-4 text-muted-foreground" />
+            <label className="text-sm font-medium text-foreground">Background Sound</label>
+          </div>
+          
+          <div className="flex gap-1.5 flex-wrap">
+            <button
+              onClick={() => setBackgroundSound('none')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                backgroundSound === 'none'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80'
+              }`}
+            >
+              None
+            </button>
+            {presetSounds.map(s => (
+              <button
+                key={s.id}
+                onClick={() => setBackgroundSound(s.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                  backgroundSound === s.id
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80'
+                }`}
+              >
+                {PRESET_EMOJIS[s.id] || '🔊'} {s.name}
+              </button>
+            ))}
+          </div>
+
+          {/* Custom sounds */}
+          {customSounds.length > 0 && (
+            <div className="flex gap-1.5 flex-wrap">
+              {customSounds.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => setBackgroundSound(s.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border flex items-center gap-1 ${
+                    backgroundSound === s.id
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80'
+                  }`}
+                >
+                  🎵 {s.name}
+                  {s.duration ? <span className="opacity-60">({s.duration}s)</span> : null}
+                  <span
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (!s.dbId) return;
+                      try {
+                        await api.deleteSound(s.dbId);
+                        setCustomSounds(prev => prev.filter(cs => cs.dbId !== s.dbId));
+                        if (backgroundSound === s.id) setBackgroundSound('none');
+                        toast.success('Sound deleted');
+                      } catch (err: any) {
+                        toast.error(err.message || 'Failed to delete');
+                      }
+                    }}
+                    className="ml-0.5 hover:text-destructive cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Upload button */}
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="video/*,audio/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setIsUploadingSound(true);
+                try {
+                  const name = file.name.replace(/\.[^.]+$/, '');
+                  const result = await api.uploadCustomSound(file, name);
+                  setCustomSounds(prev => [{ id: result.soundId, name: result.name, type: 'custom', duration: result.duration, dbId: undefined }, ...prev]);
+                  setBackgroundSound(result.soundId);
+                  toast.success(`"${result.name}" added to your sound library`);
+                  // Refresh to get dbId
+                  api.getSounds().then(({ custom }) => setCustomSounds(custom)).catch(() => {});
+                } catch (err: any) {
+                  toast.error(err.message || 'Failed to upload sound');
+                } finally {
+                  setIsUploadingSound(false);
+                  e.target.value = '';
+                }
+              }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploadingSound}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary text-secondary-foreground border border-border hover:bg-secondary/80 transition-colors disabled:opacity-50"
+            >
+              {isUploadingSound ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+              {isUploadingSound ? 'Extracting...' : 'Upload Video/Audio'}
+            </button>
+          </div>
+
+          {/* Volume slider */}
+          {backgroundSound !== 'none' && (
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground w-16 shrink-0">Volume</span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={Math.round(bgVolume * 100)}
+                onChange={e => setBgVolume(parseInt(e.target.value) / 100)}
+                className="flex-1 h-1.5 accent-primary"
+              />
+              <span className="text-xs text-muted-foreground w-10 text-right">{Math.round(bgVolume * 100)}%</span>
+            </div>
+          )}
+        </div>
+
+
         <button
           onClick={handleGenerate}
           disabled={!text || isGenerating}
