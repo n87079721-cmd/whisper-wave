@@ -286,7 +286,7 @@ async function startConnection(userId, db, options = {}) {
     const client = new Client({
       authStrategy: new LocalAuth({
         clientId: userId,
-        dataPath: path.join(DATA_DIR, 'auth'),
+        dataPath: path.join(DATA_DIR, 'wwebjs_auth'),
       }),
       puppeteer: {
         headless: true,
@@ -304,6 +304,7 @@ async function startConnection(userId, db, options = {}) {
       webVersionCache: {
         type: 'remote',
         remotePath: 'https://raw.githubusercontent.com/nicollasarquer/nicollasarquer/main/AvaliacaoEscola_17072_12082024/wpp_links_multi/wwebjs/wpp/wpp.pkg.min.js',
+        remoteExtension: '.html',
       },
     });
 
