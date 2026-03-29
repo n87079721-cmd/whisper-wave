@@ -116,6 +116,17 @@ function ensureCurrentTables(db) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
+
+  // Add archive + unread columns if missing
+  try {
+    const cols = getColumnNames(db, 'contacts');
+    if (!cols.has('is_archived')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN is_archived INTEGER DEFAULT 0");
+    }
+    if (!cols.has('unread_count')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN unread_count INTEGER DEFAULT 0");
+    }
+  } catch {}
 }
 
 function ensureIndexes(db) {

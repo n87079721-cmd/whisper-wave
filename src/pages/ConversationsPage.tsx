@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Pause } from 'lucide-react';
+import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Pause, Archive, ArchiveRestore } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
@@ -51,6 +51,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
   const [deletingMessage, setDeletingMessage] = useState<string | null>(null);
   const [deletingConversation, setDeletingConversation] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -224,6 +225,15 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     refreshMessages(selectedContact.id, { forceScroll: true });
   }, [selectedContact?.id, refreshMessages]);
 
+  // Mark chat as read when opened
+  useEffect(() => {
+    if (!selectedContact?.id) return;
+    if ((selectedContact.unread_count ?? 0) > 0) {
+      api.markChatRead(selectedContact.id).catch(() => {});
+      setConversations(prev => prev.map(c => c.id === selectedContact.id ? { ...c, unread_count: 0 } : c));
+    }
+  }, [selectedContact?.id]);
+
   const normalizePhoneDigits = (value: string) => value.replace(/\D/g, '');
   const formatPhoneDraft = (value: string) => {
     const trimmed = value.trim();
@@ -231,7 +241,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     return trimmed.startsWith('+') ? `+${digits}` : digits;
   };
 
-  const filtered = conversations.filter(c =>
+  const activeConversations = conversations.filter(c => !c.is_archived);
+  const archivedConversations = conversations.filter(c => !!c.is_archived);
+
+  const filtered = (showArchived ? archivedConversations : activeConversations).filter(c =>
     getContactDisplayName(c).toLowerCase().includes(search.toLowerCase()) ||
     cleanContactPhone(c.phone || '').includes(search)
   );
@@ -469,6 +482,16 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     finally { setDeletingConversation(false); }
   }, [selectedContact, refreshConversations]);
 
+  // Archive / Unarchive handler
+  const handleArchiveChat = useCallback(async (contactId: string, archive: boolean) => {
+    try {
+      await api.archiveChat(contactId, archive);
+      toast.success(archive ? 'Chat archived' : 'Chat unarchived');
+      if (selectedContact?.id === contactId) setSelectedContact(null);
+      refreshConversations();
+    } catch (err: any) { toast.error(err.message || 'Failed'); }
+  }, [selectedContact, refreshConversations]);
+
   // Group messages by date
   const groupedMessages = useMemo(() => {
     const groups: { date: string; messages: (Message & { _idx: number })[] }[] = [];
@@ -495,15 +518,40 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         <div className={`${showChatOnMobile ? 'hidden md:flex' : 'flex'} w-full md:w-[340px] lg:w-[380px] flex-shrink-0 flex-col border-r border-border bg-background`}>
           {/* Header */}
           <div className="px-4 py-3 flex items-center justify-between">
-            <h1 className="text-lg font-bold text-foreground">Chats</h1>
-            <button
-              type="button"
-              onClick={() => { setNewChatPhone(''); setContactSearch(''); setShowNewChat(true); }}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
-              title="New chat"
-            >
-              <Plus className="h-5 w-5" />
-            </button>
+            <h1 className="text-lg font-bold text-foreground">{showArchived ? 'Archived' : 'Chats'}</h1>
+            <div className="flex items-center gap-1">
+              {showArchived ? (
+                <button
+                  type="button"
+                  onClick={() => setShowArchived(false)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
+                  title="Back to chats"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+              ) : (
+                <>
+                  {archivedConversations.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowArchived(true)}
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
+                      title="Archived chats"
+                    >
+                      <Archive className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setNewChatPhone(''); setContactSearch(''); setShowNewChat(true); }}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
+                    title="New chat"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Search */}
@@ -533,7 +581,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 return (
                   <button
                     key={contact.id}
-                    onClick={() => setSelectedContact(contact)}
+                    onClick={() => { setSelectedContact(contact); if (showArchived) setShowArchived(false); }}
                     className={`w-full flex items-center gap-3 px-3 py-3 text-left transition-colors ${
                       isActive ? 'bg-accent' : 'hover:bg-secondary/60'
                     }`}
@@ -541,23 +589,45 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     <Avatar contact={contact} size="md" />
                     <div className="min-w-0 flex-1">
                       <div className="flex justify-between items-baseline">
-                        <p className={`text-[15px] truncate ${isActive ? 'text-foreground font-semibold' : 'text-foreground font-medium'}`}>
+                        <p className={`text-[15px] truncate ${(contact.unread_count ?? 0) > 0 ? 'text-foreground font-bold' : isActive ? 'text-foreground font-semibold' : 'text-foreground font-medium'}`}>
                           {getContactDisplayName(contact)}
                         </p>
                         <span className={`text-[11px] flex-shrink-0 ml-2 ${
-                          isActive ? 'text-foreground/70' : 'text-muted-foreground'
+                          (contact.unread_count ?? 0) > 0 ? 'text-primary font-medium' : isActive ? 'text-foreground/70' : 'text-muted-foreground'
                         }`}>
                           {contact.last_timestamp ? formatDate(contact.last_timestamp) : ''}
                         </span>
                       </div>
-                      <p className="text-[13px] text-muted-foreground truncate mt-0.5">
-                        {contact.last_type === 'voice' ? '🎤 Voice note' : contact.last_message || getContactDisplayMeta(contact)}
-                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <p className={`text-[13px] truncate flex-1 ${(contact.unread_count ?? 0) > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                          {contact.last_type === 'voice' ? '🎤 Voice note' : contact.last_message || getContactDisplayMeta(contact)}
+                        </p>
+                        {(contact.unread_count ?? 0) > 0 && (
+                          <span className="flex-shrink-0 min-w-[20px] h-5 rounded-full bg-primary text-primary-foreground text-[11px] font-bold flex items-center justify-center px-1.5">
+                            {contact.unread_count}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </button>
                 );
               })
             )}
+              {/* Archived count at bottom of list */}
+              {!showArchived && archivedConversations.length > 0 && !search && (
+                <button
+                  onClick={() => setShowArchived(true)}
+                  className="w-full flex items-center gap-3 px-3 py-3 text-left text-muted-foreground hover:bg-secondary/60 transition-colors"
+                >
+                  <div className="w-[46px] h-[46px] rounded-full flex items-center justify-center bg-muted flex-shrink-0">
+                    <Archive className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-[15px] font-medium">Archived</p>
+                    <p className="text-[13px]">{archivedConversations.length} chat{archivedConversations.length !== 1 ? 's' : ''}</p>
+                  </div>
+                </button>
+              )}
           </div>
         </div>
 
@@ -592,6 +662,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   title="Delete conversation"
                 >
                   {deletingConversation ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                </button>
+                <button
+                  onClick={() => handleArchiveChat(selectedContact.id, !selectedContact.is_archived)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
+                  title={selectedContact.is_archived ? 'Unarchive' : 'Archive'}
+                >
+                  {selectedContact.is_archived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                 </button>
               </div>
 

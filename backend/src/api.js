@@ -4,6 +4,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteConversation } from './whatsapp.js';
+import { archiveChat, markChatRead } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
 import QRCode from 'qrcode';
@@ -302,13 +303,35 @@ export function createApiRouter(db) {
         FROM messages m
         WHERE m.user_id = ?
       )
-      SELECT c.*, rm.content as last_message, rm.type as last_type, rm.timestamp as last_timestamp
+      SELECT c.*, rm.content as last_message, rm.type as last_type, rm.timestamp as last_timestamp,
+             COALESCE(c.is_archived, 0) as is_archived, COALESCE(c.unread_count, 0) as unread_count
       FROM contacts c
       INNER JOIN ranked_messages rm ON rm.contact_id = c.id AND rm.rn = 1
       WHERE c.user_id = ? AND c.is_group = 0
       ORDER BY rm.timestamp DESC
     `).all(req.userId, req.userId);
     res.json(conversations);
+  });
+
+  // ── Archive / Unarchive ─────────────────────────────────
+  router.post('/archive/:contactId', async (req, res) => {
+    try {
+      const { archive } = req.body;
+      const result = await archiveChat(req.userId, db, req.params.contactId, !!archive);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Mark chat as read ──────────────────────────────────
+  router.post('/mark-read/:contactId', async (req, res) => {
+    try {
+      const result = await markChatRead(req.userId, db, req.params.contactId);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // ── Send Text ─────────────────────────────────────────────
