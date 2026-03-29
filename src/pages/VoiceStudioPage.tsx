@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2, Search, Upload, X, Volume2, Pencil, Pause } from 'lucide-react';
+import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2, Search, Upload, X, Volume2, Pencil, Pause, Scissors } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { api, type Contact, type Voice, type SoundItem } from '@/lib/api';
 import { getContactDisplayMeta, getContactDisplayName } from '@/lib/contactDisplay';
 import { toast } from 'sonner';
@@ -129,6 +130,14 @@ const VoiceStudioPage = () => {
   const soundAudioRef = useRef<HTMLAudioElement | null>(null);
   const [editingSoundId, setEditingSoundId] = useState<number | null>(null);
   const [editingSoundName, setEditingSoundName] = useState('');
+  
+  // Trim modal state
+  const [trimSound, setTrimSound] = useState<SoundItem | null>(null);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
+  const [isTrimming, setIsTrimming] = useState(false);
+  const trimAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [isTrimPlaying, setIsTrimPlaying] = useState(false);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
