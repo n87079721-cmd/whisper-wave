@@ -46,7 +46,7 @@ const CallsPage = () => {
   }, [fetchCalls]);
 
   return (
-    <div>
+    <div className="max-w-2xl mx-auto">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold text-foreground">Calls</h1>
@@ -57,7 +57,7 @@ const CallsPage = () => {
         <button
           onClick={fetchCalls}
           disabled={loading}
-          className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent"
+          className="rounded-lg p-2.5 text-muted-foreground transition-colors hover:bg-accent"
           aria-label="Refresh calls"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -81,7 +81,7 @@ const CallsPage = () => {
           return (
             <div
               key={call.id}
-              className="flex items-center gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-accent/50"
+              className="flex items-center gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-accent/50 active:bg-accent/70"
             >
               <div className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-muted flex-shrink-0">
                 <span className="text-sm font-medium text-foreground">{getInitials(name)}</span>
@@ -92,9 +92,9 @@ const CallsPage = () => {
                 </p>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   {isMissed ? (
-                    <PhoneMissed className="h-3 w-3 text-destructive" />
+                    <PhoneMissed className="h-3 w-3 text-destructive inline-btn" />
                   ) : (
-                    <PhoneIncoming className="h-3 w-3 text-muted-foreground" />
+                    <PhoneIncoming className="h-3 w-3 text-muted-foreground inline-btn" />
                   )}
                   <span className="text-xs text-muted-foreground">
                     {isMissed ? 'Missed' : 'Incoming'} {isVideo ? 'video' : 'voice'} call
@@ -106,9 +106,9 @@ const CallsPage = () => {
                   {formatDistanceToNow(new Date(call.timestamp), { addSuffix: true })}
                 </span>
                 {isVideo ? (
-                  <Video className={`h-4 w-4 ${isMissed ? 'text-destructive' : 'text-muted-foreground'}`} />
+                  <Video className={`h-4 w-4 inline-btn ${isMissed ? 'text-destructive' : 'text-muted-foreground'}`} />
                 ) : (
-                  <Phone className={`h-4 w-4 ${isMissed ? 'text-destructive' : 'text-muted-foreground'}`} />
+                  <Phone className={`h-4 w-4 inline-btn ${isMissed ? 'text-destructive' : 'text-muted-foreground'}`} />
                 )}
               </div>
             </div>

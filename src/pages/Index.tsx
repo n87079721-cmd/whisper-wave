@@ -59,12 +59,12 @@ const Index = () => {
   };
 
   return (
-    <div className="flex h-[100dvh] bg-background overflow-hidden">
+    <div className="flex h-[100dvh] bg-background overflow-hidden safe-top">
       <div className="hidden md:block flex-shrink-0">
         <DashboardSidebar activePage={activePage} onPageChange={setActivePage} theme={theme} onToggleTheme={toggleTheme} />
       </div>
       <main className="flex-1 flex flex-col min-w-0 min-h-0">
-        <div className="flex-1 overflow-y-auto px-3 pb-20 pt-3 md:px-6 md:pb-6 md:pt-5">
+        <div className="flex-1 overflow-y-auto px-2 pb-[4.5rem] pt-2 sm:px-3 sm:pt-3 md:px-6 md:pb-6 md:pt-5">
           <div className="mx-auto w-full max-w-7xl h-full">
             {renderPage()}
           </div>
