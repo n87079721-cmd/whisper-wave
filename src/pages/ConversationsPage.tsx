@@ -31,6 +31,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
+  const replyDraftsRef = useRef<Record<string, string>>({});
 
   const [showNewChat, setShowNewChat] = useState(false);
   const [newChatPhone, setNewChatPhone] = useState('');
