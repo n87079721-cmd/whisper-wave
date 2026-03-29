@@ -541,7 +541,25 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
   const cleaned = phoneNumber.replace(/[^0-9]/g, '');
   if (cleaned.length < 8) throw new Error('Invalid phone number');
   inst.pendingPairingPhone = cleaned;
-  // whatsapp-web.js supports pairing codes via client.requestPairingCode
+
+  // Ensure the browser-side onCodeReceivedEvent function exists.
+  // When the client was initialized in QR mode (no pairWithPhoneNumber option),
+  // this function is never exposed, causing requestPairingCode() to crash.
+  try {
+    const page = inst.client?.pupPage;
+    if (page) {
+      await page.evaluate(() => {
+        if (typeof window.onCodeReceivedEvent !== 'function') {
+          window.onCodeReceivedEvent = (code) => {
+            window._pairingCode = code;
+          };
+        }
+      });
+    }
+  } catch (setupErr) {
+    console.warn(`[${userId}] Failed to expose onCodeReceivedEvent:`, setupErr?.message);
+  }
+
   try {
     const code = await inst.client.requestPairingCode(cleaned);
     inst.pairingCode = code;
@@ -551,7 +569,9 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
     inst.pairingCode = null;
     const message = String(err?.message || err || 'Unknown error');
     if (/onCodeReceivedEvent is not a function/i.test(message)) {
-      throw new Error('Phone-number pairing is temporarily unavailable on this backend build. Please use QR pairing for now.');
+      // Second attempt: try waiting for the client to be in a better state
+      console.warn(`[${userId}] onCodeReceivedEvent still missing after injection, falling back to QR`);
+      throw new Error('Phone pairing failed — please use QR code instead. Open WhatsApp on your phone → Linked Devices → Link a Device.');
     }
     throw new Error(`Pairing code request failed: ${message}`);
   }
