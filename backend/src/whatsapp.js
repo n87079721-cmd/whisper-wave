@@ -1,10 +1,10 @@
-import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth, MessageMedia } = pkg;
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
-import NodeCache from 'node-cache';
 import { generateReply, shouldReact, shouldAlsoReplyAfterReaction } from './ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -285,7 +285,7 @@ async function startConnection(userId, db, options = {}) {
     const client = new Client({
       authStrategy: new LocalAuth({
         clientId: userId,
-        dataPath: path.join(DATA_DIR, 'auth'),
+        dataPath: path.join(DATA_DIR, 'wwebjs_auth'),
       }),
       puppeteer: {
         headless: true,
@@ -299,10 +299,6 @@ async function startConnection(userId, db, options = {}) {
           '--single-process',
           '--disable-gpu',
         ],
-      },
-      webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/nicollasarquer/nicollasarquer/main/AvaliacaoEscola_17072_12082024/wpp_links_multi/wwebjs/wpp/wpp.pkg.min.js',
       },
     });
 
@@ -1089,17 +1085,22 @@ async function clearSession(userId, db) {
     console.error('Failed to clear DB tables:', err?.message || err);
   }
 
-  // Delete user auth directory
+  // Delete user auth directory (legacy Baileys path)
   const authDir = getUserAuthDir(userId);
   if (fs.existsSync(authDir)) {
     fs.rmSync(authDir, { recursive: true, force: true });
   }
   fs.mkdirSync(authDir, { recursive: true });
 
-  // Also remove the wwebjs LocalAuth data
-  const wwLocalAuth = path.join(DATA_DIR, 'auth', `.wwebjs_auth`, `session-${userId}`);
+  // Remove the wwebjs LocalAuth session data
+  const wwLocalAuth = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
   if (fs.existsSync(wwLocalAuth)) {
     fs.rmSync(wwLocalAuth, { recursive: true, force: true });
+  }
+  // Also try the default .wwebjs_auth path
+  const wwLocalAuthDefault = path.join(DATA_DIR, '.wwebjs_auth', `session-${userId}`);
+  if (fs.existsSync(wwLocalAuthDefault)) {
+    fs.rmSync(wwLocalAuthDefault, { recursive: true, force: true });
   }
 
   inst.isConnecting = false;
