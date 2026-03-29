@@ -5,6 +5,7 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation } from './whatsapp.js';
+import { initWhatsApp } from './whatsapp.js';
 import { archiveChat, markChatRead } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
@@ -36,8 +37,7 @@ export function createApiRouter(db) {
       if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
       const user = loginUser(db, username, password);
       const token = createToken(user.id);
-      // Start WhatsApp connection for this user if auth files exist
-      getOrInitWhatsApp(user.id, db);
+      // Don't auto-start WhatsApp on login — user clicks Connect on dashboard
       res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName } });
     } catch (err) {
       res.status(401).json({ error: err.message });
@@ -762,8 +762,8 @@ RULES:
 
   router.post('/reconnect', async (req, res) => {
     try {
-      const wa = getWA(req);
-      await wa.reconnect();
+      // Force-start a fresh connection
+      initWhatsApp(req.userId, db);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
