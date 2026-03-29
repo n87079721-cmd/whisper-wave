@@ -587,7 +587,18 @@ RULES:
     try {
       const filePath = path.join(__dirname, '..', 'data', 'voice-media', req.params.filename);
       if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Voice note not found' });
-      res.set('Content-Type', 'audio/ogg');
+      const ext = path.extname(filePath).toLowerCase();
+      const type = ext === '.mp3'
+        ? 'audio/mpeg'
+        : ext === '.m4a'
+          ? 'audio/mp4'
+          : ext === '.wav'
+            ? 'audio/wav'
+            : ext === '.webm'
+              ? 'audio/webm'
+              : 'audio/ogg';
+      res.set('Content-Type', type);
+      res.set('Accept-Ranges', 'bytes');
       res.sendFile(filePath);
     } catch (err) {
       res.status(500).json({ error: err.message });
