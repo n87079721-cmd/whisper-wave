@@ -935,7 +935,31 @@ RULES:
     }
   });
 
-  // ── Call Logs ───────────────────────────────────────────
+  // Reply to a status
+  router.post('/statuses/reply', async (req, res) => {
+    try {
+      const { senderJid, statusId, message } = req.body;
+      if (!senderJid || !message) return res.status(400).json({ error: 'Missing senderJid or message' });
+
+      const wa = getWA(req);
+      const sendResult = await wa.sendTextMessage(senderJid, message);
+      const msgId = getSentMessageId(sendResult);
+
+      // Also save as a regular message so it appears in the chat
+      const { contactRow } = resolveOutgoingTarget(req.userId, { jid: senderJid });
+      db.prepare(`
+        INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
+        VALUES (?, ?, ?, ?, ?, 'text', 'sent', ?, 'sent')
+        ON CONFLICT(id) DO UPDATE SET content = excluded.content
+      `).run(msgId, req.userId, contactRow.id, senderJid, message, new Date().toISOString());
+
+      res.json({ success: true, messageId: msgId });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+
   router.get('/call-logs', (req, res) => {
     try {
       const logs = getCallLogs(db, req.userId);
