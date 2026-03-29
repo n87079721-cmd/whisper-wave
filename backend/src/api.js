@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
-import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat } from './whatsapp.js';
+import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
 import QRCode from 'qrcode';
@@ -556,6 +556,27 @@ RULES:
     try {
       const result = await recoverSingleChat(req.userId, db, req.params.contactId);
       res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Sync Diagnostics ───────────────────────────────────
+  router.get('/sync-diagnostics', (req, res) => {
+    try {
+      const diagnostics = getSyncDiagnostics(req.userId, db);
+      res.json(diagnostics);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Full Reset (wipe DB + session for clean re-pair) ──
+  router.post('/full-reset', async (req, res) => {
+    try {
+      const wa = getOrInitWhatsApp(req.userId, db);
+      await wa.clearSession();
+      res.json({ success: true, message: 'Session and data wiped. Scan QR to re-pair for a full history sync.' });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

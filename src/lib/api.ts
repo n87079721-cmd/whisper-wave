@@ -261,6 +261,14 @@ export const api = {
     return requestJson<{ success: boolean; message: string }>(`/api/recover-chat/${contactId}`, { method: 'POST' });
   },
 
+  getSyncDiagnostics() {
+    return requestJson<SyncDiagnostics>('/api/sync-diagnostics');
+  },
+
+  fullReset() {
+    return requestJson<{ success: boolean; message: string }>('/api/full-reset', { method: 'POST' });
+  },
+
   // Statuses (Stories)
   getStatuses() {
     return requestJson<StatusGroup[]>('/api/statuses');
@@ -345,4 +353,16 @@ export interface CallLog {
   is_group: number;
   status: string;
   timestamp: string;
+}
+
+export interface SyncDiagnostics {
+  totalContacts: number;
+  unnamedContacts: number;
+  emptyChats: number;
+  totalMessages: number;
+  unresolvedLids: number;
+  storeContactCount: number;
+  lidMapSize: number;
+  syncState: any;
+  topUnnamed: Array<{ id: string; jid: string; name: string | null; phone: string | null }>;
 }
