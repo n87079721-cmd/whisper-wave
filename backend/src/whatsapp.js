@@ -93,6 +93,10 @@ function getInstance(userId) {
       messageBatchBuffers: new Map(),
       contactCache: new Map(),
       archiveSyncTimer: null,
+      recoverySyncTimer: null,
+      connectionWatchdogTimer: null,
+      historySyncInProgress: false,
+      contactSyncInProgress: false,
       syncState: {
         phase: 'idle',
         connectedAt: null,
@@ -548,6 +552,71 @@ function stopHeartbeat(userId) {
   }
 }
 
+function clearRecoverySyncTimer(userId) {
+  const inst = userInstances.get(userId);
+  if (inst?.recoverySyncTimer) {
+    clearTimeout(inst.recoverySyncTimer);
+    inst.recoverySyncTimer = null;
+  }
+}
+
+function clearConnectionWatchdog(userId) {
+  const inst = userInstances.get(userId);
+  if (inst?.connectionWatchdogTimer) {
+    clearTimeout(inst.connectionWatchdogTimer);
+    inst.connectionWatchdogTimer = null;
+  }
+}
+
+function startConnectionWatchdog(userId, db, generation, timeoutMs = 75000, stage = 'initializing') {
+  const inst = getInstance(userId);
+  clearConnectionWatchdog(userId);
+  inst.connectionWatchdogTimer = setTimeout(async () => {
+    if (generation !== inst.connectionGeneration) return;
+    if (inst.connectionStatus === 'connected' || inst.connectionStatus === 'qr_waiting') return;
+
+    console.warn(`⏱️ [${userId}] Connection watchdog fired while ${stage}; forcing fresh reconnect`);
+    stopHeartbeat(userId);
+    clearConnectionWatchdog(userId);
+
+    if (inst.client) {
+      const staleClient = inst.client;
+      inst.client = null;
+      try { await staleClient.destroy(); } catch {}
+    }
+
+    inst.isConnecting = false;
+    inst.connectionStatus = 'reconnecting';
+    emit(userId, 'status', { status: 'reconnecting' });
+    startConnection(userId, db, { force: true });
+  }, timeoutMs);
+}
+
+function scheduleRecoverySync(userId, db, delayMs = 90000) {
+  const inst = getInstance(userId);
+  clearRecoverySyncTimer(userId);
+  inst.recoverySyncTimer = setTimeout(() => {
+    inst.recoverySyncTimer = null;
+    if (inst.connectionStatus !== 'connected') return;
+
+    if (inst.historySyncInProgress || inst.contactSyncInProgress) {
+      scheduleRecoverySync(userId, db, 45000);
+      return;
+    }
+
+    const needsRecovery =
+      inst.syncState.totalDbContacts === 0 ||
+      inst.syncState.totalDbMessages < 25 ||
+      ['waiting_history', 'partial', 'recovering'].includes(inst.syncState.phase);
+
+    if (!needsRecovery) return;
+
+    recoverSync(userId, db).catch(err => {
+      console.error(`Scheduled recovery sync error [${userId}]:`, err?.message || err);
+    });
+  }, delayMs);
+}
+
 // ── Auto-reconnect all users on server start ─────────────
 
 export function autoReconnectAll(db) {
@@ -611,10 +680,14 @@ async function startConnection(userId, db, options = {}) {
     });
 
     inst.client = client;
+    inst.connectionStatus = 'reconnecting';
+    emit(userId, 'status', { status: 'reconnecting' });
+    startConnectionWatchdog(userId, db, generation, 75000, 'restoring session');
 
     // ── QR Code ──
     client.on('qr', (qr) => {
       if (generation !== inst.connectionGeneration) return;
+      clearConnectionWatchdog(userId);
       inst.qrCode = qr;
       inst.connectionStatus = 'qr_waiting';
       emit(userId, 'qr', qr);
@@ -625,6 +698,8 @@ async function startConnection(userId, db, options = {}) {
     client.on('ready', async () => {
       if (generation !== inst.connectionGeneration) return;
       if (inst.connectionStatus === 'connected') return;
+      clearConnectionWatchdog(userId);
+      clearRecoverySyncTimer(userId);
       if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
       inst.qrCode = null;
       inst.pairingCode = null;
@@ -651,18 +726,23 @@ async function startConnection(userId, db, options = {}) {
       console.log(`✅ [${userId}] WhatsApp connected via whatsapp-web.js (gen ${generation})`);
       updateSyncState(userId, db, { phase: 'waiting_history', connectedAt: inst.syncState.connectedAt });
 
-      // Start syncing contacts and chats
-      syncContacts(userId, db).catch(err => console.error('Sync contacts error:', err?.message));
+      // Start core chat sync first for large accounts so history appears earlier
+      syncChats(userId, db).catch(err => console.error('Sync chats error:', err?.message));
 
-      // Schedule recovery after initial sync
+      // Refresh the full contact book in the background after chat import has started
       setTimeout(() => {
+        if (generation !== inst.connectionGeneration) return;
         if (inst.connectionStatus === 'connected') {
-          recoverSync(userId, db).catch(err => console.error('Auto recovery sync error:', err?.message));
+          syncContacts(userId, db, { skipChatSync: true }).catch(err => console.error('Background contact sync error:', err?.message));
         }
-      }, 30000);
+      }, 10000);
+
+      // Only attempt a follow-up recovery pass after the main import had real time to settle
+      scheduleRecoverySync(userId, db, 90000);
 
       // Sync archive states after initial sync
       setTimeout(() => {
+        if (generation !== inst.connectionGeneration) return;
         if (inst.connectionStatus === 'connected') {
           syncArchiveStates(userId, db).catch(err => console.error('Auto archive sync error:', err?.message));
         }
@@ -696,6 +776,7 @@ async function startConnection(userId, db, options = {}) {
     // ── Authenticated (session restored, before ready) ──
     client.on('authenticated', () => {
       if (generation !== inst.connectionGeneration) return;
+      startConnectionWatchdog(userId, db, generation, 120000, 'waiting for ready after authentication');
       console.log(`🔑 [${userId}] WhatsApp authenticated (session restored)`);
     });
 
@@ -704,9 +785,13 @@ async function startConnection(userId, db, options = {}) {
       if (generation !== inst.connectionGeneration) return;
       console.warn(`⚠️ [${userId}] WhatsApp disconnected: ${reason}`);
       stopHeartbeat(userId);
+      clearConnectionWatchdog(userId);
+      clearRecoverySyncTimer(userId);
+      inst.historySyncInProgress = false;
+      inst.contactSyncInProgress = false;
+      if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
 
       if (reason === 'LOGOUT' || reason === 'CONFLICT') {
-        if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
         inst.connectionStatus = 'disconnected';
         inst.reconnectAttempt = 0;
         emit(userId, 'status', { status: 'disconnected' });
@@ -720,6 +805,12 @@ async function startConnection(userId, db, options = {}) {
     // ── Authentication failure ──
     client.on('auth_failure', (msg) => {
       console.error(`❌ [${userId}] Auth failure:`, msg);
+      stopHeartbeat(userId);
+      clearConnectionWatchdog(userId);
+      clearRecoverySyncTimer(userId);
+      inst.historySyncInProgress = false;
+      inst.contactSyncInProgress = false;
+      if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
       inst.connectionStatus = 'disconnected';
       emit(userId, 'status', { status: 'disconnected' });
     });
@@ -921,6 +1012,7 @@ async function startConnection(userId, db, options = {}) {
     console.log(`🔄 [${userId}] WhatsApp client initializing...`);
   } catch (err) {
     console.error(`startConnection error [${userId}]:`, err?.message || err);
+    clearConnectionWatchdog(userId);
     inst.connectionStatus = 'reconnecting';
     emit(userId, 'status', { status: 'reconnecting' });
     scheduleReconnect(userId, db, inst.connectionGeneration);
@@ -1117,9 +1209,13 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
 
 // ── Contact Sync ──
 
-async function syncContacts(userId, db) {
+async function syncContacts(userId, db, options = {}) {
   const inst = getInstance(userId);
   if (!inst.client || inst.connectionStatus !== 'connected') return;
+  if (inst.contactSyncInProgress) return;
+
+  const skipChatSync = options.skipChatSync === true;
+  inst.contactSyncInProgress = true;
 
   console.log(`📇 [${userId}] Contact sync initiated`);
 
@@ -1150,16 +1246,22 @@ async function syncContacts(userId, db) {
       console.log(`📇 [${userId}] Synced ${syncedCount} contacts`);
     }
 
-    // Now sync chats
-    await syncChats(userId, db);
+    if (!skipChatSync) {
+      await syncChats(userId, db);
+    }
   } catch (err) {
     console.error(`Contact sync error [${userId}]:`, err?.message || err);
+  } finally {
+    inst.contactSyncInProgress = false;
   }
 }
 
 async function syncChats(userId, db) {
   const inst = getInstance(userId);
   if (!inst.client || inst.connectionStatus !== 'connected') return;
+  if (inst.historySyncInProgress) return;
+
+  inst.historySyncInProgress = true;
 
   try {
     const chats = await inst.client.getChats();
@@ -1291,8 +1393,12 @@ async function syncChats(userId, db) {
     }
 
     console.log(`📇 [${userId}] Synced ${contactChanges} chats, ${messageCount} messages (${skippedChats} skipped - already synced)`);
+    const totalMessages = db.prepare('SELECT COUNT(*) as c FROM messages WHERE user_id = ?').get(userId)?.c || 0;
+    const finalPhase = (contactChanges > 0 || inst.syncState.totalDbContacts > 0) && (totalMessages > 0 || skippedChats > 0)
+      ? 'ready'
+      : 'partial';
     updateSyncState(userId, db, {
-      phase: 'ready',
+      phase: finalPhase,
       historyContacts: contactChanges,
       historyMessages: messageCount,
       lastProgressAt: new Date().toISOString(),
@@ -1305,6 +1411,8 @@ async function syncChats(userId, db) {
   } catch (err) {
     console.error(`Chat sync error [${userId}]:`, err?.message || err);
     updateSyncState(userId, db, { phase: 'partial' });
+  } finally {
+    inst.historySyncInProgress = false;
   }
 }
 
@@ -1313,12 +1421,22 @@ async function syncChats(userId, db) {
 async function recoverSync(userId, db) {
   const inst = getInstance(userId);
   if (!inst.client || inst.connectionStatus !== 'connected') return;
+  if (inst.historySyncInProgress) {
+    console.log(`🔄 [${userId}] Recovery sync skipped — history import already running`);
+    return;
+  }
 
   console.log(`🔄 [${userId}] Recovery sync started`);
   updateSyncState(userId, db, { phase: 'recovering' });
   emit(userId, 'sync_state', inst.syncState);
 
-  await syncContacts(userId, db);
+  await syncChats(userId, db);
+
+  if (inst.connectionStatus === 'connected' && !inst.contactSyncInProgress) {
+    syncContacts(userId, db, { skipChatSync: true }).catch(err => {
+      console.error(`Recovery contact sync error [${userId}]:`, err?.message || err);
+    });
+  }
 
   const phase = (inst.syncState.totalDbMessages > 10 && inst.syncState.totalDbContacts > 0) ? 'ready' : 'partial';
   updateSyncState(userId, db, { phase });
@@ -1617,16 +1735,21 @@ async function clearSession(userId, db) {
   const inst = getInstance(userId);
   inst.connectionGeneration++;
   stopHeartbeat(userId);
+   clearConnectionWatchdog(userId);
+   clearRecoverySyncTimer(userId);
   inst.connectionStatus = 'disconnected';
   inst.qrCode = null;
   inst.pairingCode = null;
   inst.pendingPairingPhone = null;
   inst.reconnectAttempt = 0;
+  inst.historySyncInProgress = false;
+  inst.contactSyncInProgress = false;
   inst.autoReplyCooldowns.clear();
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
+  if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
 
   inst.syncState = {
     phase: 'idle',
