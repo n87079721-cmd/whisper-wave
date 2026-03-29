@@ -336,6 +336,8 @@ export interface Contact {
   last_message?: string;
   last_type?: string;
   last_timestamp?: string;
+  is_archived?: number;
+  unread_count?: number;
 }
 
 export interface Message {
