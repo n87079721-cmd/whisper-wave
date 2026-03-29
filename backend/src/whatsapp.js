@@ -5,7 +5,6 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
-import NodeCache from 'node-cache';
 import { generateReply, shouldReact, shouldAlsoReplyAfterReaction } from './ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
