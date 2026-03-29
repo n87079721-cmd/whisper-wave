@@ -482,6 +482,16 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     finally { setDeletingConversation(false); }
   }, [selectedContact, refreshConversations]);
 
+  // Archive / Unarchive handler
+  const handleArchiveChat = useCallback(async (contactId: string, archive: boolean) => {
+    try {
+      await api.archiveChat(contactId, archive);
+      toast.success(archive ? 'Chat archived' : 'Chat unarchived');
+      if (selectedContact?.id === contactId) setSelectedContact(null);
+      refreshConversations();
+    } catch (err: any) { toast.error(err.message || 'Failed'); }
+  }, [selectedContact, refreshConversations]);
+
   // Group messages by date
   const groupedMessages = useMemo(() => {
     const groups: { date: string; messages: (Message & { _idx: number })[] }[] = [];
