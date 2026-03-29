@@ -91,6 +91,7 @@ function getInstance(userId) {
       autoReplyCooldowns: new Map(),
       messageBatchBuffers: new Map(),
       contactCache: new Map(), // phone/jid -> contact info
+      archiveSyncTimer: null,
       // Sync state tracking
       syncState: {
         phase: 'idle',
