@@ -275,8 +275,9 @@ const VoiceStudioPage = () => {
             {filteredVoices.map(voice => (
               <button
                 key={voice.id}
-                onClick={() => setSelectedVoice(voice.id)}
-                className={`flex items-center gap-2 p-2.5 rounded-lg text-left transition-all ${
+                type="button"
+                onPointerDown={(e) => { e.preventDefault(); setSelectedVoice(voice.id); }}
+                className={`flex items-center gap-2 p-2.5 rounded-lg text-left transition-all cursor-pointer select-none ${
                   selectedVoice === voice.id
                     ? 'bg-primary/15 border border-primary/30'
                     : 'bg-secondary border border-transparent hover:border-border'
