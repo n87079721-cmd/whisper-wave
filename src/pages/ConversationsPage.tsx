@@ -232,7 +232,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     return trimmed.startsWith('+') ? `+${digits}` : digits;
   };
 
-  const filtered = conversations.filter(c =>
+  const activeConversations = conversations.filter(c => !c.is_archived);
+  const archivedConversations = conversations.filter(c => !!c.is_archived);
+
+  const filtered = (showArchived ? archivedConversations : activeConversations).filter(c =>
     getContactDisplayName(c).toLowerCase().includes(search.toLowerCase()) ||
     cleanContactPhone(c.phone || '').includes(search)
   );
