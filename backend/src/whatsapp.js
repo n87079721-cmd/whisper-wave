@@ -802,14 +802,30 @@ async function startConnection(userId, db, options = {}) {
           const direction = isFromMe ? 'sent' : 'received';
           const msgId = msg.key.id || uuid();
 
+          // Download and save voice note audio for playback
+          let mediaPath = null;
+          if (isVoice && inst.sock) {
+            try {
+              const VOICE_MEDIA_DIR = path.join(DATA_DIR, 'voice-media');
+              if (!fs.existsSync(VOICE_MEDIA_DIR)) fs.mkdirSync(VOICE_MEDIA_DIR, { recursive: true });
+              const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: inst.sock.updateMediaMessage });
+              const filename = `${msgId}.ogg`;
+              fs.writeFileSync(path.join(VOICE_MEDIA_DIR, filename), buffer);
+              mediaPath = filename;
+            } catch (dlErr) {
+              console.log(`🎤 [${userId}] Voice download failed: ${dlErr?.message}`);
+            }
+          }
+
           db.prepare(`
-            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             msgId, userId, contactId, resolvedJid, content, msgType, direction,
             toIsoTimestamp(msg.messageTimestamp),
             isFromMe ? 'sent' : 'delivered',
-            msg.message.audioMessage?.seconds || null
+            msg.message.audioMessage?.seconds || null,
+            mediaPath
           );
 
           emit(userId, 'message', { contactId, msgId });
