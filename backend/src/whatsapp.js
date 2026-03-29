@@ -1914,3 +1914,46 @@ export function getSyncDiagnostics(userId, db) {
     topUnnamed: topUnnamed.map(c => ({ id: c.id, jid: c.jid, name: c.name, phone: c.phone })),
   };
 }
+
+// ── Delete message from WhatsApp + local DB ──
+export async function deleteMessage(userId, db, messageId) {
+  const inst = getInstance(userId);
+  const msg = db.prepare('SELECT id, contact_id, jid, direction FROM messages WHERE id = ? AND user_id = ?').get(messageId, userId);
+  if (!msg) throw new Error('Message not found');
+
+  // Delete from WhatsApp if connected
+  if (inst.sock && inst.connectionStatus === 'connected') {
+    try {
+      await inst.sock.sendMessage(msg.jid, { delete: { remoteJid: msg.jid, fromMe: msg.direction === 'sent', id: messageId } });
+      console.log(`🗑️ [${userId}] Deleted message ${messageId} from WhatsApp`);
+    } catch (err) {
+      console.log(`🗑️ [${userId}] WhatsApp delete failed (removing locally): ${err?.message}`);
+    }
+  }
+
+  // Always delete locally
+  db.prepare('DELETE FROM messages WHERE id = ? AND user_id = ?').run(messageId, userId);
+  return { success: true };
+}
+
+// ── Delete entire conversation (all messages) from WhatsApp + local DB ──
+export async function deleteConversation(userId, db, contactId) {
+  const inst = getInstance(userId);
+  const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+  if (!contact) throw new Error('Contact not found');
+
+  // Clear chat on WhatsApp if connected
+  if (inst.sock && inst.connectionStatus === 'connected') {
+    try {
+      await inst.sock.chatModify({ delete: true, lastMessages: [{ key: { remoteJid: contact.jid, fromMe: true, id: '' }, messageTimestamp: undefined }] }, contact.jid);
+      console.log(`🗑️ [${userId}] Cleared chat ${contact.jid} on WhatsApp`);
+    } catch (err) {
+      console.log(`🗑️ [${userId}] WhatsApp chat clear failed: ${err?.message}`);
+    }
+  }
+
+  // Delete all local messages for this contact
+  const deleted = db.prepare('DELETE FROM messages WHERE contact_id = ? AND user_id = ?').run(contactId, userId);
+  db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(contactId, userId);
+  return { success: true, deletedMessages: deleted.changes };
+}
