@@ -262,10 +262,10 @@ function getDefaultMediaName(msgType, extension) {
   return `attachment${ext || '.bin'}`;
 }
 
-function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime }) {
+function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce }) {
   db.prepare(`
-    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       contact_id = excluded.contact_id,
       jid = excluded.jid,
@@ -283,8 +283,9 @@ function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, di
       duration = COALESCE(excluded.duration, messages.duration),
       media_path = COALESCE(excluded.media_path, messages.media_path),
       media_name = COALESCE(excluded.media_name, messages.media_name),
-      media_mime = COALESCE(excluded.media_mime, messages.media_mime)
-  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime);
+      media_mime = COALESCE(excluded.media_mime, messages.media_mime),
+      is_view_once = COALESCE(excluded.is_view_once, messages.is_view_once)
+  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0);
 }
 
 function isUuidLike(value) {
