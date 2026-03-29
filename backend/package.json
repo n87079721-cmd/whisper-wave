@@ -7,7 +7,7 @@
     "dev": "node --watch src/index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.19",
+    "whatsapp-web.js": "^1.26.1-alpha.3",
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "node-cache": "^5.1.2",
