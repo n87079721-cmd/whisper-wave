@@ -67,6 +67,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [profileMedia, setProfileMedia] = useState<Message[]>([]);
   const [profileMediaLoading, setProfileMediaLoading] = useState(false);
   const swipeRef = useRef<{ startX: number; msgId: string } | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
