@@ -72,10 +72,19 @@ const StatusPage = () => {
     return () => es?.close();
   }, [fetchStatuses]);
 
-  useEffect(() => {
-    if (!viewerGroup) return;
+  const viewerJidRef = useRef<string | null>(null);
 
-    const nextGroup = groups.find((group) => group.senderJid === viewerGroup.senderJid);
+  // Keep viewerJidRef in sync
+  useEffect(() => {
+    viewerJidRef.current = viewerGroup?.senderJid ?? null;
+  }, [viewerGroup?.senderJid]);
+
+  // Sync viewer data when groups refresh (without causing re-render loop)
+  useEffect(() => {
+    const jid = viewerJidRef.current;
+    if (!jid) return;
+
+    const nextGroup = groups.find((g) => g.senderJid === jid);
     if (!nextGroup || nextGroup.statuses.length === 0) {
       setViewerGroup(null);
       setViewerIdx(0);
@@ -92,7 +101,7 @@ const StatusPage = () => {
 
     setViewerGroup(nextGroup);
     setViewerIdx((prev) => Math.min(prev, nextGroup.statuses.length - 1));
-  }, [groups, viewerGroup]);
+  }, [groups]);
 
   const currentStatus = viewerGroup?.statuses[viewerIdx] ?? null;
 
