@@ -1375,25 +1375,38 @@ export async function deleteMessage(userId, db, messageId) {
   const inst = getInstance(userId);
   const msg = db.prepare('SELECT id, contact_id, jid, direction FROM messages WHERE id = ? AND user_id = ?').get(messageId, userId);
   if (!msg) throw new Error('Message not found');
+  return { success: true };
+}
 
-  // Delete from WhatsApp if connected
+export async function deleteMessageForMe(userId, db, messageId) {
+  const msg = db.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(messageId, userId);
+  if (!msg) throw new Error('Message not found');
+  db.prepare('DELETE FROM messages WHERE id = ? AND user_id = ?').run(messageId, userId);
+  return { success: true, mode: 'me' };
+}
+
+export async function deleteMessageForEveryone(userId, db, messageId) {
+  const inst = getInstance(userId);
+  const msg = db.prepare('SELECT id, contact_id, jid, direction FROM messages WHERE id = ? AND user_id = ?').get(messageId, userId);
+  if (!msg) throw new Error('Message not found');
+
   if (inst.client && inst.connectionStatus === 'connected') {
     try {
       const chatId = fromJid(msg.jid);
       const chat = await inst.client.getChatById(chatId);
       const messages = await chat.fetchMessages({ limit: 50 });
       const waMsg = messages.find(m => (m.id?._serialized === messageId || m.id?.id === messageId));
-      if (waMsg && msg.direction === 'sent') {
+      if (waMsg) {
         await waMsg.delete(true); // delete for everyone
       }
-      console.log(`🗑️ [${userId}] Deleted message ${messageId} from WhatsApp`);
+      console.log(`🗑️ [${userId}] Deleted message ${messageId} for everyone`);
     } catch (err) {
-      console.log(`🗑️ [${userId}] WhatsApp delete failed (removing locally): ${err?.message}`);
+      console.log(`🗑️ [${userId}] WhatsApp delete-for-everyone failed: ${err?.message}`);
     }
   }
 
   db.prepare('DELETE FROM messages WHERE id = ? AND user_id = ?').run(messageId, userId);
-  return { success: true };
+  return { success: true, mode: 'everyone' };
 }
 
 // ── Delete conversation ──
