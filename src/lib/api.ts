@@ -567,3 +567,11 @@ export interface SyncDiagnostics {
   syncState: any;
   topUnnamed: Array<{ id: string; jid: string; name: string | null; phone: string | null }>;
 }
+
+export interface SoundItem {
+  id: string;
+  name: string;
+  type: 'preset' | 'custom';
+  duration?: number;
+  dbId?: number;
+}
