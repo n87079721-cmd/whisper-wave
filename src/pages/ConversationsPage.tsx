@@ -1128,6 +1128,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                           <div
                             key={msg.id}
                             data-msg-idx={msg._idx}
+                            data-msg-id={msg.id}
                             className={`flex ${msg.type === 'call' ? 'justify-center' : msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                             onTouchStart={(e) => handleSwipeStart(e, msg)}
                             onTouchEnd={(e) => handleSwipeEnd(e, msg)}
