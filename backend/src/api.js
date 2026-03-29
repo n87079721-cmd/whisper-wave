@@ -797,19 +797,15 @@ export function createApiRouter(db) {
       const apiKey = getConfig(db, req.userId, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
       if (!apiKey) return res.status(400).json({ error: 'ElevenLabs API key not configured.' });
 
-      const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, req.userId);
-      if (!contact) return res.status(404).json({ error: 'Contact not found' });
-
       const wa = getWA(req);
+      const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId });
       const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
       const audioBuffer = await generateVoiceNote(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
 
-      // Send voice note — captures message key or throws on complete failure
-      const sendResult = await wa.sendVoiceNote(contact.jid, audioBuffer);
+      const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
       const msgId = getSentMessageId(sendResult);
       const savedVoice = persistOutgoingVoiceNote(msgId, audioBuffer);
 
-      // Only insert to DB after confirmed send
       db.prepare(`
         INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
         VALUES (?, ?, ?, ?, ?, 'voice', 'sent', ?, 'sent', ?, ?, ?)
@@ -820,10 +816,10 @@ export function createApiRouter(db) {
           media_path = COALESCE(excluded.media_path, messages.media_path),
           media_name = COALESCE(excluded.media_name, messages.media_name),
           media_mime = COALESCE(excluded.media_mime, messages.media_mime)
-      `).run(msgId, req.userId, contactId, contact.jid, text, new Date().toISOString(), savedVoice.mediaPath, savedVoice.mediaName, savedVoice.mediaMime);
+      `).run(msgId, req.userId, contactRow.id, targetJid, text, new Date().toISOString(), savedVoice.mediaPath, savedVoice.mediaName, savedVoice.mediaMime);
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(req.userId);
 
-      res.json({ success: true, messageId: msgId });
+      res.json({ success: true, messageId: msgId, contactId: contactRow.id });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -900,28 +896,42 @@ export function createApiRouter(db) {
         .replace(/\s+/g, ' ')
         .trim() || String(text).trim();
 
-      const systemPrompt = `You rewrite text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note.
+      // Scale tag count based on text length
+      const wordCount = cleanedInput.split(/\s+/).length;
+      const tagRange = wordCount <= 15 ? '2-3' : wordCount <= 40 ? '4-6' : wordCount <= 80 ? '6-10' : '8-15';
 
-AVAILABLE EXPRESSION TAGS (use the ones that fit the emotion/context):
-Emotions: [happy] [sad] [angry] [excited] [nervous] [scared] [disgusted] [surprised] [confused] [bored] [proud] [shy] [jealous] [grateful] [hopeful] [disappointed] [embarrassed] [anxious] [frustrated] [amused]
-Reactions: [laughing] [crying] [gasping] [sighing] [groaning] [screaming] [giggling] [chuckling] [sniffling] [yawning]
-Delivery: [whispering] [shouting] [singing] [mumbling] [sarcastically] [dramatically] [deadpan] [breathlessly] [cheerfully] [sadly] [angrily] [nervously] [excitedly] [lovingly] [coldly] [mockingly]
-Physical: [clearing throat] [coughing] [sneezing] [hiccupping] [clicking tongue] [tutting] [blowing raspberry] [kissing teeth] [inhaling sharply] [exhaling deeply] [clapping]
-Pacing cues: [pause] [hesitates] [breathes] [slows down] [drawn out] [continues after a beat] ... —
+      const systemPrompt = `You rewrite text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note. You ARE this person — you feel things, you react, you breathe.
+
+AVAILABLE EXPRESSION TAGS (use generously where they fit):
+Emotions: [happy] [sad] [angry] [excited] [nervous] [scared] [disgusted] [surprised] [confused] [bored] [proud] [shy] [jealous] [grateful] [hopeful] [disappointed] [embarrassed] [anxious] [frustrated] [amused] [nostalgic] [elated] [resigned] [awe]
+Reactions: [laughing] [crying] [gasping] [sighing] [groaning] [screaming] [giggling] [chuckling] [sniffling] [yawning] [scoffing] [laughs softly] [snickering]
+Delivery: [whispering] [shouting] [singing] [mumbling] [sarcastically] [dramatically] [deadpan] [breathlessly] [cheerfully] [sadly] [angrily] [nervously] [excitedly] [lovingly] [coldly] [mockingly] [matter-of-fact] [wistful] [cautiously] [timidly] [quizzically]
+Physical: [clearing throat] [coughing] [sneezing] [hiccupping] [clicking tongue] [tutting] [blowing raspberry] [kissing teeth] [inhaling sharply] [exhaling deeply] [clapping] [gulping] [panting]
+Pacing cues: [pause] [hesitates] [breathes] [slows down] [drawn out] [continues after a beat] [stammers] [deliberate] [rushed] [emphasized] [understated] ... —
+
+TEXT FILTERS — Make it sound SPOKEN, not typed:
+- Use fillers naturally: "like", "you know", "I mean", "honestly", "basically", "right?", "so yeah", "anyway", "look", "thing is"
+- Use casual contractions and slang: "gonna", "wanna", "kinda", "sorta", "dunno", "lemme", "y'know", "ngl", "tbh", "lowkey"
+- Self-corrections mid-sentence: "I was gonna— actually no, I think..."
+- Trailing thoughts: "but yeah..." or "so... yeah"
+- Verbal reactions: "oh!", "wait", "okay so", "ugh", "hmm", "right right right"
+- Tone shifts within the message — start casual, get serious, or vice versa
+
+EMOTION & DELIVERY RULES:
+- FEEL the text. If it's good news, be genuinely excited. Bad news, let the weight show.
+- Layer emotions: [inhaling sharply] before a revelation, [pause] before something heavy, [laughs softly] after self-deprecation
+- Use tone SHIFTS — start one way, shift mid-message. People don't maintain one emotion throughout.
+- For longer texts: vary the energy. Mix calm reflective moments with bursts of emotion.
 
 RULES:
-- Output ONE rewritten version only
-- Make it sound spoken, not written
-- Use 2-4 total cues, and at least 1 of them must shape pacing naturally
-- Use the RIGHT cue in the RIGHT spot; never spam tags or stack them everywhere
-- If the input already had tags, rewrite from the meaning and create a fresh new version instead of keeping the same tags
-- Break long sentences into shorter spoken chunks when needed
-- Use contractions (I'm, don't, can't, won't, it's)
-- Add natural pauses with tags or punctuation where helpful, but keep it believable
-- Add filler words only when they genuinely help the delivery
-- Keep the same meaning but make it feel conversational and human-paced
-- Match tags to context: happy news → [excited] [happy], bad news → [sighing] [sadly], funny → [laughing] [chuckling], serious → [clearing throat] [inhaling sharply]
-- Return ONLY the enhanced text. No quotes, no explanation, no preamble.`;
+- Output ONE rewritten version only — ONLY the enhanced text, no quotes, no explanation
+- Use ${tagRange} expression tags total (scale with length — longer = more tags)
+- At least 2 pacing cues (pauses, breaths, hesitations) per rewrite
+- Break long sentences into shorter spoken fragments
+- Use contractions everywhere (I'm, don't, can't, won't, it's, that's, there's)
+- Match tags to context: happy → [excited] [laughing], bad → [sighing] [sadly], funny → [chuckling] [laughs softly], serious → [clearing throat] [inhaling sharply], awkward → [hesitates] [nervously]
+- If input already had tags, completely rewrite with fresh emotion and new tags
+- Add at least one emotional shift or tonal change in longer texts`;
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -932,7 +942,7 @@ RULES:
             { role: 'system', content: systemPrompt },
             { role: 'user', content: `Rewrite this for a natural WhatsApp voice note:\n\n${cleanedInput}` }
           ],
-          temperature: 1.15,
+          temperature: 1.2,
           max_tokens: 1024,
         }),
       });
@@ -1011,10 +1021,35 @@ RULES:
     try {
       const sound = db.prepare('SELECT * FROM custom_sounds WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
       if (!sound) return res.status(404).json({ error: 'Sound not found' });
-      // Delete file
       try { fs.unlinkSync(path.join(soundsDir, sound.filename)); } catch {}
       db.prepare('DELETE FROM custom_sounds WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
       res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Rename a custom sound
+  router.patch('/sounds/:id', (req, res) => {
+    try {
+      const { name } = req.body;
+      if (!name) return res.status(400).json({ error: 'Missing name' });
+      const sound = db.prepare('SELECT * FROM custom_sounds WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
+      if (!sound) return res.status(404).json({ error: 'Sound not found' });
+      db.prepare('UPDATE custom_sounds SET name = ? WHERE id = ? AND user_id = ?').run(name, req.params.id, req.userId);
+      res.json({ success: true, name });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Stream a custom sound for preview playback
+  router.get('/sounds/:soundId/stream', (req, res) => {
+    try {
+      const soundFile = path.join(soundsDir, `${req.params.soundId}.mp3`);
+      if (!fs.existsSync(soundFile)) return res.status(404).json({ error: 'Sound file not found' });
+      res.set('Content-Type', 'audio/mpeg');
+      fs.createReadStream(soundFile).pipe(res);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

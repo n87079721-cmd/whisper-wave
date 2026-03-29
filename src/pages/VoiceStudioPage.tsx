@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2, Search, Upload, X, Volume2 } from 'lucide-react';
+import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2, Search, Upload, X, Volume2, Pencil, Pause } from 'lucide-react';
 import { api, type Contact, type Voice, type SoundItem } from '@/lib/api';
 import { getContactDisplayMeta, getContactDisplayName } from '@/lib/contactDisplay';
 import { toast } from 'sonner';
@@ -125,6 +125,10 @@ const VoiceStudioPage = () => {
   const [customSounds, setCustomSounds] = useState<SoundItem[]>([]);
   const [isUploadingSound, setIsUploadingSound] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [previewingSound, setPreviewingSound] = useState<string | null>(null);
+  const soundAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [editingSoundId, setEditingSoundId] = useState<number | null>(null);
+  const [editingSoundName, setEditingSoundName] = useState('');
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -271,8 +275,9 @@ const VoiceStudioPage = () => {
             {filteredVoices.map(voice => (
               <button
                 key={voice.id}
-                onClick={() => setSelectedVoice(voice.id)}
-                className={`flex items-center gap-2 p-2.5 rounded-lg text-left transition-all ${
+                type="button"
+                onPointerDown={(e) => { e.preventDefault(); setSelectedVoice(voice.id); }}
+                className={`flex items-center gap-2 p-2.5 rounded-lg text-left transition-all cursor-pointer select-none ${
                   selectedVoice === voice.id
                     ? 'bg-primary/15 border border-primary/30'
                     : 'bg-secondary border border-transparent hover:border-border'
@@ -418,6 +423,7 @@ const VoiceStudioPage = () => {
           
           <div className="flex gap-1.5 flex-wrap">
             <button
+              type="button"
               onClick={() => setBackgroundSound('none')}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
                 backgroundSound === 'none'
@@ -430,6 +436,7 @@ const VoiceStudioPage = () => {
             {presetSounds.map(s => (
               <button
                 key={s.id}
+                type="button"
                 onClick={() => setBackgroundSound(s.id)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
                   backgroundSound === s.id
@@ -444,20 +451,77 @@ const VoiceStudioPage = () => {
 
           {/* Custom sounds */}
           {customSounds.length > 0 && (
-            <div className="flex gap-1.5 flex-wrap">
+            <div className="space-y-1.5">
               {customSounds.map(s => (
-                <button
+                <div
                   key={s.id}
-                  onClick={() => setBackgroundSound(s.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border flex items-center gap-1 ${
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all border cursor-pointer ${
                     backgroundSound === s.id
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80'
+                      ? 'bg-primary/15 border-primary/30'
+                      : 'bg-secondary border-border hover:bg-secondary/80'
                   }`}
+                  onClick={() => setBackgroundSound(s.id)}
                 >
-                  🎵 {s.name}
-                  {s.duration ? <span className="opacity-60">({s.duration}s)</span> : null}
-                  <span
+                  {/* Play/pause preview */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (previewingSound === s.id) {
+                        soundAudioRef.current?.pause();
+                        setPreviewingSound(null);
+                      } else {
+                        if (soundAudioRef.current) soundAudioRef.current.pause();
+                        const audio = new Audio(api.getSoundStreamUrl(s.id));
+                        audio.onended = () => setPreviewingSound(null);
+                        audio.play().catch(() => toast.error('Failed to play sound'));
+                        soundAudioRef.current = audio;
+                        setPreviewingSound(s.id);
+                      }
+                    }}
+                    className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center hover:bg-primary/30 shrink-0"
+                  >
+                    {previewingSound === s.id ? <Pause className="w-3 h-3 text-primary" /> : <Play className="w-3 h-3 text-primary ml-0.5" />}
+                  </button>
+                  
+                  {editingSoundId === s.dbId ? (
+                    <input
+                      autoFocus
+                      value={editingSoundName}
+                      onChange={e => setEditingSoundName(e.target.value)}
+                      onBlur={async () => {
+                        if (editingSoundName.trim() && s.dbId) {
+                          try {
+                            await api.renameSound(s.dbId, editingSoundName.trim());
+                            setCustomSounds(prev => prev.map(cs => cs.dbId === s.dbId ? { ...cs, name: editingSoundName.trim() } : cs));
+                          } catch {}
+                        }
+                        setEditingSoundId(null);
+                      }}
+                      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                      onClick={e => e.stopPropagation()}
+                      className="flex-1 bg-background border border-border rounded px-2 py-0.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary/50"
+                    />
+                  ) : (
+                    <span className="flex-1 text-foreground truncate">🎵 {s.name} {s.duration ? <span className="text-muted-foreground">({s.duration}s)</span> : null}</span>
+                  )}
+                  
+                  {/* Edit name */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingSoundId(s.dbId ?? null);
+                      setEditingSoundName(s.name);
+                    }}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                  
+                  {/* Delete */}
+                  <button
+                    type="button"
                     onClick={async (e) => {
                       e.stopPropagation();
                       if (!s.dbId) return;
@@ -470,43 +534,50 @@ const VoiceStudioPage = () => {
                         toast.error(err.message || 'Failed to delete');
                       }
                     }}
-                    className="ml-0.5 hover:text-destructive cursor-pointer"
+                    className="text-muted-foreground hover:text-destructive"
                   >
                     <X className="w-3 h-3" />
-                  </span>
-                </button>
+                  </button>
+                </div>
               ))}
             </div>
           )}
 
-          {/* Upload button */}
+          {/* Upload button — multiple files */}
           <div className="flex items-center gap-2">
             <input
               ref={fileInputRef}
               type="file"
               accept="video/*,audio/*"
+              multiple
               className="hidden"
               onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
+                const files = Array.from(e.target.files || []);
+                if (!files.length) return;
                 setIsUploadingSound(true);
-                try {
-                  const name = file.name.replace(/\.[^.]+$/, '');
-                  const result = await api.uploadCustomSound(file, name);
-                  setCustomSounds(prev => [{ id: result.soundId, name: result.name, type: 'custom', duration: result.duration, dbId: undefined }, ...prev]);
-                  setBackgroundSound(result.soundId);
-                  toast.success(`"${result.name}" added to your sound library`);
-                  // Refresh to get dbId
-                  api.getSounds().then(({ custom }) => setCustomSounds(custom)).catch(() => {});
-                } catch (err: any) {
-                  toast.error(err.message || 'Failed to upload sound');
-                } finally {
-                  setIsUploadingSound(false);
-                  e.target.value = '';
+                let lastSoundId = '';
+                for (const file of files) {
+                  try {
+                    const name = file.name.replace(/\.[^.]+$/, '');
+                    const result = await api.uploadCustomSound(file, name);
+                    lastSoundId = result.soundId;
+                    toast.success(`"${result.name}" added`);
+                  } catch (err: any) {
+                    toast.error(`${file.name}: ${err.message || 'Upload failed'}`);
+                  }
                 }
+                // Refresh full list to get dbIds
+                try {
+                  const { custom } = await api.getSounds();
+                  setCustomSounds(custom);
+                } catch {}
+                if (lastSoundId) setBackgroundSound(lastSoundId);
+                setIsUploadingSound(false);
+                e.target.value = '';
               }}
             />
             <button
+              type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploadingSound}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary text-secondary-foreground border border-border hover:bg-secondary/80 transition-colors disabled:opacity-50"
