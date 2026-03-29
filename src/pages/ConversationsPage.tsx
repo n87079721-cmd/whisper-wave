@@ -1081,11 +1081,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                           <div
                             key={msg.id}
                             data-msg-idx={msg._idx}
-                            className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
+                            className={`flex ${msg.type === 'call' ? 'justify-center' : msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                           >
                             <div
                               className={`group max-w-[85%] md:max-w-[65%] ${
-                                msg.type === 'sticker'
+                                msg.type === 'call'
+                                  ? 'bg-muted/50 px-4 py-2 rounded-xl text-[13px]'
+                                  : msg.type === 'sticker'
                                   ? 'bg-transparent'
                                   : `px-3 py-2 rounded-2xl text-[14px] ${
                                       msg.direction === 'sent'
