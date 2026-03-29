@@ -572,10 +572,27 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [messages]);
 
   const renderMessageContent = (msg: Message) => {
+    // Deleted message placeholder
+    if (msg.is_deleted) {
+      return (
+        <div className="flex items-center gap-2 italic text-muted-foreground text-[13px]">
+          <span>🚫</span>
+          <span>{msg.direction === 'sent' ? 'You deleted this message' : 'This message was deleted'}</span>
+        </div>
+      );
+    }
+
+    const viewOnceBadge = msg.is_view_once ? (
+      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground bg-muted/50 rounded-full px-1.5 py-0.5 mb-1">
+        <Eye className="w-3 h-3" /> View once
+      </span>
+    ) : null;
+
     if (msg.type === 'voice') {
       const voiceUrl = msg.media_path ? api.getVoiceMediaUrl(msg.media_path) : null;
       return (
         <div className="space-y-2 min-w-[220px]">
+          {viewOnceBadge}
           {voiceUrl ? (
             <div className="rounded-2xl border border-border/50 bg-background/30 px-2 py-2">
               <audio controls preload="metadata" className="h-10 w-full min-w-[220px]" src={voiceUrl}>
@@ -600,6 +617,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       const imageUrl = msg.media_path ? api.getMessageMediaUrl(msg.media_path) : null;
       return (
         <div className="space-y-2">
+          {viewOnceBadge}
           {imageUrl ? (
             <a href={imageUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl bg-muted/60">
               <img
@@ -624,6 +642,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       const videoUrl = msg.media_path ? api.getMessageMediaUrl(msg.media_path) : null;
       return (
         <div className="space-y-2">
+          {viewOnceBadge}
           {videoUrl ? (
             <video
               src={videoUrl}
@@ -647,6 +666,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       const documentLabel = msg.media_name || msg.content || 'Document';
       return (
         <div className="space-y-2">
+          {viewOnceBadge}
           {downloadUrl ? (
             <a
               href={downloadUrl}
@@ -673,7 +693,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       );
     }
 
-    return <span className="whitespace-pre-wrap break-words">{msg.content}</span>;
+    return (
+      <>
+        {viewOnceBadge}
+        <span className="whitespace-pre-wrap break-words">{msg.content}</span>
+      </>
+    );
   };
 
   return (
