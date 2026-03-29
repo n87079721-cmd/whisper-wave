@@ -9,7 +9,7 @@ const TEMP_DIR = path.join(__dirname, '..', 'data', 'temp');
 const SOUNDS_DIR = path.join(__dirname, '..', 'data', 'sounds');
 
 // Background sound prompts for ElevenLabs Sound Effects API
-const BG_SOUND_PROMPTS = {
+export const BG_SOUND_PROMPTS = {
   cafe: 'Coffee shop ambience with quiet conversations, espresso machine, cups clinking, cozy indoor cafe background noise',
   rain: 'Gentle rain falling on a window, steady rainfall, calming rain sounds, light drizzle ambience',
   street: 'City street ambience, distant traffic, car horns, pedestrians walking, urban outdoor background',
