@@ -378,14 +378,17 @@ function scheduleSyncGrace(userId, db) {
     inst.syncGraceTimer = null;
     // If still waiting for history and nothing arrived, mark partial
     if (inst.syncState.phase === 'waiting_history') {
+      console.log(`⏳ [${userId}] Grace period expired — no history received, marking partial`);
       updateSyncState(userId, db, { phase: 'partial' });
     }
-    // If importing finished but counts are very low, mark partial
+    // If importing, check if we have a meaningful amount of data
     if (inst.syncState.phase === 'importing') {
-      const phase = inst.syncState.historyMessages > 0 ? 'ready' : 'partial';
+      const hasEnough = inst.syncState.historyMessages > 50 && inst.syncState.historyContacts > 3;
+      const phase = hasEnough ? 'ready' : 'partial';
+      console.log(`⏳ [${userId}] Grace period expired during import — ${inst.syncState.historyMessages} msgs, ${inst.syncState.historyContacts} contacts → ${phase}`);
       updateSyncState(userId, db, { phase });
     }
-  }, 30000); // 30s grace period
+  }, 90000); // 90s grace period — history arrives in waves over 1-3 minutes
 }
 
 export function onWhatsAppEvent(userId, listener) {
@@ -656,12 +659,14 @@ async function startConnection(userId, db, options = {}) {
         updateSyncState(userId, db, { phase: 'waiting_history', connectedAt: new Date().toISOString() });
         scheduleSyncGrace(userId, db);
         syncContacts(userId, db);
-        // Schedule recovery sync after initial passive history window
+        // Schedule recovery sync AFTER passive history has had plenty of time
+        // Baileys delivers history in waves over 1-3 minutes after initial QR pair
         setTimeout(() => {
-          if (inst.connectionStatus === 'connected' && (inst.syncState.phase === 'waiting_history' || inst.syncState.phase === 'partial')) {
+          if (inst.connectionStatus === 'connected' && (inst.syncState.phase === 'waiting_history' || inst.syncState.phase === 'partial' || inst.syncState.phase === 'importing')) {
+            console.log(`🔄 [${userId}] Auto recovery starting (phase: ${inst.syncState.phase}, ${inst.syncState.historyMessages} msgs so far)`);
             recoverSync(userId, db).catch(err => console.error('Auto recovery sync error:', err?.message));
           }
-        }, 45000); // 45s after connect — give passive history a chance first
+        }, 120000); // 2 minutes after connect — give passive history plenty of time
       }
 
       if (connection === 'close') {
@@ -983,9 +988,15 @@ async function startConnection(userId, db, options = {}) {
       }
       emit(userId, 'history_sync', { chats: chats?.length || 0, messages: historyMsgs?.length || 0 });
 
-      // Update sync state after processing
-      const phase = (inst.syncState.historyMessages > 10 && inst.syncState.historyContacts > 0) ? 'ready' : 'partial';
-      updateSyncState(userId, db, { phase });
+      // Don't rush to "ready" — keep importing while waves are still arriving
+      // Only mark ready if we have substantial data; otherwise stay importing so grace timer handles it
+      if (inst.syncState.historyMessages > 100 && inst.syncState.historyContacts > 5) {
+        updateSyncState(userId, db, { phase: 'ready' });
+        console.log(`✅ [${userId}] History sync looks complete: ${inst.syncState.historyMessages} msgs, ${inst.syncState.historyContacts} contacts`);
+      } else {
+        // Stay in 'importing' — more waves may arrive. Grace timer will finalize.
+        updateSyncState(userId, db, { phase: 'importing' });
+      }
 
       // Schedule a deferred LID sweep to catch any late-arriving mappings
       schedulelidSweep(userId, db, inst);
