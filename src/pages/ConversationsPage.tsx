@@ -518,15 +518,40 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         <div className={`${showChatOnMobile ? 'hidden md:flex' : 'flex'} w-full md:w-[340px] lg:w-[380px] flex-shrink-0 flex-col border-r border-border bg-background`}>
           {/* Header */}
           <div className="px-4 py-3 flex items-center justify-between">
-            <h1 className="text-lg font-bold text-foreground">Chats</h1>
-            <button
-              type="button"
-              onClick={() => { setNewChatPhone(''); setContactSearch(''); setShowNewChat(true); }}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
-              title="New chat"
-            >
-              <Plus className="h-5 w-5" />
-            </button>
+            <h1 className="text-lg font-bold text-foreground">{showArchived ? 'Archived' : 'Chats'}</h1>
+            <div className="flex items-center gap-1">
+              {showArchived ? (
+                <button
+                  type="button"
+                  onClick={() => setShowArchived(false)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
+                  title="Back to chats"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+              ) : (
+                <>
+                  {archivedConversations.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowArchived(true)}
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
+                      title="Archived chats"
+                    >
+                      <Archive className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setNewChatPhone(''); setContactSearch(''); setShowNewChat(true); }}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
+                    title="New chat"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Search */}
