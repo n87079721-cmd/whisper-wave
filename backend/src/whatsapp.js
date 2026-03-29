@@ -978,6 +978,11 @@ async function startConnection(userId, db, options = {}) {
           emit(userId, 'message', { contactId, msgId });
 
           if (type === 'notify' && !isFromMe) {
+            // Increment unread count
+            try {
+              db.prepare("UPDATE contacts SET unread_count = unread_count + 1 WHERE id = ? AND user_id = ?").run(contactId, userId);
+            } catch {}
+
             db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'message_received', ?)`).run(userId, JSON.stringify({ contactId }));
 
             if (!isGroup) {
@@ -2132,4 +2137,51 @@ export async function deleteConversation(userId, db, contactId) {
   const deleted = db.prepare('DELETE FROM messages WHERE contact_id = ? AND user_id = ?').run(contactId, userId);
   db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(contactId, userId);
   return { success: true, deletedMessages: deleted.changes };
+}
+
+// ── Archive / Unarchive chat ──
+export async function archiveChat(userId, db, contactId, archive) {
+  const inst = getInstance(userId);
+  const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+  if (!contact) throw new Error('Contact not found');
+
+  // Sync to WhatsApp if connected
+  if (inst.sock && inst.connectionStatus === 'connected') {
+    try {
+      const lastMsg = db.prepare('SELECT id, jid, direction, timestamp FROM messages WHERE contact_id = ? AND user_id = ? ORDER BY timestamp DESC LIMIT 1').get(contactId, userId);
+      const lastMessages = lastMsg
+        ? [{ key: { remoteJid: contact.jid, fromMe: lastMsg.direction === 'sent', id: lastMsg.id }, messageTimestamp: Math.floor(new Date(lastMsg.timestamp).getTime() / 1000) }]
+        : [{ key: { remoteJid: contact.jid, fromMe: true, id: '' }, messageTimestamp: undefined }];
+      await inst.sock.chatModify({ archive, lastMessages }, contact.jid);
+      console.log(`📦 [${userId}] ${archive ? 'Archived' : 'Unarchived'} chat ${contact.jid} on WhatsApp`);
+    } catch (err) {
+      console.log(`📦 [${userId}] WhatsApp archive failed: ${err?.message}`);
+    }
+  }
+
+  db.prepare("UPDATE contacts SET is_archived = ? WHERE id = ? AND user_id = ?").run(archive ? 1 : 0, contactId, userId);
+  return { success: true, archived: archive };
+}
+
+// ── Mark chat as read ──
+export async function markChatRead(userId, db, contactId) {
+  const inst = getInstance(userId);
+  const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+  if (!contact) throw new Error('Contact not found');
+
+  // Sync to WhatsApp if connected
+  if (inst.sock && inst.connectionStatus === 'connected') {
+    try {
+      const lastMsg = db.prepare('SELECT id, jid, direction, timestamp FROM messages WHERE contact_id = ? AND user_id = ? ORDER BY timestamp DESC LIMIT 1').get(contactId, userId);
+      const lastMessages = lastMsg
+        ? [{ key: { remoteJid: contact.jid, fromMe: lastMsg.direction === 'sent', id: lastMsg.id }, messageTimestamp: Math.floor(new Date(lastMsg.timestamp).getTime() / 1000) }]
+        : [{ key: { remoteJid: contact.jid, fromMe: true, id: '' }, messageTimestamp: undefined }];
+      await inst.sock.chatModify({ markRead: true, lastMessages }, contact.jid);
+    } catch (err) {
+      console.log(`📖 [${userId}] WhatsApp mark-read failed: ${err?.message}`);
+    }
+  }
+
+  db.prepare("UPDATE contacts SET unread_count = 0 WHERE id = ? AND user_id = ?").run(contactId, userId);
+  return { success: true };
 }
