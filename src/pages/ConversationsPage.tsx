@@ -56,6 +56,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     file: File;
     previewUrl: string | null;
     kind: 'image' | 'video' | 'document';
+    viewOnce: boolean;
   } | null>(null);
   selectedContactRef.current = selectedContact;
 
@@ -298,7 +299,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     const previewUrl = kind === 'document' ? null : URL.createObjectURL(file);
     setPendingAttachment(prev => {
       if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
-      return { file, previewUrl, kind };
+      return { file, previewUrl, kind, viewOnce: false };
     });
   }, []);
 
