@@ -940,6 +940,12 @@ RULES:
   router.post('/reconnect', async (req, res) => {
     try {
       const wa = getWA(req);
+      const currentState = wa.getState();
+
+      if (currentState.status === 'reconnecting' || currentState.status === 'qr_waiting') {
+        return res.json({ success: true, state: currentState, skipped: true });
+      }
+
       await wa.reconnect();
       res.json({ success: true, state: wa.getState() });
     } catch (err) {
