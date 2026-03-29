@@ -707,7 +707,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                             className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                           >
                             <div
-                              className={`max-w-[85%] md:max-w-[65%] px-3 py-2 rounded-2xl text-[14px] ${
+                              className={`group max-w-[85%] md:max-w-[65%] px-3 py-2 rounded-2xl text-[14px] ${
                                 msg.direction === 'sent'
                                   ? 'bg-bubble-out text-bubble-out-foreground rounded-br-md'
                                   : 'bg-bubble-in text-bubble-in-foreground rounded-bl-md'
