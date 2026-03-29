@@ -366,6 +366,13 @@ export const api = {
     return toUrl(`/api/status-media/${encodeURIComponent(filename)}`) + suffix;
   },
 
+  replyToStatus(senderJid: string, statusId: string, message: string) {
+    return requestJson<{ success?: boolean; error?: string }>('/api/statuses/reply', {
+      method: 'POST',
+      body: JSON.stringify({ senderJid, statusId, message }),
+    });
+  },
+
   // Call Logs
   getCallLogs() {
     return requestJson<CallLog[]>('/api/call-logs');
