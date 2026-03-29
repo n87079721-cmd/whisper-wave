@@ -952,7 +952,75 @@ RULES:
     }
   });
 
-  // ── Settings ──────────────────────────────────────────────
+  // ── Custom Sounds ────────────────────────────────────────
+  const soundsDir = path.join(__dirname, '..', 'data', 'sounds');
+  const soundUpload = multer({ dest: path.join(__dirname, '..', 'data', 'temp'), limits: { fileSize: 50 * 1024 * 1024 } });
+
+  router.get('/sounds', (req, res) => {
+    const presets = Object.keys(BG_SOUND_PROMPTS).map(id => ({
+      id,
+      name: id.charAt(0).toUpperCase() + id.slice(1),
+      type: 'preset',
+    }));
+    const custom = db.prepare('SELECT * FROM custom_sounds WHERE user_id = ? ORDER BY created_at DESC').all(req.userId).map(s => ({
+      id: s.sound_id,
+      name: s.name,
+      type: 'custom',
+      duration: s.duration,
+      dbId: s.id,
+    }));
+    res.json({ presets, custom });
+  });
+
+  router.post('/sounds/upload', soundUpload.single('file'), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+      const name = req.body.name || req.file.originalname.replace(/\.[^.]+$/, '');
+      const soundId = `custom-${uuid()}`;
+      if (!fs.existsSync(soundsDir)) fs.mkdirSync(soundsDir, { recursive: true });
+      const outputPath = path.join(soundsDir, `${soundId}.mp3`);
+
+      // Extract audio with ffmpeg
+      try {
+        execSync(`ffmpeg -y -i "${req.file.path}" -vn -c:a libmp3lame -b:a 128k -ar 44100 -ac 1 "${outputPath}"`, { stdio: 'pipe' });
+      } catch (ffErr) {
+        return res.status(400).json({ error: 'Failed to extract audio. Is this a valid audio/video file?' });
+      }
+
+      // Get duration
+      let duration = 0;
+      try {
+        const probe = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${outputPath}"`, { stdio: 'pipe' }).toString().trim();
+        duration = Math.round(parseFloat(probe) || 0);
+      } catch {}
+
+      db.prepare('INSERT INTO custom_sounds (user_id, sound_id, name, filename, duration) VALUES (?, ?, ?, ?, ?)')
+        .run(req.userId, soundId, name, `${soundId}.mp3`, duration);
+
+      // Cleanup temp upload
+      try { fs.unlinkSync(req.file.path); } catch {}
+
+      res.json({ soundId, name, duration });
+    } catch (err) {
+      try { if (req.file?.path) fs.unlinkSync(req.file.path); } catch {}
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.delete('/sounds/:id', (req, res) => {
+    try {
+      const sound = db.prepare('SELECT * FROM custom_sounds WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
+      if (!sound) return res.status(404).json({ error: 'Sound not found' });
+      // Delete file
+      try { fs.unlinkSync(path.join(soundsDir, sound.filename)); } catch {}
+      db.prepare('DELETE FROM custom_sounds WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+
   router.get('/config/:key', (req, res) => {
     const val = getConfig(db, req.userId, req.params.key);
     if (req.params.key.includes('api_key') && val) {
