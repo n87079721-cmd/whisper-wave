@@ -1154,7 +1154,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   )}
                   <input
                     value={replyText}
-                    onChange={(e) => { setReplyText(e.target.value); setPreviewUrl(null); }}
+                    onChange={(e) => {
+                      const nextValue = e.target.value;
+                      setReplyText(nextValue);
+                      if (selectedContact?.id) replyDraftsRef.current[selectedContact.id] = nextValue;
+                      setPreviewUrl(null);
+                    }}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
                     placeholder={replyMode === 'voice' ? 'Text to voice...' : pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
                     className="flex-1 px-4 py-2.5 rounded-full bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
