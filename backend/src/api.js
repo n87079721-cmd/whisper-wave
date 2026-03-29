@@ -548,21 +548,92 @@ export function createApiRouter(db) {
     }
   });
 
+  // ── Star / Unstar Message ─────────────────────────────────
+  router.post('/messages/:messageId/star', (req, res) => {
+    try {
+      const { starred } = req.body;
+      db.prepare('UPDATE messages SET is_starred = ? WHERE id = ? AND user_id = ?')
+        .run(starred ? 1 : 0, req.params.messageId, req.userId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Get Starred Messages ──────────────────────────────────
+  router.get('/starred-messages', (req, res) => {
+    try {
+      const messages = db.prepare(`
+        SELECT m.*, c.name as contact_name, c.phone as contact_phone, c.jid as contact_jid
+        FROM messages m
+        LEFT JOIN contacts c ON c.id = m.contact_id
+        WHERE m.user_id = ? AND m.is_starred = 1
+        ORDER BY m.timestamp DESC
+      `).all(req.userId);
+      res.json(messages);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Get Media for Contact ─────────────────────────────────
+  router.get('/contacts/:contactId/media', (req, res) => {
+    try {
+      const media = db.prepare(`
+        SELECT * FROM messages
+        WHERE contact_id = ? AND user_id = ? AND type IN ('image', 'video', 'document', 'sticker') AND media_path IS NOT NULL
+        ORDER BY timestamp DESC
+      `).all(req.params.contactId, req.userId);
+      res.json(media);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Send Text ─────────────────────────────────────────────
   router.post('/send/text', async (req, res) => {
     try {
-      const { contactId, jid, message } = req.body;
+      const { contactId, jid, message, quotedMessageId } = req.body;
       if (!message || (!contactId && !jid)) return res.status(400).json({ error: 'Missing contactId/jid or message' });
 
       const wa = getWA(req);
       const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId, jid });
 
-      const sendResult = await wa.sendTextMessage(targetJid, message);
+      let sendResult;
+      // If quoting a message, use reply
+      if (quotedMessageId) {
+        try {
+          const quotedMsg = await wa.getMessageById(quotedMessageId);
+          if (quotedMsg) {
+            sendResult = await quotedMsg.reply(message);
+          }
+        } catch (err) {
+          console.log('Quote reply failed, sending as plain:', err?.message);
+        }
+      }
+      if (!sendResult) {
+        sendResult = await wa.sendTextMessage(targetJid, message);
+      }
       const msgId = getSentMessageId(sendResult);
 
+      // Get quoted message info for DB
+      let replyToId = null, replyToContent = null, replyToSender = null;
+      if (quotedMessageId) {
+        const quotedRow = db.prepare('SELECT content, direction, contact_id FROM messages WHERE id = ? AND user_id = ?').get(quotedMessageId, req.userId);
+        if (quotedRow) {
+          replyToId = quotedMessageId;
+          replyToContent = (quotedRow.content || '').slice(0, 200);
+          replyToSender = quotedRow.direction === 'sent' ? 'You' : null;
+          if (!replyToSender) {
+            const c = db.prepare('SELECT name, phone FROM contacts WHERE id = ?').get(quotedRow.contact_id);
+            replyToSender = c?.name || c?.phone || null;
+          }
+        }
+      }
+
       db.prepare(`
-        INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
-        VALUES (?, ?, ?, ?, ?, 'text', 'sent', ?, 'sent')
+        INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, reply_to_id, reply_to_content, reply_to_sender)
+        VALUES (?, ?, ?, ?, ?, 'text', 'sent', ?, 'sent', ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           contact_id = excluded.contact_id,
           jid = excluded.jid,
@@ -570,7 +641,7 @@ export function createApiRouter(db) {
           direction = excluded.direction,
           timestamp = excluded.timestamp,
           status = excluded.status
-      `).run(msgId, req.userId, contactRow.id, targetJid, message, new Date().toISOString());
+      `).run(msgId, req.userId, contactRow.id, targetJid, message, new Date().toISOString(), replyToId, replyToContent, replyToSender);
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
 
       res.json({ success: true, messageId: msgId, contactId: contactRow.id });

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Mic, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film, Eye, EyeOff, Pencil, Check, PhoneMissed } from 'lucide-react';
+import { Search, Mic, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film, Eye, EyeOff, Pencil, Check, PhoneMissed, Star, Reply, User } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
@@ -62,6 +62,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     kind: 'image' | 'video' | 'document';
     viewOnce: boolean;
   } | null>(null);
+  const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
+  const [profileMedia, setProfileMedia] = useState<Message[]>([]);
+  const [profileMediaLoading, setProfileMediaLoading] = useState(false);
+  const swipeRef = useRef<{ startX: number; msgId: string } | null>(null);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -246,6 +251,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     setShowScrollDown(false);
     setReplyText(replyDraftsRef.current[selectedContact.id] ?? '');
     setPreviewUrl(null);
+    setQuotedMessage(null);
+    setShowProfile(false);
+    setEditingMsgId(null);
     refreshMessages(selectedContact.id, { forceScroll: true });
   }, [selectedContact?.id, refreshMessages]);
 
@@ -389,11 +397,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             ? await api.sendMediaToPhone(activeContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
             : await api.sendMedia(activeContactId, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
           : isTemp
-            ? await api.sendTextToPhone(activeContact.phone || '', trimmedReply)
-            : await api.sendText(activeContactId, trimmedReply);
+            ? await api.sendTextToPhone(activeContact.phone || '', trimmedReply, quotedMessage?.id)
+            : await api.sendText(activeContactId, trimmedReply, quotedMessage?.id);
 
         if (res.error) throw new Error(res.error);
         toast.success(pendingAttachment ? 'Attachment sent' : 'Message sent');
+        setQuotedMessage(null);
 
         replyDraftsRef.current[activeContactId] = '';
         setReplyText('');
@@ -619,6 +628,42 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setEditingText('');
     }
   }, [editingText]);
+
+  const handleStarMessage = useCallback(async (messageId: string, currentlyStarred: boolean) => {
+    try {
+      await api.starMessage(messageId, !currentlyStarred);
+      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, is_starred: currentlyStarred ? 0 : 1 } : m));
+      toast.success(currentlyStarred ? 'Unstarred' : 'Starred');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed');
+    }
+  }, []);
+
+  const handleOpenProfile = useCallback(async () => {
+    if (!selectedContact) return;
+    setShowProfile(true);
+    setProfileMediaLoading(true);
+    try {
+      const media = await api.getContactMedia(selectedContact.id);
+      setProfileMedia(media);
+    } catch {}
+    setProfileMediaLoading(false);
+  }, [selectedContact]);
+
+  const handleSwipeStart = useCallback((e: React.TouchEvent, msg: Message) => {
+    if (msg.type === 'call') return;
+    swipeRef.current = { startX: e.touches[0].clientX, msgId: msg.id };
+  }, []);
+
+  const handleSwipeEnd = useCallback((e: React.TouchEvent, msg: Message) => {
+    if (!swipeRef.current || swipeRef.current.msgId !== msg.id) return;
+    const deltaX = e.changedTouches[0].clientX - swipeRef.current.startX;
+    const threshold = 60;
+    if ((msg.direction === 'received' && deltaX > threshold) || (msg.direction === 'sent' && deltaX < -threshold)) {
+      setQuotedMessage(msg);
+    }
+    swipeRef.current = null;
+  }, []);
 
   const renderMessageContent = (msg: Message) => {
     // Deleted message placeholder
@@ -943,11 +988,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                <Avatar contact={selectedContact} size="lg" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
-                  <p className="text-xs text-muted-foreground truncate">{getContactDisplayMeta(selectedContact)}</p>
-                </div>
+                <button onClick={handleOpenProfile} className="flex items-center gap-3 min-w-0 flex-1">
+                  <Avatar contact={selectedContact} size="lg" />
+                  <div className="min-w-0 flex-1 text-left">
+                    <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
+                    <p className="text-xs text-muted-foreground truncate">{getContactDisplayMeta(selectedContact)}</p>
+                  </div>
+                </button>
                 <button
                   onClick={() => { setChatSearchOpen(o => !o); setChatSearch(''); setTimeout(() => chatSearchInputRef.current?.focus(), 100); }}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
@@ -1082,6 +1129,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                             key={msg.id}
                             data-msg-idx={msg._idx}
                             className={`flex ${msg.type === 'call' ? 'justify-center' : msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
+                            onTouchStart={(e) => handleSwipeStart(e, msg)}
+                            onTouchEnd={(e) => handleSwipeEnd(e, msg)}
                           >
                             <div
                               className={`group max-w-[85%] md:max-w-[65%] ${
@@ -1096,15 +1145,43 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                     }`
                               } ${isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''}`}
                             >
+                              {/* Quoted message preview */}
+                              {msg.reply_to_content && (
+                                <div className="mb-1.5 rounded-lg border-l-2 border-primary bg-background/20 px-2.5 py-1.5 text-[12px]">
+                                  <p className="font-medium text-primary text-[11px]">{msg.reply_to_sender || 'Unknown'}</p>
+                                  <p className="text-muted-foreground line-clamp-2">{msg.reply_to_content}</p>
+                                </div>
+                              )}
                               {renderMessageContent(msg)}
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
                                 <span className={`text-[10px] ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
+                                {msg.is_starred ? <Star className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500" /> : null}
                                 {msg.direction === 'sent' && <StatusLabel status={msg.status} />}
+                                {/* Reply button */}
+                                {msg.type !== 'call' && !msg.is_deleted && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setQuotedMessage(msg); }}
+                                    className="opacity-0 md:group-hover:opacity-100 hover:text-primary text-muted-foreground transition-all ml-0.5"
+                                    title="Reply"
+                                  >
+                                    <Reply className="w-3 h-3" />
+                                  </button>
+                                )}
+                                {/* Star button */}
+                                {msg.type !== 'call' && !msg.is_deleted && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleStarMessage(msg.id, !!msg.is_starred); }}
+                                    className="opacity-0 md:group-hover:opacity-100 hover:text-yellow-500 text-muted-foreground transition-all"
+                                    title={msg.is_starred ? 'Unstar' : 'Star'}
+                                  >
+                                    <Star className={`w-3 h-3 ${msg.is_starred ? 'fill-yellow-500 text-yellow-500' : ''}`} />
+                                  </button>
+                                )}
                                 {/* Edit button for sent text messages */}
                                 {msg.direction === 'sent' && msg.type === 'text' && !msg.is_deleted && (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setEditingMsgId(msg.id); setEditingText(msg.content || ''); }}
-                                    className="opacity-70 md:opacity-0 md:group-hover:opacity-100 hover:text-primary text-muted-foreground transition-all ml-0.5"
+                                    className="opacity-0 md:group-hover:opacity-100 hover:text-primary text-muted-foreground transition-all ml-0.5"
                                     title="Edit message"
                                   >
                                     <Pencil className="w-3 h-3" />
@@ -1114,7 +1191,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setDeleteMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
                                     disabled={deletingMessage === msg.id}
-                                    className="opacity-70 md:opacity-0 md:group-hover:opacity-100 hover:text-destructive text-muted-foreground transition-all"
+                                    className="opacity-0 md:group-hover:opacity-100 hover:text-destructive text-muted-foreground transition-all"
                                     title="Delete message"
                                   >
                                     {deletingMessage === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
@@ -1167,6 +1244,19 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   className="hidden"
                   onChange={handleSelectAttachment}
                 />
+
+                {/* Quoted message bar */}
+                {quotedMessage && (
+                  <div className="flex items-center gap-2 rounded-xl border border-border bg-secondary/60 p-2">
+                    <div className="flex-1 min-w-0 border-l-2 border-primary pl-2">
+                      <p className="text-[11px] font-medium text-primary">{quotedMessage.direction === 'sent' ? 'You' : (selectedContact ? getContactDisplayName(selectedContact) : 'Them')}</p>
+                      <p className="text-xs text-muted-foreground truncate">{quotedMessage.content || (quotedMessage.type === 'image' ? '📷 Photo' : quotedMessage.type === 'video' ? '🎥 Video' : quotedMessage.type === 'voice' ? '🎤 Voice' : quotedMessage.type)}</p>
+                    </div>
+                    <button onClick={() => setQuotedMessage(null)} className="p-1 text-muted-foreground hover:text-foreground flex-shrink-0">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
 
                 {pendingAttachment && (
                   <div className="flex items-center gap-3 rounded-2xl border border-border bg-secondary/60 p-2.5">
@@ -1293,7 +1383,75 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 </div>
               </div>
             </>
-          ) : (
+          ) : null}
+
+          {/* Profile Panel */}
+          {showProfile && selectedContact && (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center bg-background/80 backdrop-blur-sm" onClick={() => setShowProfile(false)}>
+              <div className="w-full max-w-md max-h-[85vh] bg-card border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+                  <button onClick={() => setShowProfile(false)} className="p-1 text-muted-foreground hover:text-foreground">
+                    <X className="w-5 h-5" />
+                  </button>
+                  <h3 className="text-sm font-semibold text-foreground">Contact Info</h3>
+                </div>
+                <div className="flex flex-col items-center py-6 gap-2 border-b border-border">
+                  <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center border-2 border-border">
+                    {selectedContact.avatar_url
+                      ? <img src={selectedContact.avatar_url} alt="" className="w-20 h-20 rounded-full object-cover" />
+                      : <User className="w-8 h-8 text-muted-foreground" />
+                    }
+                  </div>
+                  <p className="text-lg font-semibold text-foreground">{getContactDisplayName(selectedContact)}</p>
+                  <p className="text-sm text-muted-foreground">{getContactDisplayMeta(selectedContact)}</p>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  <div className="px-4 py-3 border-b border-border">
+                    <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                      Media ({profileMedia.filter(m => m.type === 'image' || m.type === 'video').length})
+                    </h4>
+                    {profileMediaLoading ? (
+                      <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-1 max-h-[200px] overflow-y-auto rounded-lg">
+                        {profileMedia.filter(m => m.type === 'image' || m.type === 'video').map((m) => (
+                          <div key={m.id} className="aspect-square rounded-md overflow-hidden bg-muted">
+                            {m.type === 'image' && m.media_path && (
+                              <img src={api.getMessageMediaUrl(m.media_path)} alt="" className="w-full h-full object-cover" />
+                            )}
+                            {m.type === 'video' && m.media_path && (
+                              <video src={api.getMessageMediaUrl(m.media_path)} className="w-full h-full object-cover" muted playsInline />
+                            )}
+                          </div>
+                        ))}
+                        {profileMedia.filter(m => m.type === 'image' || m.type === 'video').length === 0 && (
+                          <p className="col-span-3 text-xs text-muted-foreground text-center py-4">No media shared yet</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="px-4 py-3">
+                    <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                      Documents ({profileMedia.filter(m => m.type === 'document').length})
+                    </h4>
+                    <div className="space-y-1 max-h-[120px] overflow-y-auto">
+                      {profileMedia.filter(m => m.type === 'document').map((m) => (
+                        <div key={m.id} className="flex items-center gap-2 rounded-lg bg-secondary/50 p-2 text-sm">
+                          <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                          <span className="truncate text-foreground text-xs">{m.media_name || 'Document'}</span>
+                        </div>
+                      ))}
+                      {profileMedia.filter(m => m.type === 'document').length === 0 && (
+                        <p className="text-xs text-muted-foreground text-center py-2">No documents shared yet</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!selectedContact && (
             /* Empty state */
             <div className="flex-1 flex flex-col items-center justify-center text-center px-6 bg-chat-bg">
               <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">

@@ -340,18 +340,20 @@ function getDefaultMediaName(msgType, extension) {
   return `attachment${ext || '.bin'}`;
 }
 
-function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce, isEdited }) {
-  // Ensure is_edited column exists
+function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce, isEdited, replyToId, replyToContent, replyToSender }) {
+  // Ensure columns exist
   try {
     const cols = db.prepare("PRAGMA table_info(messages)").all().map(c => c.name);
-    if (!cols.includes('is_edited')) {
-      db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
-    }
+    if (!cols.includes('is_edited')) db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
+    if (!cols.includes('is_starred')) db.exec("ALTER TABLE messages ADD COLUMN is_starred INTEGER DEFAULT 0");
+    if (!cols.includes('reply_to_id')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_id TEXT");
+    if (!cols.includes('reply_to_content')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_content TEXT");
+    if (!cols.includes('reply_to_sender')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_sender TEXT");
   } catch {}
 
   db.prepare(`
-    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once, is_edited)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once, is_edited, reply_to_id, reply_to_content, reply_to_sender)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       contact_id = excluded.contact_id,
       jid = excluded.jid,
@@ -371,8 +373,11 @@ function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, di
       media_name = COALESCE(excluded.media_name, messages.media_name),
       media_mime = COALESCE(excluded.media_mime, messages.media_mime),
       is_view_once = COALESCE(excluded.is_view_once, messages.is_view_once),
-      is_edited = CASE WHEN excluded.is_edited = 1 THEN 1 ELSE messages.is_edited END
-  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0, isEdited ? 1 : 0);
+      is_edited = CASE WHEN excluded.is_edited = 1 THEN 1 ELSE messages.is_edited END,
+      reply_to_id = COALESCE(excluded.reply_to_id, messages.reply_to_id),
+      reply_to_content = COALESCE(excluded.reply_to_content, messages.reply_to_content),
+      reply_to_sender = COALESCE(excluded.reply_to_sender, messages.reply_to_sender)
+  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0, isEdited ? 1 : 0, replyToId || null, replyToContent || null, replyToSender || null);
 }
 
 async function editMessage(userId, db, messageId, newContent) {
@@ -674,6 +679,20 @@ async function startConnection(userId, db, options = {}) {
           resolvedMediaMime = savedMedia?.mediaMime || mimetype || null;
         }
 
+        // Capture quoted message context
+        let replyToId = null, replyToContent = null, replyToSender = null;
+        try {
+          if (msg.hasQuotedMsg) {
+            const quoted = await msg.getQuotedMessage();
+            if (quoted) {
+              replyToId = quoted.id?._serialized || null;
+              replyToContent = (quoted.body || '').slice(0, 200);
+              const quotedContact = await quoted.getContact?.();
+              replyToSender = quotedContact?.pushname || quotedContact?.name || (quoted.fromMe ? 'You' : null);
+            }
+          }
+        } catch {}
+
         upsertMessageRecord(db, {
           id: msgId,
           userId,
@@ -689,6 +708,9 @@ async function startConnection(userId, db, options = {}) {
           mediaName: resolvedMediaName,
           mediaMime: resolvedMediaMime,
           isViewOnce,
+          replyToId,
+          replyToContent,
+          replyToSender,
         });
 
         emit(userId, 'message', { contactId, msgId });

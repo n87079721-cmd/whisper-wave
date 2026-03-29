@@ -211,22 +211,23 @@ export const api = {
   },
 
   // Send
-  sendText(contactId: string, message: string) {
+  sendText(contactId: string, message: string, quotedMessageId?: string) {
     return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/text', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contactId, message }),
+      body: JSON.stringify({ contactId, message, quotedMessageId }),
     });
   },
 
-  sendTextToPhone(phone: string, message: string) {
+  sendTextToPhone(phone: string, message: string, quotedMessageId?: string) {
     const jid = toPhoneJid(phone);
     return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/text', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jid, message }),
+      body: JSON.stringify({ jid, message, quotedMessageId }),
     });
   },
+
 
   async sendMedia(contactId: string, file: File, caption?: string, isViewOnce?: boolean) {
     const mimeType = file.type || 'application/octet-stream';
@@ -391,6 +392,24 @@ export const api = {
   getCallLogs() {
     return requestJson<CallLog[]>('/api/call-logs');
   },
+
+  // Star Messages
+  starMessage(messageId: string, starred: boolean) {
+    return requestJson<{ success: boolean }>(`/api/messages/${messageId}/star`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ starred }),
+    });
+  },
+
+  getStarredMessages() {
+    return requestJson<Message[]>('/api/starred-messages');
+  },
+
+  // Contact Media
+  getContactMedia(contactId: string) {
+    return requestJson<Message[]>(`/api/contacts/${contactId}/media`);
+  },
 };
 
 // Types
@@ -435,6 +454,13 @@ export interface Message {
   is_view_once?: number;
   is_deleted?: number;
   is_edited?: number;
+  is_starred?: number;
+  reply_to_id?: string | null;
+  reply_to_content?: string | null;
+  reply_to_sender?: string | null;
+  // joined fields for starred view
+  contact_name?: string | null;
+  contact_phone?: string | null;
 }
 
 export interface Stats {
