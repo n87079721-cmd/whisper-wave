@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Clock, Dice5, Gauge, RefreshCw, Globe, MessageSquare, AlertTriangle, Database } from 'lucide-react';
+import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Dice5, Gauge, RefreshCw, MessageSquare, AlertTriangle, Database } from 'lucide-react';
 import { api, type SyncDiagnostics } from '@/lib/api';
 import { toast } from 'sonner';
 import { Slider } from '@/components/ui/slider';
@@ -24,11 +24,8 @@ const SettingsPage = () => {
   const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
 
   // Availability settings
-  const [activeHoursStart, setActiveHoursStart] = useState('10:00');
-  const [activeHoursEnd, setActiveHoursEnd] = useState('23:00');
   const [replyChance, setReplyChance] = useState(70);
   const [responseSpeed, setResponseSpeed] = useState('normal');
-  const [timezone, setTimezone] = useState('America/New_York');
 
   useEffect(() => {
     api.getConfig('elevenlabs_api_key').then(data => {
@@ -43,20 +40,11 @@ const SettingsPage = () => {
     api.getConfig('ai_system_prompt').then(data => {
       if (data.exists) setSystemPrompt(data.value || '');
     }).catch(() => {});
-    api.getConfig('ai_active_hours_start').then(data => {
-      if (data.exists) setActiveHoursStart(data.value || '10:00');
-    }).catch(() => {});
-    api.getConfig('ai_active_hours_end').then(data => {
-      if (data.exists) setActiveHoursEnd(data.value || '23:00');
-    }).catch(() => {});
     api.getConfig('ai_reply_chance').then(data => {
       if (data.exists) setReplyChance(parseInt(data.value || '70', 10));
     }).catch(() => {});
     api.getConfig('ai_response_speed').then(data => {
       if (data.exists) setResponseSpeed(data.value || 'normal');
-    }).catch(() => {});
-    api.getConfig('ai_timezone').then(data => {
-      if (data.exists) setTimezone(data.value || 'America/New_York');
     }).catch(() => {});
   }, []);
 
@@ -309,54 +297,6 @@ const SettingsPage = () => {
                 </div>
               </div>
 
-              {/* Active Hours */}
-              <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-primary" />
-                  <label className="text-sm font-medium text-foreground">Active Hours</label>
-                </div>
-                <p className="text-xs text-muted-foreground">Only reply during these hours. Outside = silent.</p>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <label className="text-xs text-muted-foreground mb-1 block">From</label>
-                    <input type="time" value={activeHoursStart}
-                      onChange={(e) => { setActiveHoursStart(e.target.value); saveAvailabilitySetting('ai_active_hours_start', e.target.value); }}
-                      className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
-                  </div>
-                  <span className="text-muted-foreground mt-5">→</span>
-                  <div className="flex-1">
-                    <label className="text-xs text-muted-foreground mb-1 block">To</label>
-                    <input type="time" value={activeHoursEnd}
-                      onChange={(e) => { setActiveHoursEnd(e.target.value); saveAvailabilitySetting('ai_active_hours_end', e.target.value); }}
-                      className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Timezone */}
-              <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
-                <div className="flex items-center gap-2">
-                  <Globe className="w-4 h-4 text-primary" />
-                  <label className="text-sm font-medium text-foreground">Timezone</label>
-                </div>
-                <p className="text-xs text-muted-foreground">Set your timezone so active hours work correctly (especially if your VPS is in a different region).</p>
-                <select value={timezone}
-                  onChange={(e) => { setTimezone(e.target.value); saveAvailabilitySetting('ai_timezone', e.target.value); }}
-                  className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary/50">
-                  <option value="Africa/Lagos">Africa/Lagos (WAT)</option>
-                  <option value="Africa/Johannesburg">Africa/Johannesburg (SAST)</option>
-                  <option value="Africa/Nairobi">Africa/Nairobi (EAT)</option>
-                  <option value="Africa/Cairo">Africa/Cairo (EET)</option>
-                  <option value="America/New_York">America/New_York (EST)</option>
-                  <option value="America/Chicago">America/Chicago (CST)</option>
-                  <option value="America/Los_Angeles">America/Los_Angeles (PST)</option>
-                  <option value="Europe/London">Europe/London (GMT)</option>
-                  <option value="Europe/Berlin">Europe/Berlin (CET)</option>
-                  <option value="Asia/Dubai">Asia/Dubai (GST)</option>
-                  <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
-                  <option value="Asia/Tokyo">Asia/Tokyo (JST)</option>
-                </select>
-              </div>
 
               {/* Reply Chance */}
               <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">

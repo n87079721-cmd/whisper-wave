@@ -1748,8 +1748,6 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
   const contactRow = db.prepare('SELECT is_archived FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (contactRow?.is_archived) return;
 
-  if (!isWithinActiveHours(db, userId)) return;
-
   const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
   if (Math.random() * 100 > replyChance) {
     const reactionEmoji = shouldReact();
@@ -1811,7 +1809,7 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   }
 
   let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
-  replyText = replyText.replace(/[—–-]{2,}/g, ' ').replace(/—/g, ' ').replace(/–/g, ' ');
+  replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
   const delay = calculateDelay(lastMsgContent.length, speed);
 
   setTimeout(async () => {
