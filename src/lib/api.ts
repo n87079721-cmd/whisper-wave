@@ -427,6 +427,23 @@ export const api = {
   getContactMedia(contactId: string) {
     return requestJson<Message[]>(`/api/contacts/${contactId}/media`);
   },
+
+  // Admin
+  adminListUsers() {
+    return requestJson<Array<{
+      id: string;
+      username: string;
+      display_name: string | null;
+      created_at: string;
+      message_count: number;
+      contact_count: number;
+      is_current: boolean;
+    }>>('/api/admin/users');
+  },
+
+  adminDeleteUser(userId: string) {
+    return requestJson<{ success: boolean }>(`/api/admin/users/${userId}`, { method: 'DELETE' });
+  },
 };
 
 // Types
