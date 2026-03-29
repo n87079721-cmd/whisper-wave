@@ -228,14 +228,6 @@ export const api = {
     });
   },
 
-  sendTextToPhone(phone: string, message: string) {
-    const jid = toPhoneJid(phone);
-    return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/text', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jid, message }),
-    });
-  },
 
   async sendMedia(contactId: string, file: File, caption?: string, isViewOnce?: boolean) {
     const mimeType = file.type || 'application/octet-stream';
