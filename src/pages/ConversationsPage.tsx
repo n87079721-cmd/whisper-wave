@@ -251,6 +251,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     setShowScrollDown(false);
     setReplyText(replyDraftsRef.current[selectedContact.id] ?? '');
     setPreviewUrl(null);
+    setQuotedMessage(null);
+    setShowProfile(false);
+    setEditingMsgId(null);
     refreshMessages(selectedContact.id, { forceScroll: true });
   }, [selectedContact?.id, refreshMessages]);
 
