@@ -16,6 +16,7 @@ import { generateReply, shouldReact, shouldAlsoReplyAfterReaction } from './ai.j
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, '..', 'data');
+const VOICE_MEDIA_DIR = path.join(DATA_DIR, 'voice-media');
 const logger = pino({ level: 'silent' });
 
 // Per-user instance store
@@ -350,6 +351,170 @@ function resolveLidPhone(inst, jid) {
   return { phone: jid.replace(/@.*$/, ''), jid };
 }
 
+function unwrapMessageContent(message) {
+  let current = message;
+  let depth = 0;
+
+  while (current && depth < 10) {
+    const next = current?.ephemeralMessage?.message
+      || current?.viewOnceMessage?.message
+      || current?.viewOnceMessageV2?.message
+      || current?.viewOnceMessageV2Extension?.message
+      || current?.deviceSentMessage?.message
+      || current?.documentWithCaptionMessage?.message
+      || current?.editedMessage?.message?.protocolMessage?.editedMessage;
+
+    if (!next) break;
+    current = next;
+    depth += 1;
+  }
+
+  return current || message;
+}
+
+function extractMessageContent(message) {
+  return message?.conversation
+    || message?.extendedTextMessage?.text
+    || message?.imageMessage?.caption
+    || message?.videoMessage?.caption
+    || message?.documentMessage?.caption
+    || message?.buttonsResponseMessage?.selectedDisplayText
+    || message?.listResponseMessage?.title
+    || message?.templateButtonReplyMessage?.selectedDisplayText
+    || '';
+}
+
+function getMessagePayload(message) {
+  const innerMessage = unwrapMessageContent(message);
+  const audioMessage = innerMessage?.audioMessage || null;
+  const isVoice = !!audioMessage;
+  const isImage = !!innerMessage?.imageMessage;
+  const isVideo = !!innerMessage?.videoMessage;
+  const isDocument = !!innerMessage?.documentMessage;
+
+  let msgType = 'text';
+  if (isVoice) msgType = 'voice';
+  else if (isImage) msgType = 'image';
+  else if (isVideo) msgType = 'video';
+  else if (isDocument) msgType = 'document';
+
+  return {
+    msgType,
+    isVoice,
+    content: extractMessageContent(innerMessage),
+    duration: audioMessage?.seconds || null,
+    mimetype: audioMessage?.mimetype || null,
+  };
+}
+
+function getAudioFileExtension(mimetype) {
+  const normalized = String(mimetype || '').toLowerCase();
+  if (normalized.includes('mpeg')) return 'mp3';
+  if (normalized.includes('mp4') || normalized.includes('aac') || normalized.includes('m4a')) return 'm4a';
+  if (normalized.includes('webm')) return 'webm';
+  if (normalized.includes('wav')) return 'wav';
+  return 'ogg';
+}
+
+async function saveVoiceMedia(userId, inst, msg, msgId, mimetype) {
+  if (!inst.sock) return null;
+
+  try {
+    if (!fs.existsSync(VOICE_MEDIA_DIR)) fs.mkdirSync(VOICE_MEDIA_DIR, { recursive: true });
+    const filename = `${msgId}.${getAudioFileExtension(mimetype)}`;
+    const filePath = path.join(VOICE_MEDIA_DIR, filename);
+
+    if (fs.existsSync(filePath)) return filename;
+
+    const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: inst.sock.updateMediaMessage });
+    if (!buffer?.length) return null;
+    fs.writeFileSync(filePath, buffer);
+    return filename;
+  } catch (err) {
+    console.log(`🎤 [${userId}] Voice download failed: ${err?.message}`);
+    return null;
+  }
+}
+
+function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath }) {
+  db.prepare(`
+    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      contact_id = excluded.contact_id,
+      jid = excluded.jid,
+      content = CASE
+        WHEN COALESCE(messages.content, '') = '' AND COALESCE(excluded.content, '') <> '' THEN excluded.content
+        ELSE messages.content
+      END,
+      type = CASE
+        WHEN COALESCE(messages.type, 'text') = 'text' AND excluded.type <> 'text' THEN excluded.type
+        ELSE messages.type
+      END,
+      direction = excluded.direction,
+      timestamp = excluded.timestamp,
+      status = excluded.status,
+      duration = COALESCE(excluded.duration, messages.duration),
+      media_path = COALESCE(excluded.media_path, messages.media_path)
+  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath);
+}
+
+function isUuidLike(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
+}
+
+function toEpochSeconds(value) {
+  if (typeof value === 'bigint') return Number(value);
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value && typeof value === 'object') {
+    if (typeof value.toNumber === 'function') return value.toNumber();
+    if (typeof value.low === 'number') return value.low;
+  }
+  if (typeof value === 'string' && value) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+    const asDate = Date.parse(value);
+    if (!Number.isNaN(asDate)) return Math.floor(asDate / 1000);
+  }
+  return null;
+}
+
+function buildHistoryAnchorFromDbRow(row, jid) {
+  if (!row?.id || isUuidLike(row.id)) return null;
+  const timestamp = Math.floor(new Date(row.timestamp).getTime() / 1000);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
+  return {
+    key: { remoteJid: jid, fromMe: row.direction === 'sent', id: row.id },
+    timestamp,
+  };
+}
+
+function buildHistoryAnchorFromChat(jid, chat) {
+  const lastMessage = chat?.lastMessage;
+  const keyId = lastMessage?.key?.id;
+  const timestamp = toEpochSeconds(lastMessage?.messageTimestamp || chat?.conversationTimestamp || chat?.lastMessageRecvTimestamp);
+  if (!keyId || !timestamp) return null;
+
+  return {
+    key: {
+      remoteJid: jid,
+      fromMe: !!lastMessage?.key?.fromMe,
+      id: keyId,
+      participant: lastMessage?.key?.participant,
+    },
+    timestamp,
+  };
+}
+
+function rememberChat(inst, chat, resolvedJid = null) {
+  if (!chat?.id) return;
+  if (!inst.store?.chats) inst.store.chats = {};
+  inst.store.chats[chat.id] = { ...inst.store.chats[chat.id], ...chat };
+  if (resolvedJid && resolvedJid !== chat.id) {
+    inst.store.chats[resolvedJid] = { ...inst.store.chats[resolvedJid], ...chat, id: resolvedJid };
+  }
+}
+
 export function getWhatsAppState(userId) {
   const inst = getInstance(userId);
   return {
@@ -511,6 +676,9 @@ async function startConnection(userId, db, options = {}) {
     try { inst.sock.ev.removeAllListeners('call'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('chats.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('chats.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('lid-mapping.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('messaging-history.set'); } catch {}
     try { inst.sock.ev.removeAllListeners('creds.update'); } catch {}
     try { inst.sock.end?.(undefined); } catch {}
@@ -548,7 +716,7 @@ async function startConnection(userId, db, options = {}) {
 
     // Local contact cache (replaces removed makeInMemoryStore)
     if (!inst.store) {
-      inst.store = { contacts: {} };
+      inst.store = { contacts: {}, chats: {} };
     }
 
     // Pre-populate contact store from DB on reconnect to prevent empty name lookups
@@ -687,7 +855,7 @@ async function startConnection(userId, db, options = {}) {
             console.log(`🔄 [${userId}] Auto recovery starting (phase: ${inst.syncState.phase}, ${inst.syncState.historyMessages} msgs so far)`);
             recoverSync(userId, db).catch(err => console.error('Auto recovery sync error:', err?.message));
           }
-        }, 150000); // 2.5 minutes after connect
+        }, 45000); // start active recovery soon enough to surface recent chats
       }
 
       if (connection === 'close') {
@@ -783,50 +951,29 @@ async function startConnection(userId, db, options = {}) {
           const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
           if (!contactId) continue; // Skip unresolved @lid contacts
 
-          const content = msg.message.conversation
-            || msg.message.extendedTextMessage?.text
-            || msg.message.imageMessage?.caption
-            || msg.message.videoMessage?.caption
-            || '';
-          const isVoice = !!msg.message.audioMessage;
-          const isImage = !!msg.message.imageMessage;
-          const isVideo = !!msg.message.videoMessage;
-          const isDocument = !!msg.message.documentMessage;
-
-          let msgType = 'text';
-          if (isVoice) msgType = 'voice';
-          else if (isImage) msgType = 'image';
-          else if (isVideo) msgType = 'video';
-          else if (isDocument) msgType = 'document';
+          const payload = getMessagePayload(msg.message);
+          const content = payload.content;
 
           const direction = isFromMe ? 'sent' : 'received';
           const msgId = msg.key.id || uuid();
 
-          // Download and save voice note audio for playback
-          let mediaPath = null;
-          if (isVoice && inst.sock) {
-            try {
-              const VOICE_MEDIA_DIR = path.join(DATA_DIR, 'voice-media');
-              if (!fs.existsSync(VOICE_MEDIA_DIR)) fs.mkdirSync(VOICE_MEDIA_DIR, { recursive: true });
-              const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: inst.sock.updateMediaMessage });
-              const filename = `${msgId}.ogg`;
-              fs.writeFileSync(path.join(VOICE_MEDIA_DIR, filename), buffer);
-              mediaPath = filename;
-            } catch (dlErr) {
-              console.log(`🎤 [${userId}] Voice download failed: ${dlErr?.message}`);
-            }
-          }
+          const mediaPath = payload.isVoice
+            ? await saveVoiceMedia(userId, inst, msg, msgId, payload.mimetype)
+            : null;
 
-          db.prepare(`
-            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
-            msgId, userId, contactId, resolvedJid, content, msgType, direction,
-            toIsoTimestamp(msg.messageTimestamp),
-            isFromMe ? 'sent' : 'delivered',
-            msg.message.audioMessage?.seconds || null,
-            mediaPath
-          );
+          upsertMessageRecord(db, {
+            id: msgId,
+            userId,
+            contactId,
+            jid: resolvedJid,
+            content,
+            type: payload.msgType,
+            direction,
+            timestamp: toIsoTimestamp(msg.messageTimestamp),
+            status: isFromMe ? 'sent' : 'delivered',
+            duration: payload.duration,
+            mediaPath,
+          });
 
           emit(userId, 'message', { contactId, msgId });
 
@@ -858,6 +1005,7 @@ async function startConnection(userId, db, options = {}) {
           if (!jid || jid === 'status@broadcast') continue;
           buildLidMapping(inst, chat);
           const resolved = resolveLidPhone(inst, jid);
+          rememberChat(inst, chat, resolved.jid);
           const phone = '+' + resolved.phone;
           const isGroup = jid.endsWith('@g.us');
           getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup);
@@ -870,7 +1018,18 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
-    inst.sock.ev.on('messaging-history.set', ({ chats, contacts: syncedContacts, messages: historyMsgs, syncType }) => {
+    inst.sock.ev.on('chats.update', (updates) => {
+      for (const chat of updates) {
+        try {
+          const jid = chat.id;
+          if (!jid || jid === 'status@broadcast') continue;
+          const resolved = resolveLidPhone(inst, jid);
+          rememberChat(inst, chat, resolved.jid);
+        } catch {}
+      }
+    });
+
+    inst.sock.ev.on('messaging-history.set', async ({ chats, contacts: syncedContacts, messages: historyMsgs, syncType }) => {
       const syncLabel = syncType === 2 ? 'ON_DEMAND' : syncType === 1 ? 'PUSH' : `type=${syncType ?? 'initial'}`;
       console.log(`📜 [${userId}] History sync [${syncLabel}]: ${chats?.length || 0} chats, ${syncedContacts?.length || 0} contacts, ${historyMsgs?.length || 0} messages`);
 
@@ -932,6 +1091,7 @@ async function startConnection(userId, db, options = {}) {
             if (!jid || jid === 'status@broadcast') continue;
             buildLidMapping(inst, chat);
             const resolved = resolveLidPhone(inst, jid);
+            rememberChat(inst, chat, resolved.jid);
             const phone = '+' + resolved.phone;
             const isGroup = jid.endsWith('@g.us');
             getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup);
@@ -979,30 +1139,25 @@ async function startConnection(userId, db, options = {}) {
             const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
             if (!contactId) continue; // Skip unresolved @lid contacts
 
-            const content = msg.message.conversation
-              || msg.message.extendedTextMessage?.text
-              || msg.message.imageMessage?.caption
-              || msg.message.videoMessage?.caption
-              || '';
-
-            const isVoice = !!msg.message.audioMessage;
-            let msgType = 'text';
-            if (isVoice) msgType = 'voice';
-            else if (msg.message.imageMessage) msgType = 'image';
-            else if (msg.message.videoMessage) msgType = 'video';
-            else if (msg.message.documentMessage) msgType = 'document';
-
+            const payload = getMessagePayload(msg.message);
             const msgId = msg.key.id || uuid();
-            db.prepare(`
-              INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(
-              msgId, userId, contactId, resolvedJid, content, msgType,
-              isFromMe ? 'sent' : 'received',
-              toIsoTimestamp(msg.messageTimestamp),
-              isFromMe ? 'sent' : 'delivered',
-              msg.message.audioMessage?.seconds || null
-            );
+            const mediaPath = payload.isVoice
+              ? await saveVoiceMedia(userId, inst, msg, msgId, payload.mimetype)
+              : null;
+
+            upsertMessageRecord(db, {
+              id: msgId,
+              userId,
+              contactId,
+              jid: resolvedJid,
+              content: payload.content,
+              type: payload.msgType,
+              direction: isFromMe ? 'sent' : 'received',
+              timestamp: toIsoTimestamp(msg.messageTimestamp),
+              status: isFromMe ? 'sent' : 'delivered',
+              duration: payload.duration,
+              mediaPath,
+            });
           } catch {}
         }
       }
@@ -1324,35 +1479,45 @@ async function recoverSync(userId, db) {
   const chatsToRecover = [];
   try {
     const storeContacts = inst.store?.contacts || {};
-    const contactJids = Object.keys(storeContacts).filter(
+    const storeChats = inst.store?.chats || {};
+    const candidateJids = Array.from(new Set([
+      ...Object.keys(storeContacts),
+      ...Object.keys(storeChats),
+    ])).filter(
       jid => jid.endsWith('@s.whatsapp.net') && jid !== 'status@broadcast'
     );
 
     const dbContacts = db.prepare(`
-      SELECT c.jid, c.id, COUNT(m.id) as msg_count
+      SELECT c.jid, c.id, COUNT(m.id) as msg_count, MAX(m.timestamp) as latest_timestamp
       FROM contacts c
       LEFT JOIN messages m ON m.contact_id = c.id AND m.user_id = ?
       WHERE c.user_id = ? AND c.is_group = 0
       GROUP BY c.jid
     `).all(userId, userId);
 
-    const dbContactMap = new Map(dbContacts.map(c => [c.jid, { id: c.id, count: c.msg_count }]));
+    const dbContactMap = new Map(dbContacts.map(c => [c.jid, { id: c.id, count: c.msg_count, latestTimestamp: c.latest_timestamp || null }]));
 
     let recovered = 0;
-    for (const jid of contactJids) {
+    const sortedJids = candidateJids.sort((a, b) => {
+      const bTs = toEpochSeconds(storeChats[b]?.lastMessage?.messageTimestamp || storeChats[b]?.conversationTimestamp || storeChats[b]?.lastMessageRecvTimestamp) || 0;
+      const aTs = toEpochSeconds(storeChats[a]?.lastMessage?.messageTimestamp || storeChats[a]?.conversationTimestamp || storeChats[a]?.lastMessageRecvTimestamp) || 0;
+      return bTs - aTs;
+    });
+
+    for (const jid of sortedJids) {
       const resolved = resolveLidPhone(inst, jid);
       const existing = dbContactMap.get(resolved.jid) || dbContactMap.get(jid);
 
       if (!existing || existing.count === 0) {
         const phone = '+' + resolved.phone;
-        const contact = storeContacts[jid];
+        const contact = storeContacts[jid] || storeChats[jid] || storeChats[resolved.jid];
         getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(contact), false);
         chatsToRecover.push({ jid: resolved.jid, contactDbId: existing?.id || null });
         recovered++;
       }
     }
 
-    console.log(`🔄 [${userId}] Recovery: ${contactJids.length} store contacts, ${dbContacts.length} DB contacts, ${recovered} missing`);
+    console.log(`🔄 [${userId}] Recovery: ${candidateJids.length} candidate chats, ${dbContacts.length} DB contacts, ${recovered} missing`);
     if (recovered > 0) {
       emit(userId, 'contacts_sync', { count: recovered });
     }
@@ -1366,24 +1531,18 @@ async function recoverSync(userId, db) {
     console.log(`🔄 [${userId}] Requesting history for ${fetchTargets.length} empty chats`);
     for (const target of fetchTargets) {
       try {
-        // First check if there's an oldest message in DB we can use as anchor
         const oldestMsg = db.prepare(
-          'SELECT id, jid, timestamp FROM messages WHERE jid = ? AND user_id = ? ORDER BY timestamp ASC LIMIT 1'
+          'SELECT id, jid, direction, timestamp FROM messages WHERE jid = ? AND user_id = ? ORDER BY timestamp ASC LIMIT 1'
         ).get(target.jid, userId);
+        const dbAnchor = buildHistoryAnchorFromDbRow(oldestMsg, target.jid);
+        const chatAnchor = buildHistoryAnchorFromChat(target.jid, inst.store?.chats?.[target.jid]);
+        const anchor = dbAnchor || chatAnchor;
 
-        if (oldestMsg && typeof inst.sock.fetchMessageHistory === 'function') {
-          // Valid anchor: use real message key + timestamp
-          const ts = Math.floor(new Date(oldestMsg.timestamp).getTime() / 1000);
-          await inst.sock.fetchMessageHistory(50, { remoteJid: target.jid, fromMe: false, id: oldestMsg.id }, ts);
+        if (anchor && typeof inst.sock.fetchMessageHistory === 'function') {
+          await inst.sock.fetchMessageHistory(50, anchor.key, anchor.timestamp);
           console.log(`📜 [${userId}] fetchMessageHistory sent for ${target.jid} (anchored)`);
         } else {
-          // No messages at all — use chatModify to mark unread (triggers server-side sync)
-          try {
-            await inst.sock.chatModify({ markRead: false, lastMessages: [{ key: { remoteJid: target.jid, fromMe: false, id: '' }, messageTimestamp: undefined }] }, target.jid);
-            console.log(`📜 [${userId}] chatModify(markUnread) sent for ${target.jid}`);
-          } catch (modErr) {
-            console.log(`📜 [${userId}] chatModify for ${target.jid} failed: ${modErr?.message}`);
-          }
+          console.log(`📜 [${userId}] Skipping history request for ${target.jid}: no valid anchor available yet`);
         }
         await new Promise(r => setTimeout(r, 500));
       } catch (err) {
@@ -1467,29 +1626,23 @@ export async function recoverSingleChat(userId, db, contactId) {
 
   // Check for an existing oldest message to use as anchor
   const oldestMsg = db.prepare(
-    'SELECT id, jid, timestamp FROM messages WHERE contact_id = ? AND user_id = ? ORDER BY timestamp ASC LIMIT 1'
+    'SELECT id, jid, direction, timestamp FROM messages WHERE contact_id = ? AND user_id = ? ORDER BY timestamp ASC LIMIT 1'
   ).get(contactId, userId);
+  const dbAnchor = buildHistoryAnchorFromDbRow(oldestMsg, jid);
+  const chatAnchor = buildHistoryAnchorFromChat(jid, inst.store?.chats?.[jid]);
+  const anchor = dbAnchor || chatAnchor;
 
-  if (oldestMsg && typeof inst.sock.fetchMessageHistory === 'function') {
+  if (anchor && typeof inst.sock.fetchMessageHistory === 'function') {
     try {
-      const ts = Math.floor(new Date(oldestMsg.timestamp).getTime() / 1000);
-      await inst.sock.fetchMessageHistory(50, { remoteJid: jid, fromMe: false, id: oldestMsg.id }, ts);
-      console.log(`📜 [${userId}] fetchMessageHistory sent for ${jid} (anchored to ${oldestMsg.id})`);
+      await inst.sock.fetchMessageHistory(50, anchor.key, anchor.timestamp);
+      console.log(`📜 [${userId}] fetchMessageHistory sent for ${jid} (anchored)`);
       return { success: true, message: 'History request sent with valid anchor. Messages will appear shortly.' };
     } catch (err) {
       console.error(`fetchMessageHistory error for ${jid}:`, err?.message);
     }
   }
 
-  // Fallback: use chatModify to mark unread (may trigger server-side sync)
-  try {
-    await inst.sock.chatModify({ markRead: false, lastMessages: [{ key: { remoteJid: jid, fromMe: false, id: '' }, messageTimestamp: undefined }] }, jid);
-    console.log(`📜 [${userId}] chatModify(markUnread) sent for ${jid}`);
-  } catch (modErr) {
-    console.log(`📜 [${userId}] chatModify for ${jid} failed: ${modErr?.message}`);
-  }
-
-  return { success: true, message: 'History recovery requested. Results depend on WhatsApp server availability.' };
+  return { success: true, message: 'No valid sync anchor yet for this chat. Keep the session connected a bit longer and try again.' };
 }
 
 // ─── Human-like timing helpers ───
@@ -1735,6 +1888,9 @@ async function clearSession(userId, db) {
     try { inst.sock.ev.removeAllListeners('call'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('chats.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('chats.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('lid-mapping.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('messaging-history.set'); } catch {}
     try { inst.sock.ev.removeAllListeners('creds.update'); } catch {}
     try { await inst.sock.logout(); } catch {}
