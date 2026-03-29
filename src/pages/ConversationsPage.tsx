@@ -20,14 +20,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [loading, setLoading] = useState(true);
 
   const [replyText, setReplyText] = useState('');
-  const [replyMode, setReplyMode] = useState<'text' | 'voice'>('text');
   const [sending, setSending] = useState(false);
-  const [voices, setVoices] = useState<Voice[]>([]);
-  const [selectedVoice, setSelectedVoice] = useState('JBFqnCBsd6RMkjVDRZzb');
 
-  const [previewing, setPreviewing] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
