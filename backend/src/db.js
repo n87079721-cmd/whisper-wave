@@ -69,6 +69,8 @@ function ensureCurrentTables(db) {
       status TEXT DEFAULT 'sent',
       duration INTEGER,
       media_path TEXT,
+       media_name TEXT,
+       media_mime TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (contact_id) REFERENCES contacts(id)
@@ -125,6 +127,16 @@ function ensureCurrentTables(db) {
     }
     if (!cols.has('unread_count')) {
       db.exec("ALTER TABLE contacts ADD COLUMN unread_count INTEGER DEFAULT 0");
+    }
+  } catch {}
+
+  try {
+    const messageCols = getColumnNames(db, 'messages');
+    if (!messageCols.has('media_name')) {
+      db.exec("ALTER TABLE messages ADD COLUMN media_name TEXT");
+    }
+    if (!messageCols.has('media_mime')) {
+      db.exec("ALTER TABLE messages ADD COLUMN media_mime TEXT");
     }
   } catch {}
 }
@@ -277,6 +289,8 @@ function migrateMessagesTable(db, legacyUserId) {
       status TEXT DEFAULT 'sent',
       duration INTEGER,
       media_path TEXT,
+      media_name TEXT,
+      media_mime TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (contact_id) REFERENCES contacts(id)
@@ -289,11 +303,13 @@ function migrateMessagesTable(db, legacyUserId) {
   const statusExpr = columns.has('status') ? "COALESCE(status, 'sent')" : "'sent'";
   const durationExpr = columns.has('duration') ? 'duration' : 'NULL';
   const mediaPathExpr = columns.has('media_path') ? 'media_path' : 'NULL';
+  const mediaNameExpr = columns.has('media_name') ? 'media_name' : 'NULL';
+  const mediaMimeExpr = columns.has('media_mime') ? 'media_mime' : 'NULL';
   const createdExpr = columns.has('created_at') ? "COALESCE(created_at, datetime('now'))" : "datetime('now')";
 
   db.prepare(`
-    INSERT OR IGNORE INTO messages_new (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, created_at)
-    SELECT id, ${userExpr}, contact_id, jid, ${contentExpr}, ${typeExpr}, direction, timestamp, ${statusExpr}, ${durationExpr}, ${mediaPathExpr}, ${createdExpr}
+    INSERT OR IGNORE INTO messages_new (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, created_at)
+    SELECT id, ${userExpr}, contact_id, jid, ${contentExpr}, ${typeExpr}, direction, timestamp, ${statusExpr}, ${durationExpr}, ${mediaPathExpr}, ${mediaNameExpr}, ${mediaMimeExpr}, ${createdExpr}
     FROM messages
   `).run({ legacyUserId });
 
