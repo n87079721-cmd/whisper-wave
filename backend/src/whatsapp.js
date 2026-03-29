@@ -631,6 +631,7 @@ async function startConnection(userId, db, options = {}) {
       inst.pendingPairingPhone = null;
       inst.connectionStatus = 'connected';
       inst.reconnectAttempt = 0;
+      startHeartbeat(userId, db);
 
       inst.syncState = {
         phase: 'waiting_history',
