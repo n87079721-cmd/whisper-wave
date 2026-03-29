@@ -7,6 +7,7 @@ export interface SyncState {
   phase: 'idle' | 'waiting_history' | 'importing' | 'partial' | 'ready' | 'recovering';
   connectedAt: string | null;
   lastHistorySyncAt: string | null;
+  lastProgressAt?: string | null;
   storeContacts: number;
   historyChats: number;
   historyContacts: number;
@@ -20,6 +21,7 @@ const defaultSyncState: SyncState = {
   phase: 'idle',
   connectedAt: null,
   lastHistorySyncAt: null,
+  lastProgressAt: null,
   storeContacts: 0,
   historyChats: 0,
   historyContacts: 0,
