@@ -1154,48 +1154,44 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                               )}
                               {renderMessageContent(msg)}
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
-                                <span className={`text-[10px] ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
-                                {msg.is_starred ? <Star className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500" /> : null}
+                                <span className={`text-[10px] inline-btn ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
+                                {msg.is_starred ? <Star className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500 inline-btn" /> : null}
                                 {msg.direction === 'sent' && <StatusLabel status={msg.status} />}
-                                {/* Reply button */}
+                                {/* Action buttons - visible on hover (desktop) or always tiny on mobile */}
                                 {msg.type !== 'call' && !msg.is_deleted && (
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); setQuotedMessage(msg); }}
-                                    className="opacity-0 md:group-hover:opacity-100 hover:text-primary text-muted-foreground transition-all ml-0.5"
-                                    title="Reply"
-                                  >
-                                    <Reply className="w-3 h-3" />
-                                  </button>
-                                )}
-                                {/* Star button */}
-                                {msg.type !== 'call' && !msg.is_deleted && (
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); handleStarMessage(msg.id, !!msg.is_starred); }}
-                                    className="opacity-0 md:group-hover:opacity-100 hover:text-yellow-500 text-muted-foreground transition-all"
-                                    title={msg.is_starred ? 'Unstar' : 'Star'}
-                                  >
-                                    <Star className={`w-3 h-3 ${msg.is_starred ? 'fill-yellow-500 text-yellow-500' : ''}`} />
-                                  </button>
-                                )}
-                                {/* Edit button for sent text messages */}
-                                {msg.direction === 'sent' && msg.type === 'text' && !msg.is_deleted && (
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); setEditingMsgId(msg.id); setEditingText(msg.content || ''); }}
-                                    className="opacity-0 md:group-hover:opacity-100 hover:text-primary text-muted-foreground transition-all ml-0.5"
-                                    title="Edit message"
-                                  >
-                                    <Pencil className="w-3 h-3" />
-                                  </button>
-                                )}
-                                <div className="relative ml-1">
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); setDeleteMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
-                                    disabled={deletingMessage === msg.id}
-                                    className="opacity-0 md:group-hover:opacity-100 hover:text-destructive text-muted-foreground transition-all"
-                                    title="Delete message"
-                                  >
-                                    {deletingMessage === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                                  </button>
+                                  <div className="flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-all">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setQuotedMessage(msg); }}
+                                      className="inline-btn p-0.5 hover:text-primary text-muted-foreground/50 md:text-muted-foreground"
+                                      title="Reply"
+                                    >
+                                      <Reply className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleStarMessage(msg.id, !!msg.is_starred); }}
+                                      className="inline-btn p-0.5 hover:text-yellow-500 text-muted-foreground/50 md:text-muted-foreground"
+                                      title={msg.is_starred ? 'Unstar' : 'Star'}
+                                    >
+                                      <Star className={`w-3 h-3 ${msg.is_starred ? 'fill-yellow-500 text-yellow-500' : ''}`} />
+                                    </button>
+                                    {msg.direction === 'sent' && msg.type === 'text' && (
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); setEditingMsgId(msg.id); setEditingText(msg.content || ''); }}
+                                        className="inline-btn p-0.5 hover:text-primary text-muted-foreground/50 md:text-muted-foreground"
+                                        title="Edit message"
+                                      >
+                                        <Pencil className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                    <div className="relative">
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); setDeleteMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
+                                        disabled={deletingMessage === msg.id}
+                                        className="inline-btn p-0.5 hover:text-destructive text-muted-foreground/50 md:text-muted-foreground"
+                                        title="Delete message"
+                                      >
+                                        {deletingMessage === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                                      </button>
                                   {deleteMenuMsgId === msg.id && (
                                     <div className={`absolute z-20 bottom-full mb-1 ${msg.direction === 'sent' ? 'right-0' : 'left-0'} bg-popover border border-border rounded-lg shadow-xl py-1 min-w-[160px]`}>
                                       <button
