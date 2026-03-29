@@ -1128,6 +1128,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                           <div
                             key={msg.id}
                             data-msg-idx={msg._idx}
+                            data-msg-id={msg.id}
                             className={`flex ${msg.type === 'call' ? 'justify-center' : msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                             onTouchStart={(e) => handleSwipeStart(e, msg)}
                             onTouchEnd={(e) => handleSwipeEnd(e, msg)}
@@ -1145,12 +1146,25 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                     }`
                               } ${isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''}`}
                             >
-                              {/* Quoted message preview */}
+                              {/* Quoted message preview - tap to scroll to original */}
                               {msg.reply_to_content && (
-                                <div className="mb-1.5 rounded-lg border-l-2 border-primary bg-background/20 px-2.5 py-1.5 text-[12px]">
+                                <button
+                                  type="button"
+                                  className="inline-btn w-full text-left mb-1.5 rounded-lg border-l-2 border-primary bg-background/20 px-2.5 py-1.5 text-[12px] hover:bg-background/30 transition-colors cursor-pointer"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!msg.reply_to_id) return;
+                                    const el = messagesViewportRef.current?.querySelector(`[data-msg-id="${msg.reply_to_id}"]`);
+                                    if (el) {
+                                      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                      el.classList.add('ring-2', 'ring-primary', 'rounded-2xl');
+                                      setTimeout(() => el.classList.remove('ring-2', 'ring-primary', 'rounded-2xl'), 2000);
+                                    }
+                                  }}
+                                >
                                   <p className="font-medium text-primary text-[11px]">{msg.reply_to_sender || 'Unknown'}</p>
                                   <p className="text-muted-foreground line-clamp-2">{msg.reply_to_content}</p>
-                                </div>
+                                </button>
                               )}
                               {renderMessageContent(msg)}
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
