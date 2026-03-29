@@ -323,6 +323,10 @@ export const api = {
     return requestJson<{ success: boolean }>('/api/reconnect', { method: 'POST' });
   },
 
+  disconnect() {
+    return requestJson<{ success: boolean }>('/api/disconnect', { method: 'POST' });
+  },
+
   clearSession() {
     return requestJson<{ success: boolean }>('/api/clear-session', { method: 'POST' });
   },

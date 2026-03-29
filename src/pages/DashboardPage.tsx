@@ -39,7 +39,7 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
   };
 
   const handleDisconnect = async () => {
-    try { await api.clearSession(); } catch {}
+    try { await api.disconnect(); toast.success('Disconnected — session saved'); refresh(); } catch {}
   };
 
   const handleRequestPairingCode = async () => {
