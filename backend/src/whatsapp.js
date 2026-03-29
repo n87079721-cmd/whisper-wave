@@ -85,14 +85,14 @@ function getInstance(userId) {
       connectionStatus: 'disconnected',
       eventListeners: [],
       reconnectTimer: null,
+      heartbeatTimer: null,
       isConnecting: false,
       reconnectAttempt: 0,
       connectionGeneration: 0,
       autoReplyCooldowns: new Map(),
       messageBatchBuffers: new Map(),
-      contactCache: new Map(), // phone/jid -> contact info
+      contactCache: new Map(),
       archiveSyncTimer: null,
-      // Sync state tracking
       syncState: {
         phase: 'idle',
         connectedAt: null,
