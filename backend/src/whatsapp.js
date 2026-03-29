@@ -624,7 +624,7 @@ async function startConnection(userId, db, options = {}) {
           // View-once media: don't try to download, show placeholder
           const typeLabel = msgType === 'video' ? '🎥 Video' : msgType === 'voice' ? '🎤 Voice note' : '📷 Photo';
           resolvedContent = `${typeLabel} (view once) — open WhatsApp on your phone to view`;
-        } else if (msg.hasMedia && ['voice', 'image', 'video', 'document'].includes(msgType)) {
+        } else if (msg.hasMedia && ['voice', 'image', 'video', 'document', 'sticker'].includes(msgType)) {
           const savedMedia = await saveMessageMedia(userId, msg, msgId, {
             msgType,
             mimetype,
@@ -754,7 +754,10 @@ function getMessagePayload(msg) {
     duration = msg.duration || null;
     mimetype = msg.mimetype || 'audio/ogg; codecs=opus';
     mediaName = mediaName || 'voice-note.ogg';
-  } else if (rawType === 'image' || rawType === 'sticker') {
+  } else if (rawType === 'sticker') {
+    msgType = 'sticker';
+    content = msg.body || msg.caption || '';
+  } else if (rawType === 'image') {
     msgType = 'image';
     content = msg.body || msg.caption || '';
   } else if (rawType === 'video' || rawType === 'gif') {
@@ -1012,7 +1015,7 @@ async function syncChats(userId, db) {
               let mediaPath = null;
               let resolvedMediaName = mediaName;
               let resolvedMediaMime = mimetype;
-              if (msg.hasMedia && ['voice', 'image', 'video', 'document'].includes(msgType)) {
+              if (msg.hasMedia && ['voice', 'image', 'video', 'document', 'sticker'].includes(msgType)) {
                 const savedMedia = await saveMessageMedia(userId, msg, msgId, {
                   msgType,
                   mimetype,
@@ -1110,7 +1113,7 @@ export async function recoverSingleChat(userId, db, contactId) {
         let mediaPath = null;
         let resolvedMediaName = mediaName;
         let resolvedMediaMime = mimetype;
-        if (msg.hasMedia && ['voice', 'image', 'video', 'document'].includes(msgType)) {
+        if (msg.hasMedia && ['voice', 'image', 'video', 'document', 'sticker'].includes(msgType)) {
           const savedMedia = await saveMessageMedia(userId, msg, msgId, {
             msgType,
             mimetype,
