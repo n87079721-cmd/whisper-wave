@@ -232,6 +232,7 @@ const VoiceStudioPage = () => {
   const isV3 = selectedModel === 'eleven_v3';
 
   return (
+    <>
     <div className="space-y-4 sm:space-y-6 max-w-2xl">
       <div>
         <h1 className="text-lg sm:text-2xl font-bold text-foreground">Voice Studio</h1>
