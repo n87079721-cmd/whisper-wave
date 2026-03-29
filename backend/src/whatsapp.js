@@ -609,9 +609,32 @@ async function startConnection(userId, db, options = {}) {
     });
 
     // ── Disconnected ──
+    // ── Connection state changes (detects silent drops) ──
+    client.on('change_state', (state) => {
+      if (generation !== inst.connectionGeneration) return;
+      console.log(`🔄 [${userId}] Connection state changed: ${state}`);
+      if (state === 'CONFLICT' || state === 'UNLAUNCHED' || state === 'UNPAIRED') {
+        // Don't auto-reconnect for these — user action needed
+      } else if (state === 'TIMEOUT' || state === 'PAIRING') {
+        if (inst.connectionStatus === 'connected') {
+          inst.connectionStatus = 'reconnecting';
+          emit(userId, 'status', { status: 'reconnecting' });
+          scheduleReconnect(userId, db, generation);
+        }
+      }
+    });
+
+    // ── Authenticated (session restored, before ready) ──
+    client.on('authenticated', () => {
+      if (generation !== inst.connectionGeneration) return;
+      console.log(`🔑 [${userId}] WhatsApp authenticated (session restored)`);
+    });
+
+    // ── Disconnected ──
     client.on('disconnected', (reason) => {
       if (generation !== inst.connectionGeneration) return;
       console.warn(`⚠️ [${userId}] WhatsApp disconnected: ${reason}`);
+      stopHeartbeat(userId);
 
       if (reason === 'LOGOUT' || reason === 'CONFLICT') {
         if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
@@ -621,15 +644,7 @@ async function startConnection(userId, db, options = {}) {
       } else {
         inst.connectionStatus = 'reconnecting';
         emit(userId, 'status', { status: 'reconnecting' });
-        if (inst.reconnectTimer) clearTimeout(inst.reconnectTimer);
-        const delays = [3000, 5000, 10000];
-        const delay = delays[Math.min(inst.reconnectAttempt, delays.length - 1)];
-        inst.reconnectAttempt++;
-        inst.reconnectTimer = setTimeout(() => {
-          if (generation !== inst.connectionGeneration) return;
-          inst.reconnectTimer = null;
-          startConnection(userId, db, { force: true });
-        }, delay);
+        scheduleReconnect(userId, db, generation);
       }
     });
 
