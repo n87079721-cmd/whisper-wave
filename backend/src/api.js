@@ -939,9 +939,9 @@ RULES:
 
   router.post('/reconnect', async (req, res) => {
     try {
-      // Force-start a fresh connection
-      initWhatsApp(req.userId, db);
-      res.json({ success: true });
+      const wa = getWA(req);
+      await wa.reconnect();
+      res.json({ success: true, state: wa.getState() });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
