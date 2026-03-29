@@ -327,6 +327,7 @@ export const api = {
   editMessage(messageId: string, newContent: string) {
     return requestJson<{ success: boolean }>('/api/edit/message', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messageId, newContent }),
     });
   },
@@ -341,6 +342,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ archive }),
     });
+  },
+
+  syncArchives() {
+    return requestJson<{ synced: number }>('/api/sync-archives', { method: 'POST' });
   },
 
   markChatRead(contactId: string) {
@@ -377,6 +382,7 @@ export const api = {
   replyToStatus(senderJid: string, statusId: string, message: string) {
     return requestJson<{ success?: boolean; error?: string }>('/api/statuses/reply', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ senderJid, statusId, message }),
     });
   },

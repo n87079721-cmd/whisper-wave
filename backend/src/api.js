@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation } from './whatsapp.js';
 import { initWhatsApp } from './whatsapp.js';
-import { archiveChat, markChatRead } from './whatsapp.js';
+import { archiveChat, markChatRead, syncArchiveStates } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
 import QRCode from 'qrcode';
@@ -971,6 +971,16 @@ RULES:
       `).run(msgId, req.userId, contactRow.id, senderJid, message, new Date().toISOString());
 
       res.json({ success: true, messageId: msgId });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Sync archive states from WhatsApp ──────────────────
+  router.post('/sync-archives', async (req, res) => {
+    try {
+      const result = await syncArchiveStates(req.userId, db);
+      res.json(result);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

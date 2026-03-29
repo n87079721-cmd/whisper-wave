@@ -153,6 +153,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [refreshAllContacts]);
 
   useEffect(() => {
+    // Sync archive states from WhatsApp then refresh conversations
+    api.syncArchives().catch(() => {});
     refreshConversations().then(() => setLoading(false));
     api.getVoices().then(setVoices).catch(() => {});
   }, [refreshConversations]);

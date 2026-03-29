@@ -1724,6 +1724,38 @@ export async function archiveChat(userId, db, contactId, archive) {
   return { success: true, archived: archive };
 }
 
+// ── Sync archive states from WhatsApp ──
+
+export async function syncArchiveStates(userId, db) {
+  const inst = getInstance(userId);
+  if (!inst.client || inst.connectionStatus !== 'connected') return { synced: 0 };
+
+  try {
+    const chats = await inst.client.getChats();
+    let synced = 0;
+    for (const chat of chats) {
+      const jid = toJid(chat.id._serialized);
+      const contact = db.prepare('SELECT id, is_archived FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+      if (!contact) continue;
+
+      const waArchived = chat.archived ? 1 : 0;
+      const dbArchived = contact.is_archived || 0;
+      if (waArchived !== dbArchived) {
+        db.prepare('UPDATE contacts SET is_archived = ? WHERE id = ? AND user_id = ?').run(waArchived, contact.id, userId);
+        synced++;
+      }
+    }
+    if (synced > 0) {
+      console.log(`📦 [${userId}] Synced ${synced} archive state changes from WhatsApp`);
+      emit(userId, 'contacts_updated', { reason: 'archive_sync' });
+    }
+    return { synced };
+  } catch (err) {
+    console.error(`📦 [${userId}] Archive sync failed:`, err?.message);
+    return { synced: 0 };
+  }
+}
+
 // ── Mark chat as read ──
 
 export async function markChatRead(userId, db, contactId) {
