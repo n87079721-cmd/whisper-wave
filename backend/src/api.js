@@ -952,17 +952,36 @@ RULES:
     }
   });
 
-  // Reply to a status
+  // Reply to a status (quotes the original status like WhatsApp does)
   router.post('/statuses/reply', async (req, res) => {
     try {
       const { senderJid, statusId, message } = req.body;
       if (!senderJid || !message) return res.status(400).json({ error: 'Missing senderJid or message' });
 
       const wa = getWA(req);
-      const sendResult = await wa.sendTextMessage(senderJid, message);
+      let sendResult;
+
+      // Try to quote the original status message
+      if (statusId) {
+        try {
+          const statusMsg = await wa.getMessageById(statusId);
+          if (statusMsg) {
+            // reply() quotes the original status and sends to the status author's chat
+            sendResult = await statusMsg.reply(message);
+          }
+        } catch (err) {
+          console.log('Could not quote status, falling back to DM:', err?.message);
+        }
+      }
+
+      // Fallback: send as quoted-context DM
+      if (!sendResult) {
+        sendResult = await wa.sendTextMessage(senderJid, message);
+      }
+
       const msgId = getSentMessageId(sendResult);
 
-      // Also save as a regular message so it appears in the chat
+      // Save as a regular message so it appears in the chat
       const { contactRow } = resolveOutgoingTarget(req.userId, { jid: senderJid });
       db.prepare(`
         INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
