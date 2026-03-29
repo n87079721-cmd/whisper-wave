@@ -1124,6 +1124,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                             key={msg.id}
                             data-msg-idx={msg._idx}
                             className={`flex ${msg.type === 'call' ? 'justify-center' : msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
+                            onTouchStart={(e) => handleSwipeStart(e, msg)}
+                            onTouchEnd={(e) => handleSwipeEnd(e, msg)}
                           >
                             <div
                               className={`group max-w-[85%] md:max-w-[65%] ${
@@ -1138,15 +1140,43 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                     }`
                               } ${isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''}`}
                             >
+                              {/* Quoted message preview */}
+                              {msg.reply_to_content && (
+                                <div className="mb-1.5 rounded-lg border-l-2 border-primary bg-background/20 px-2.5 py-1.5 text-[12px]">
+                                  <p className="font-medium text-primary text-[11px]">{msg.reply_to_sender || 'Unknown'}</p>
+                                  <p className="text-muted-foreground line-clamp-2">{msg.reply_to_content}</p>
+                                </div>
+                              )}
                               {renderMessageContent(msg)}
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
                                 <span className={`text-[10px] ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
+                                {msg.is_starred ? <Star className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500" /> : null}
                                 {msg.direction === 'sent' && <StatusLabel status={msg.status} />}
+                                {/* Reply button */}
+                                {msg.type !== 'call' && !msg.is_deleted && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setQuotedMessage(msg); }}
+                                    className="opacity-0 md:group-hover:opacity-100 hover:text-primary text-muted-foreground transition-all ml-0.5"
+                                    title="Reply"
+                                  >
+                                    <Reply className="w-3 h-3" />
+                                  </button>
+                                )}
+                                {/* Star button */}
+                                {msg.type !== 'call' && !msg.is_deleted && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleStarMessage(msg.id, !!msg.is_starred); }}
+                                    className="opacity-0 md:group-hover:opacity-100 hover:text-yellow-500 text-muted-foreground transition-all"
+                                    title={msg.is_starred ? 'Unstar' : 'Star'}
+                                  >
+                                    <Star className={`w-3 h-3 ${msg.is_starred ? 'fill-yellow-500 text-yellow-500' : ''}`} />
+                                  </button>
+                                )}
                                 {/* Edit button for sent text messages */}
                                 {msg.direction === 'sent' && msg.type === 'text' && !msg.is_deleted && (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setEditingMsgId(msg.id); setEditingText(msg.content || ''); }}
-                                    className="opacity-70 md:opacity-0 md:group-hover:opacity-100 hover:text-primary text-muted-foreground transition-all ml-0.5"
+                                    className="opacity-0 md:group-hover:opacity-100 hover:text-primary text-muted-foreground transition-all ml-0.5"
                                     title="Edit message"
                                   >
                                     <Pencil className="w-3 h-3" />
@@ -1156,7 +1186,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setDeleteMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
                                     disabled={deletingMessage === msg.id}
-                                    className="opacity-70 md:opacity-0 md:group-hover:opacity-100 hover:text-destructive text-muted-foreground transition-all"
+                                    className="opacity-0 md:group-hover:opacity-100 hover:text-destructive text-muted-foreground transition-all"
                                     title="Delete message"
                                   >
                                     {deletingMessage === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
