@@ -1,12 +1,5 @@
-import makeWASocket, {
-  useMultiFileAuthState,
-  DisconnectReason,
-  makeCacheableSignalKeyStore,
-  fetchLatestBaileysVersion,
-  downloadMediaMessage,
-} from '@whiskeysockets/baileys';
-import { Boom } from '@hapi/boom';
-import pino from 'pino';
+import pkg from 'whatsapp-web.js';
+const { Client, LocalAuth, MessageMedia } = pkg;
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -17,7 +10,7 @@ import { generateReply, shouldReact, shouldAlsoReplyAfterReaction } from './ai.j
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const VOICE_MEDIA_DIR = path.join(DATA_DIR, 'voice-media');
-const logger = pino({ level: 'silent' });
+const STATUS_MEDIA_DIR = path.join(DATA_DIR, 'status-media');
 
 // Per-user instance store
 const userInstances = new Map(); // userId -> instance object
@@ -43,13 +36,13 @@ function extractNameCandidate(source) {
   const saved = sanitizeName(source?.name);
   if (saved) return { name: saved, priority: NAME_PRIORITY.saved };
 
-  const notify = sanitizeName(source?.notify);
+  const notify = sanitizeName(source?.notify || source?.pushname || source?.shortName);
   if (notify) return { name: notify, priority: NAME_PRIORITY.notify };
 
   const verified = sanitizeName(source?.verifiedName);
   if (verified) return { name: verified, priority: NAME_PRIORITY.verified };
 
-  const push = sanitizeName(source?.pushName);
+  const push = sanitizeName(source?.pushName || source?.pushname);
   if (push) return { name: push, priority: NAME_PRIORITY.push };
 
   return { name: null, priority: NAME_PRIORITY.none };
@@ -81,22 +74,10 @@ function shouldReplaceName(candidate, existingName, phone) {
   return candidate.priority >= NAME_PRIORITY.saved;
 }
 
-function isSignalSessionError(err) {
-  const message = (err?.message || err?.toString?.() || '').toLowerCase();
-  return (
-    message.includes('bad mac') ||
-    message.includes('failed to decrypt message with any known session') ||
-    message.includes('decryptwhispermessage') ||
-    message.includes('sessioncipher') ||
-    message.includes('signalprotocol')
-  );
-}
-
 function getInstance(userId) {
   if (!userInstances.has(userId)) {
     userInstances.set(userId, {
-      sock: null,
-      store: null,
+      client: null,
       qrCode: null,
       pairingCode: null,
       pendingPairingPhone: null,
@@ -106,15 +87,12 @@ function getInstance(userId) {
       isConnecting: false,
       reconnectAttempt: 0,
       connectionGeneration: 0,
-      badMacTimestamps: [],
-      repairInProgress: false,
-      msgRetryCounterCache: new NodeCache({ stdTTL: 600, checkperiod: 120 }),
       autoReplyCooldowns: new Map(),
       messageBatchBuffers: new Map(),
-      lidMap: new Map(),
+      contactCache: new Map(), // phone/jid -> contact info
       // Sync state tracking
       syncState: {
-        phase: 'idle',         // idle | waiting_history | importing | partial | ready | recovering
+        phase: 'idle',
         connectedAt: null,
         lastHistorySyncAt: null,
         lastProgressAt: null,
@@ -132,279 +110,24 @@ function getInstance(userId) {
   return userInstances.get(userId);
 }
 
-// Build LID-to-phone mappings from a contact object
-function buildLidMapping(inst, contact) {
-  if (!contact) return;
-  const id = contact.id;
-  if (!id) return;
+// ── Helpers ──────────────────────────────────────────────
 
-  // Case 1: Contact has id=xxx@s.whatsapp.net and lid=yyy@lid
-  if (id.endsWith('@s.whatsapp.net') && contact.lid) {
-    const lidJid = typeof contact.lid === 'string' ? contact.lid : contact.lid?.toString?.();
-    if (lidJid) {
-      const phone = id.replace('@s.whatsapp.net', '');
-      inst.lidMap.set(lidJid, phone);
-      if (!lidJid.endsWith('@lid')) inst.lidMap.set(lidJid + '@lid', phone);
-    }
-  }
-
-  // Case 2: Contact has id=xxx@lid and lid property pointing to @s.whatsapp.net
-  if (id.endsWith('@lid') && contact.lid && contact.lid !== id) {
-    const otherJid = typeof contact.lid === 'string' ? contact.lid : null;
-    if (otherJid?.endsWith('@s.whatsapp.net')) {
-      const phone = otherJid.replace('@s.whatsapp.net', '');
-      inst.lidMap.set(id, phone);
-    }
-  }
-
-  // Case 3: Contact with @lid id has a phoneNumber field (Baileys v6.7+)
-  if (id.endsWith('@lid') && contact.phoneNumber) {
-    const phone = contact.phoneNumber.replace(/[^0-9]/g, '');
-    if (phone.length >= 7 && phone.length <= 15) {
-      inst.lidMap.set(id, phone);
-    }
-  }
-
-  // Case 4: Contact with @lid id has a phone field
-  if (id.endsWith('@lid') && contact.phone) {
-    const phone = (typeof contact.phone === 'string' ? contact.phone : '').replace(/[^0-9]/g, '');
-    if (phone.length >= 7 && phone.length <= 15) {
-      inst.lidMap.set(id, phone);
-    }
-  }
+/** Convert a whatsapp-web.js serialized ID to a standard JID */
+function toJid(id) {
+  if (!id) return '';
+  // whatsapp-web.js uses format like "1234567890@c.us" or "1234567890-1234567890@g.us"
+  // We normalize @c.us to @s.whatsapp.net for DB consistency
+  return id.replace(/@c\.us$/, '@s.whatsapp.net');
 }
 
-// Extract LID mappings from message alt fields (Baileys 6.8+)
-function extractAltMappings(inst, msg) {
-  if (!msg?.key) return;
-  const { remoteJid, remoteJidAlt, participant, participantAlt } = msg.key;
-
-  // senderPn is the most reliable source (contains real phone @s.whatsapp.net)
-  if (msg.key.senderPn && remoteJid?.endsWith('@lid')) {
-    const phone = msg.key.senderPn.replace('@s.whatsapp.net', '').replace(/@.*$/, '');
-    if (phone && /^\d{7,15}$/.test(phone)) {
-      inst.lidMap.set(remoteJid, phone);
-    }
-  }
-
-  if (remoteJid?.endsWith('@lid') && remoteJidAlt?.endsWith('@s.whatsapp.net')) {
-    const phone = remoteJidAlt.replace('@s.whatsapp.net', '');
-    inst.lidMap.set(remoteJid, phone);
-  }
-  if (participant?.endsWith('@lid') && participantAlt?.endsWith('@s.whatsapp.net')) {
-    const phone = participantAlt.replace('@s.whatsapp.net', '');
-    inst.lidMap.set(participant, phone);
-  }
+/** Convert a standard JID back to whatsapp-web.js format */
+function fromJid(jid) {
+  if (!jid) return '';
+  return jid.replace(/@s\.whatsapp\.net$/, '@c.us');
 }
 
-// Reconcile @lid and @s.whatsapp.net duplicate contacts in DB
-function reconcileLidContacts(db, userId, lidJid, phone) {
-  try {
-    const lidPhone = '+' + lidJid.replace('@lid', '');
-    const realPhone = '+' + phone;
-    const realJid = phone + '@s.whatsapp.net';
-
-    // Find the @lid-based contact (by JID, by fake phone from raw LID, or by name pattern)
-    const lidContact = db.prepare(
-      "SELECT id, name, phone FROM contacts WHERE user_id = ? AND (jid = ? OR phone = ? OR jid LIKE ?)"
-    ).get(userId, lidJid, lidPhone, lidJid.replace('@lid', '') + '%');
-
-    if (!lidContact) return;
-
-    // Find or create the real phone contact
-    const realContact = db.prepare(
-      "SELECT id, name FROM contacts WHERE user_id = ? AND jid = ?"
-    ).get(userId, realJid);
-
-    if (realContact && realContact.id !== lidContact.id) {
-      // Move messages from lid contact to real contact
-      db.prepare(
-        "UPDATE messages SET contact_id = ?, jid = ? WHERE contact_id = ? AND user_id = ?"
-      ).run(realContact.id, realJid, lidContact.id, userId);
-
-      // Update name if lid contact had a better one
-      if (lidContact.name && !isPhoneLikeName(lidContact.name, realPhone) &&
-          (!realContact.name || isPhoneLikeName(realContact.name, realPhone))) {
-        db.prepare("UPDATE contacts SET name = ? WHERE id = ?").run(lidContact.name, realContact.id);
-      }
-
-      // Delete the lid contact
-      db.prepare("DELETE FROM contacts WHERE id = ? AND user_id = ?").run(lidContact.id, userId);
-    } else if (!realContact) {
-      // No real contact exists — update the lid contact to use real JID/phone
-      db.prepare(
-        "UPDATE contacts SET jid = ?, phone = ? WHERE id = ? AND user_id = ?"
-      ).run(realJid, realPhone, lidContact.id, userId);
-
-      // Also update messages
-      db.prepare(
-        "UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?"
-      ).run(realJid, lidContact.id, userId);
-    }
-  } catch (err) {
-    console.error('reconcileLidContacts error:', err?.message || err);
-  }
-}
-
-// Deferred LID sweep: re-check unresolved contacts after a delay
-const pendingSweeps = new Map();
-function schedulelidSweep(userId, db, inst) {
-  if (pendingSweeps.has(userId)) clearTimeout(pendingSweeps.get(userId));
-  pendingSweeps.set(userId, setTimeout(() => {
-    pendingSweeps.delete(userId);
-    runLidSweep(userId, db, inst);
-  }, 10000)); // 10 seconds after last history sync event
-}
-
-function runLidSweep(userId, db, inst) {
-  try {
-    // Find all contacts still using @lid JIDs
-    const lidContacts = db.prepare(
-      "SELECT id, jid, name, phone FROM contacts WHERE user_id = ? AND jid LIKE '%@lid'"
-    ).all(userId);
-
-    if (!lidContacts.length) return;
-    console.log(`🔍 [${userId}] LID sweep: checking ${lidContacts.length} unresolved contacts`);
-
-    let resolved = 0;
-    for (const contact of lidContacts) {
-      const mapped = inst.lidMap.get(contact.jid);
-      if (mapped) {
-        reconcileLidContacts(db, userId, contact.jid, mapped);
-        resolved++;
-      }
-    }
-
-    if (resolved > 0) {
-      console.log(`🔗 [${userId}] LID sweep resolved ${resolved} contacts`);
-      emit(userId, 'contacts_sync', { count: resolved });
-    } else {
-      console.log(`📇 [${userId}] LID sweep: no new resolutions (${inst.lidMap.size} mappings available)`);
-    }
-  } catch (err) {
-    console.error(`LID sweep error [${userId}]:`, err?.message || err);
-  }
-}
-
-// Resolve a JID to a real phone number
-// Returns { phone, jid } where phone is the clean number and jid is the best JID to use
-function resolveLidPhone(inst, jid) {
-  if (!jid) return { phone: '', jid: jid };
-
-  // Normal @s.whatsapp.net — phone is directly in the JID
-  if (jid.endsWith('@s.whatsapp.net')) {
-    return { phone: jid.replace('@s.whatsapp.net', ''), jid };
-  }
-
-  // Group JIDs — not a phone number
-  if (jid.endsWith('@g.us')) {
-    return { phone: jid.replace('@g.us', ''), jid };
-  }
-
-  // @lid JID — need to resolve
-  if (jid.endsWith('@lid')) {
-    // Layer 1: Check cached lidMap
-    const mapped = inst.lidMap.get(jid);
-    if (mapped) {
-      return { phone: mapped, jid: mapped + '@s.whatsapp.net' };
-    }
-
-    // Layer 1.5: Try Baileys' internal signal repository mapping
-    try {
-      const pnJid = inst.sock?.signalRepository?.lidMapping?.getPNForLID?.(jid);
-      if (pnJid && pnJid.endsWith('@s.whatsapp.net')) {
-        const phone = pnJid.replace('@s.whatsapp.net', '');
-        inst.lidMap.set(jid, phone);
-        return { phone, jid: pnJid };
-      }
-    } catch {}
-
-    // Layer 2: Scan store contacts for any contact whose .lid matches this JID
-    if (inst.store?.contacts) {
-      for (const [cid, contact] of Object.entries(inst.store.contacts)) {
-        if (!cid.endsWith('@s.whatsapp.net')) continue;
-        const contactLid = contact.lid;
-        if (contactLid === jid || contactLid === jid.replace('@lid', '')) {
-          const phone = cid.replace('@s.whatsapp.net', '');
-          inst.lidMap.set(jid, phone);
-          return { phone, jid: cid };
-        }
-      }
-    }
-
-    // Layer 2.5: Check if any store contact with @lid id has phoneNumber
-    const lidContact = inst.store?.contacts?.[jid];
-    if (lidContact?.phoneNumber) {
-      const phone = lidContact.phoneNumber.replace(/[^0-9]/g, '');
-      if (phone.length >= 7 && phone.length <= 15) {
-        inst.lidMap.set(jid, phone);
-        return { phone, jid: phone + '@s.whatsapp.net' };
-      }
-    }
-
-    // Layer 3: Fallback — use raw LID number (will show as unknown number)
-    const rawLid = jid.replace('@lid', '');
-    return { phone: rawLid, jid };
-  }
-
-  // Unknown format fallback
-  return { phone: jid.replace(/@.*$/, ''), jid };
-}
-
-function unwrapMessageContent(message) {
-  let current = message;
-  let depth = 0;
-
-  while (current && depth < 10) {
-    const next = current?.ephemeralMessage?.message
-      || current?.viewOnceMessage?.message
-      || current?.viewOnceMessageV2?.message
-      || current?.viewOnceMessageV2Extension?.message
-      || current?.deviceSentMessage?.message
-      || current?.documentWithCaptionMessage?.message
-      || current?.editedMessage?.message?.protocolMessage?.editedMessage;
-
-    if (!next) break;
-    current = next;
-    depth += 1;
-  }
-
-  return current || message;
-}
-
-function extractMessageContent(message) {
-  return message?.conversation
-    || message?.extendedTextMessage?.text
-    || message?.imageMessage?.caption
-    || message?.videoMessage?.caption
-    || message?.documentMessage?.caption
-    || message?.buttonsResponseMessage?.selectedDisplayText
-    || message?.listResponseMessage?.title
-    || message?.templateButtonReplyMessage?.selectedDisplayText
-    || '';
-}
-
-function getMessagePayload(message) {
-  const innerMessage = unwrapMessageContent(message);
-  const audioMessage = innerMessage?.audioMessage || null;
-  const isVoice = !!audioMessage;
-  const isImage = !!innerMessage?.imageMessage;
-  const isVideo = !!innerMessage?.videoMessage;
-  const isDocument = !!innerMessage?.documentMessage;
-
-  let msgType = 'text';
-  if (isVoice) msgType = 'voice';
-  else if (isImage) msgType = 'image';
-  else if (isVideo) msgType = 'video';
-  else if (isDocument) msgType = 'document';
-
-  return {
-    msgType,
-    isVoice,
-    content: extractMessageContent(innerMessage),
-    duration: audioMessage?.seconds || null,
-    mimetype: audioMessage?.mimetype || null,
-  };
+function phoneFromJid(jid) {
+  return jid.replace(/@(s\.whatsapp\.net|c\.us|g\.us|lid)$/, '');
 }
 
 function getAudioFileExtension(mimetype) {
@@ -421,34 +144,6 @@ function hasSavedVoiceFile(filePath) {
     return fs.existsSync(filePath) && fs.statSync(filePath).size > 0;
   } catch {
     return false;
-  }
-}
-
-function normalizeMessageForMediaDownload(msg) {
-  if (!msg?.message) return msg;
-  const innerMessage = unwrapMessageContent(msg.message);
-  if (innerMessage === msg.message) return msg;
-  return { ...msg, message: innerMessage };
-}
-
-async function saveVoiceMedia(userId, inst, msg, msgId, mimetype) {
-  if (!inst.sock) return null;
-
-  try {
-    if (!fs.existsSync(VOICE_MEDIA_DIR)) fs.mkdirSync(VOICE_MEDIA_DIR, { recursive: true });
-    const filename = `${msgId}.${getAudioFileExtension(mimetype)}`;
-    const filePath = path.join(VOICE_MEDIA_DIR, filename);
-
-    if (hasSavedVoiceFile(filePath)) return filename;
-
-    const normalizedMsg = normalizeMessageForMediaDownload(msg);
-    const buffer = await downloadMediaMessage(normalizedMsg, 'buffer', {}, { logger, reuploadRequest: inst.sock.updateMediaMessage });
-    if (!buffer?.length) return null;
-    fs.writeFileSync(filePath, buffer);
-    return filename;
-  } catch (err) {
-    console.log(`🎤 [${userId}] Voice download failed: ${err?.message}`);
-    return null;
   }
 }
 
@@ -479,65 +174,7 @@ function isUuidLike(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
 }
 
-function toEpochSeconds(value) {
-  if (typeof value === 'bigint') return Number(value);
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (value && typeof value === 'object') {
-    if (typeof value.toNumber === 'function') return value.toNumber();
-    if (typeof value.low === 'number') return value.low;
-  }
-  if (typeof value === 'string' && value) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-    const asDate = Date.parse(value);
-    if (!Number.isNaN(asDate)) return Math.floor(asDate / 1000);
-  }
-  return null;
-}
-
-function buildHistoryAnchorFromDbRow(row, jid) {
-  if (!row?.id || isUuidLike(row.id)) return null;
-  const timestamp = Math.floor(new Date(row.timestamp).getTime() / 1000);
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
-  return {
-    key: { remoteJid: jid, fromMe: row.direction === 'sent', id: row.id },
-    timestamp,
-  };
-}
-
-function buildHistoryAnchorFromChat(jid, chat) {
-  const lastMessage = chat?.lastMessage;
-  const keyId = lastMessage?.key?.id;
-  const timestamp = toEpochSeconds(lastMessage?.messageTimestamp || chat?.conversationTimestamp || chat?.lastMessageRecvTimestamp);
-  if (!keyId || !timestamp) return null;
-
-  return {
-    key: {
-      remoteJid: jid,
-      fromMe: !!lastMessage?.key?.fromMe,
-      id: keyId,
-      participant: lastMessage?.key?.participant,
-    },
-    timestamp,
-  };
-}
-
-function getChatActivityTimestamp(chat) {
-  const timestamp = toEpochSeconds(
-    chat?.lastMessage?.messageTimestamp || chat?.conversationTimestamp || chat?.lastMessageRecvTimestamp
-  );
-
-  return timestamp ? new Date(timestamp * 1000).toISOString() : null;
-}
-
-function rememberChat(inst, chat, resolvedJid = null) {
-  if (!chat?.id) return;
-  if (!inst.store?.chats) inst.store.chats = {};
-  inst.store.chats[chat.id] = { ...inst.store.chats[chat.id], ...chat };
-  if (resolvedJid && resolvedJid !== chat.id) {
-    inst.store.chats[resolvedJid] = { ...inst.store.chats[resolvedJid], ...chat, id: resolvedJid };
-  }
-}
+// ── Exports ──────────────────────────────────────────────
 
 export function getWhatsAppState(userId) {
   const inst = getInstance(userId);
@@ -552,37 +189,12 @@ export function getWhatsAppState(userId) {
 function updateSyncState(userId, db, updates) {
   const inst = getInstance(userId);
   Object.assign(inst.syncState, updates);
-  // Compute live DB counts
   try {
     inst.syncState.totalDbContacts = db.prepare('SELECT COUNT(*) as c FROM contacts WHERE user_id = ? AND is_group = 0').get(userId)?.c || 0;
     inst.syncState.totalDbMessages = db.prepare('SELECT COUNT(*) as c FROM messages WHERE user_id = ?').get(userId)?.c || 0;
-    inst.syncState.unresolvedLids = db.prepare("SELECT COUNT(*) as c FROM contacts WHERE user_id = ? AND jid LIKE '%@lid'").get(userId)?.c || 0;
+    inst.syncState.unresolvedLids = 0; // No LID issue with whatsapp-web.js
   } catch {}
   emit(userId, 'sync_state', inst.syncState);
-}
-
-function scheduleSyncGrace(userId, db) {
-  const inst = getInstance(userId);
-  if (inst.syncGraceTimer) clearTimeout(inst.syncGraceTimer);
-  inst.syncGraceTimer = setTimeout(() => {
-    inst.syncGraceTimer = null;
-
-    if (inst.syncState.phase === 'waiting_history') {
-      console.log(`⏳ [${userId}] Grace period expired — no history received, marking partial`);
-      updateSyncState(userId, db, { phase: 'partial' });
-      return;
-    }
-
-    if (inst.syncState.phase === 'importing') {
-      const lastProgressAt = inst.syncState.lastProgressAt ? new Date(inst.syncState.lastProgressAt).getTime() : 0;
-      const quietForMs = lastProgressAt ? Date.now() - lastProgressAt : Number.POSITIVE_INFINITY;
-      const hasEnough = inst.syncState.historyMessages > 100 && inst.syncState.historyContacts > 5;
-      const canFinalize = quietForMs > 30000;
-      const phase = hasEnough && canFinalize ? 'ready' : 'partial';
-      console.log(`⏳ [${userId}] Grace period expired during import — ${inst.syncState.historyMessages} msgs, ${inst.syncState.historyContacts} contacts, quiet ${Math.round(quietForMs / 1000)}s → ${phase}`);
-      updateSyncState(userId, db, { phase });
-    }
-  }, 120000); // 2m grace period for slow history waves after QR pair
 }
 
 export function onWhatsAppEvent(userId, listener) {
@@ -596,55 +208,22 @@ function emit(userId, event, data) {
   inst.eventListeners.forEach(l => l(event, data));
 }
 
-function purgeCorruptedSignalSessions(userId) {
-  const authDir = getUserAuthDir(userId);
-  if (!fs.existsSync(authDir)) return 0;
-  const files = fs.readdirSync(authDir);
-  const targets = files.filter((name) => /^session-.*\.json$/i.test(name) || /^sender-key-.*\.json$/i.test(name));
-  for (const file of targets) {
-    try { fs.rmSync(path.join(authDir, file), { force: true }); } catch {}
-  }
-  return targets.length;
-}
-
-function triggerSignalSessionRepair(userId, db, sourceError) {
-  const inst = getInstance(userId);
-  const now = Date.now();
-  inst.badMacTimestamps.push(now);
-  inst.badMacTimestamps = inst.badMacTimestamps.filter((ts) => now - ts < 60000);
-  if (inst.badMacTimestamps.length < 3 || inst.repairInProgress) return;
-
-  inst.repairInProgress = true;
-  console.warn(`⚠️ [${userId}] Signal decrypt failures. Auto-repairing...`);
-
-  setTimeout(async () => {
-    try {
-      inst.connectionStatus = 'reconnecting';
-      emit(userId, 'status', { status: 'reconnecting' });
-      if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
-      const removed = purgeCorruptedSignalSessions(userId);
-      console.log(`🛠️ [${userId}] Cleared ${removed} Signal session file(s). Reconnecting...`);
-      await startConnection(userId, db, { force: true });
-    } catch (err) {
-      console.error(`Signal repair failed [${userId}]:`, err?.message || err);
-    } finally {
-      inst.repairInProgress = false;
-      inst.badMacTimestamps = [];
-    }
-  }, 200);
-}
-
 export async function requestPairingWithPhone(userId, phoneNumber) {
   const inst = getInstance(userId);
-  if (!inst.sock) throw new Error('WhatsApp socket not initialised');
+  if (!inst.client) throw new Error('WhatsApp client not initialised');
   if (inst.connectionStatus === 'connected') throw new Error('Already connected');
   const cleaned = phoneNumber.replace(/[^0-9]/g, '');
   if (cleaned.length < 8) throw new Error('Invalid phone number');
   inst.pendingPairingPhone = cleaned;
-  const code = await inst.sock.requestPairingCode(cleaned);
-  inst.pairingCode = code;
-  emit(userId, 'pairing_code', { code });
-  return code;
+  // whatsapp-web.js supports pairing codes via client.requestPairingCode
+  try {
+    const code = await inst.client.requestPairingCode(cleaned);
+    inst.pairingCode = code;
+    emit(userId, 'pairing_code', { code });
+    return code;
+  } catch (err) {
+    throw new Error(`Pairing code request failed: ${err?.message || err}`);
+  }
 }
 
 export function initWhatsApp(userId, db) {
@@ -655,17 +234,15 @@ export function initWhatsApp(userId, db) {
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
     reconnect: () => startConnection(userId, db, { force: true }),
     clearSession: () => clearSession(userId, db),
-    getSocket: () => getInstance(userId).sock,
+    getSocket: () => getInstance(userId).client,
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
     triggerSync: () => recoverSync(userId, db),
   };
 }
 
-// Get or create WA interface for a user
 export function getOrInitWhatsApp(userId, db) {
   const inst = getInstance(userId);
-  // If never started or disconnected with no socket, start
-  if (!inst.sock && inst.connectionStatus === 'disconnected') {
+  if (!inst.client && inst.connectionStatus === 'disconnected') {
     return initWhatsApp(userId, db);
   }
   return {
@@ -674,18 +251,20 @@ export function getOrInitWhatsApp(userId, db) {
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
     reconnect: () => startConnection(userId, db, { force: true }),
     clearSession: () => clearSession(userId, db),
-    getSocket: () => inst.sock,
+    getSocket: () => inst.client,
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
     triggerSync: () => recoverSync(userId, db),
   };
 }
+
+// ── Connection ──────────────────────────────────────────
 
 async function startConnection(userId, db, options = {}) {
   const inst = getInstance(userId);
   const force = options.force === true;
 
   if (inst.isConnecting) return;
-  if (!force && inst.sock && inst.connectionStatus === 'connected') return;
+  if (!force && inst.client && inst.connectionStatus === 'connected') return;
   inst.isConnecting = true;
 
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
@@ -693,672 +272,230 @@ async function startConnection(userId, db, options = {}) {
   const generation = inst.connectionGeneration + 1;
   inst.connectionGeneration = generation;
 
-  if (inst.sock) {
-    try { inst.sock.ev.removeAllListeners('connection.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('messages.upsert'); } catch {}
-    try { inst.sock.ev.removeAllListeners('messages.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('call'); } catch {}
-    try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('contacts.upsert'); } catch {}
-    try { inst.sock.ev.removeAllListeners('chats.upsert'); } catch {}
-    try { inst.sock.ev.removeAllListeners('chats.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('lid-mapping.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('messaging-history.set'); } catch {}
-    try { inst.sock.ev.removeAllListeners('creds.update'); } catch {}
-    try { inst.sock.end?.(undefined); } catch {}
-    inst.sock = null;
+  // Destroy previous client
+  if (inst.client) {
+    try { await inst.client.destroy(); } catch {}
+    inst.client = null;
   }
 
   try {
     const authDir = getUserAuthDir(userId);
     if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
 
-    const { state, saveCreds } = await useMultiFileAuthState(authDir);
-    const { version } = await fetchLatestBaileysVersion();
-
-    inst.sock = makeWASocket({
-      version,
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
+    const client = new Client({
+      authStrategy: new LocalAuth({
+        clientId: userId,
+        dataPath: path.join(DATA_DIR, 'auth'),
+      }),
+      puppeteer: {
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--disable-gpu',
+        ],
       },
-      logger,
-      printQRInTerminal: false,
-      generateHighQualityLinkPreview: false,
-      keepAliveIntervalMs: 30000,
-      syncFullHistory: true,
-      markOnlineOnConnect: false,
-      msgRetryCounterCache: inst.msgRetryCounterCache,
-      getMessage: async (key) => {
-        try {
-          const row = db.prepare('SELECT content FROM messages WHERE id = ? AND user_id = ?').get(key.id, userId);
-          if (row?.content) return { conversation: row.content };
-        } catch {}
-        return undefined;
+      webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/nicollasarquer/nicollasarquer/main/AvaliacaoEscola_17072_12082024/wpp_links_multi/wwebjs/wpp/wpp.pkg.min.js',
       },
     });
 
-    // Local contact cache (replaces removed makeInMemoryStore)
-    if (!inst.store) {
-      inst.store = { contacts: {}, chats: {} };
-    }
+    inst.client = client;
 
-    // Pre-populate contact store from DB on reconnect to prevent empty name lookups
-    try {
-      const dbContacts = db.prepare(
-        "SELECT jid, name, phone FROM contacts WHERE user_id = ? AND is_group = 0 AND jid LIKE '%@s.whatsapp.net'"
-      ).all(userId);
-      for (const c of dbContacts) {
-        if (c.jid && !inst.store.contacts[c.jid]) {
-          inst.store.contacts[c.jid] = { id: c.jid, name: c.name, notify: c.name };
-        }
-      }
-      if (dbContacts.length > 0) {
-        console.log(`📇 [${userId}] Pre-populated store with ${dbContacts.length} contacts from DB`);
-      }
-    } catch (err) {
-      console.error(`Store pre-population error [${userId}]:`, err?.message || err);
-    }
-
-    // Populate contact cache from socket events and build LID mappings
-    // Also write newly discovered names back to store (bidirectional sync)
-    inst.sock.ev.on('contacts.update', (updates) => {
-      for (const u of updates) {
-        if (u.id) {
-          inst.store.contacts[u.id] = { ...inst.store.contacts[u.id], ...u };
-          buildLidMapping(inst, inst.store.contacts[u.id]);
-          // Write new names back to DB immediately
-          if (u.id.endsWith('@s.whatsapp.net')) {
-            const candidate = getNameCandidate(inst.store.contacts[u.id]);
-            if (candidate.name) {
-              const phone = '+' + u.id.replace('@s.whatsapp.net', '');
-              if (!isPhoneLikeName(candidate.name, phone)) {
-                try {
-                  const existing = db.prepare('SELECT id, name FROM contacts WHERE jid = ? AND user_id = ?').get(u.id, userId);
-                  if (existing && (!existing.name || isPhoneLikeName(existing.name, phone))) {
-                    db.prepare("UPDATE contacts SET name = ?, updated_at = datetime('now') WHERE id = ?").run(candidate.name, existing.id);
-                  }
-                } catch {}
-              }
-            }
-          }
-        }
-      }
-    });
-
-    // DEBUG: Log first few raw contacts from events to diagnose LID issue
-    let contactDebugCount = 0;
-
-    inst.sock.ev.on('contacts.upsert', (contacts) => {
-      for (const c of contacts) {
-        if (c.id) {
-          inst.store.contacts[c.id] = { ...inst.store.contacts[c.id], ...c };
-          buildLidMapping(inst, inst.store.contacts[c.id]);
-          if (contactDebugCount < 15) {
-            console.log(`🔍 [DEBUG] contacts.upsert raw:`, JSON.stringify({
-              id: c.id,
-              name: c.name,
-              notify: c.notify,
-              verifiedName: c.verifiedName,
-              pushName: c.pushName,
-              lid: c.lid,
-              lidJid: c.lidJid,
-              phoneNumber: c.phoneNumber,
-              phone: c.phone,
-              imgUrl: c.imgUrl ? '(has img)' : undefined,
-              allKeys: Object.keys(c),
-            }));
-            contactDebugCount++;
-          }
-        }
-      }
-    });
-
-    inst.sock.ev.on('creds.update', saveCreds);
-
-    // Listen for LID mapping updates from Baileys
-    try {
-      inst.sock.ev.on('lid-mapping.update', (mappings) => {
-        if (!mappings || typeof mappings !== 'object') return;
-        for (const [lid, pn] of Object.entries(mappings)) {
-          const phone = typeof pn === 'string' ? pn.replace('@s.whatsapp.net', '') : '';
-          if (phone) {
-            inst.lidMap.set(lid, phone);
-            reconcileLidContacts(db, userId, lid, phone);
-          }
-        }
-        console.log(`🔗 [${userId}] LID mapping update: ${Object.keys(mappings).length} mappings`);
-        emit(userId, 'contacts_sync', { count: Object.keys(mappings).length });
-      });
-    } catch {}
-
-    inst.sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
+    // ── QR Code ──
+    client.on('qr', (qr) => {
       if (generation !== inst.connectionGeneration) return;
+      inst.qrCode = qr;
+      inst.connectionStatus = 'qr_waiting';
+      emit(userId, 'qr', qr);
+      console.log(`📱 [${userId}] QR code received`);
+    });
 
-      if (qr) {
-        inst.qrCode = qr;
-        inst.connectionStatus = 'qr_waiting';
-        emit(userId, 'qr', qr);
-      }
+    // ── Ready (connected) ──
+    client.on('ready', async () => {
+      if (generation !== inst.connectionGeneration) return;
+      if (inst.connectionStatus === 'connected') return;
+      if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
+      inst.qrCode = null;
+      inst.pairingCode = null;
+      inst.pendingPairingPhone = null;
+      inst.connectionStatus = 'connected';
+      inst.reconnectAttempt = 0;
 
-      if (connection === 'open') {
-        if (inst.connectionStatus === 'connected') return;
-        if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
-        inst.qrCode = null;
-        inst.pairingCode = null;
-        inst.pendingPairingPhone = null;
-        inst.connectionStatus = 'connected';
+      inst.syncState = {
+        phase: 'waiting_history',
+        connectedAt: new Date().toISOString(),
+        lastHistorySyncAt: null,
+        lastProgressAt: null,
+        storeContacts: 0,
+        historyChats: 0,
+        historyContacts: 0,
+        historyMessages: 0,
+        unresolvedLids: 0,
+        totalDbContacts: 0,
+        totalDbMessages: 0,
+      };
+
+      emit(userId, 'connected', null);
+      console.log(`✅ [${userId}] WhatsApp connected via whatsapp-web.js (gen ${generation})`);
+      updateSyncState(userId, db, { phase: 'waiting_history', connectedAt: inst.syncState.connectedAt });
+
+      // Start syncing contacts and chats
+      syncContacts(userId, db).catch(err => console.error('Sync contacts error:', err?.message));
+
+      // Schedule recovery after initial sync
+      setTimeout(() => {
+        if (inst.connectionStatus === 'connected') {
+          recoverSync(userId, db).catch(err => console.error('Auto recovery sync error:', err?.message));
+        }
+      }, 30000);
+    });
+
+    // ── Disconnected ──
+    client.on('disconnected', (reason) => {
+      if (generation !== inst.connectionGeneration) return;
+      console.warn(`⚠️ [${userId}] WhatsApp disconnected: ${reason}`);
+
+      if (reason === 'LOGOUT' || reason === 'CONFLICT') {
+        inst.connectionStatus = 'disconnected';
         inst.reconnectAttempt = 0;
-        inst.badMacTimestamps = [];
-        inst.repairInProgress = false;
-
-        // Fresh connection = fresh sync lifecycle. Do not keep old counters.
-        inst.syncState = {
-          phase: 'waiting_history',
-          connectedAt: new Date().toISOString(),
-          lastHistorySyncAt: null,
-          lastProgressAt: null,
-          storeContacts: 0,
-          historyChats: 0,
-          historyContacts: 0,
-          historyMessages: 0,
-          unresolvedLids: 0,
-          totalDbContacts: 0,
-          totalDbMessages: 0,
-        };
-
-        emit(userId, 'connected', null);
-        console.log(`✅ [${userId}] WhatsApp connected (gen ${generation})`);
-        updateSyncState(userId, db, { phase: 'waiting_history', connectedAt: inst.syncState.connectedAt });
-        scheduleSyncGrace(userId, db);
-        syncContacts(userId, db);
-        // Schedule recovery sync AFTER passive history has had plenty of time
-        // Baileys delivers history in waves over 1-3 minutes after initial QR pair
-        setTimeout(() => {
-          if (inst.connectionStatus === 'connected' && (inst.syncState.phase === 'waiting_history' || inst.syncState.phase === 'partial' || inst.syncState.phase === 'importing')) {
-            console.log(`🔄 [${userId}] Auto recovery starting (phase: ${inst.syncState.phase}, ${inst.syncState.historyMessages} msgs so far)`);
-            recoverSync(userId, db).catch(err => console.error('Auto recovery sync error:', err?.message));
-          }
-        }, 45000); // start active recovery soon enough to surface recent chats
-      }
-
-      if (connection === 'close') {
-        const statusCode = extractDisconnectStatusCode(lastDisconnect?.error);
-        const disconnectMessage = lastDisconnect?.error?.message || lastDisconnect?.error?.toString?.() || 'unknown';
-        const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.badSession;
-
-        console.warn(`⚠️ [${userId}] WhatsApp closed (gen ${generation}, code ${statusCode ?? 'unknown'}): ${disconnectMessage}`);
-
-        if (isLoggedOut) {
-          inst.connectionStatus = 'disconnected';
-          inst.reconnectAttempt = 0;
-          emit(userId, 'status', { status: 'disconnected' });
-        } else {
-          inst.connectionStatus = 'reconnecting';
-          emit(userId, 'status', { status: 'reconnecting' });
-          if (inst.reconnectTimer) clearTimeout(inst.reconnectTimer);
-          const delays = [3000, 5000, 10000];
-          const delay = delays[Math.min(inst.reconnectAttempt, delays.length - 1)];
-          inst.reconnectAttempt++;
-          inst.reconnectTimer = setTimeout(() => {
-            if (generation !== inst.connectionGeneration) return;
-            inst.reconnectTimer = null;
-            startConnection(userId, db, { force: true });
-          }, delay);
-        }
-      }
-    });
-
-    inst.sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
-      for (const msg of msgs) {
-        try {
-          if (!msg.message) continue;
-          const jid = msg.key.remoteJid;
-          if (!jid) continue;
-
-          // Capture status updates (stories)
-          if (jid === 'status@broadcast') {
-            captureStatusUpdate(userId, db, inst, msg).catch(err => {
-              console.error('Status capture error:', err?.message || err);
-            });
-            continue;
-          }
-
-          // Extract LID→PN mappings from alt fields
-          extractAltMappings(inst, msg);
-
-          // DEBUG: Log raw message key fields for first few @lid messages
-          if (jid.endsWith('@lid')) {
-            console.log(`🔍 [DEBUG] msg.upsert @lid key:`, JSON.stringify({
-              remoteJid: msg.key.remoteJid,
-              senderPn: msg.key.senderPn,
-              remoteJidAlt: msg.key.remoteJidAlt,
-              participant: msg.key.participant,
-              participantAlt: msg.key.participantAlt,
-              fromMe: msg.key.fromMe,
-              pushName: msg.pushName,
-              allKeyFields: Object.keys(msg.key),
-            }));
-          }
-
-          const isFromMe = msg.key.fromMe;
-          const resolved = resolveLidPhone(inst, jid);
-          const phone = '+' + resolved.phone;
-          const resolvedJid = resolved.jid;
-
-          // If we just resolved a LID, reconcile existing DB entries BEFORE creating new ones
-          if (jid.endsWith('@lid') && resolvedJid !== jid) {
-            reconcileLidContacts(db, userId, jid, resolved.phone);
-          }
-          // Also check if there's an existing contact with the resolved JID to prevent duplicates
-          if (jid.endsWith('@lid') && resolvedJid === jid && msg.key.senderPn) {
-            // senderPn gave us the real phone but resolveLidPhone may have already used it
-            const senderPhone = msg.key.senderPn.replace('@s.whatsapp.net', '').replace(/@.*$/, '');
-            if (senderPhone && /^\d{7,15}$/.test(senderPhone)) {
-              reconcileLidContacts(db, userId, jid, senderPhone);
-              // Re-resolve after reconciliation
-              const reResolved = resolveLidPhone(inst, jid);
-              if (reResolved.jid !== jid) {
-                Object.assign(resolved, reResolved);
-              }
-            }
-          }
-
-          const isGroup = jid.endsWith('@g.us');
-          const contactCandidate = getNameCandidate(
-            inst.store?.contacts?.[jid],
-            inst.store?.contacts?.[resolvedJid],
-            msg,
-            { pushName: msg.pushName || null }
-          );
-
-          const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup, toIsoTimestamp(msg.messageTimestamp));
-          if (!contactId) continue; // Skip unresolved @lid contacts
-
-          const payload = getMessagePayload(msg.message);
-          const content = payload.content;
-
-          const direction = isFromMe ? 'sent' : 'received';
-          const msgId = msg.key.id || uuid();
-
-          const mediaPath = payload.isVoice
-            ? await saveVoiceMedia(userId, inst, msg, msgId, payload.mimetype)
-            : null;
-
-          upsertMessageRecord(db, {
-            id: msgId,
-            userId,
-            contactId,
-            jid: resolvedJid,
-            content,
-            type: payload.msgType,
-            direction,
-            timestamp: toIsoTimestamp(msg.messageTimestamp),
-            status: isFromMe ? 'sent' : 'delivered',
-            duration: payload.duration,
-            mediaPath,
-          });
-
-          emit(userId, 'message', { contactId, msgId });
-
-          if (type === 'notify' && !isFromMe) {
-            // Increment unread count
-            try {
-              db.prepare("UPDATE contacts SET unread_count = unread_count + 1 WHERE id = ? AND user_id = ?").run(contactId, userId);
-            } catch {}
-
-            db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'message_received', ?)`).run(userId, JSON.stringify({ contactId }));
-
-            if (!isGroup) {
-              handleAutoReply(userId, db, contactId, jid, phone, contactCandidate.name || msg.pushName || null, msg.key).catch(err => {
-                console.error('Auto-reply error:', err?.message || err);
-              });
-            }
-          }
-        } catch (err) {
-          if (isSignalSessionError(err)) {
-            triggerSignalSessionRepair(userId, db, err);
-            continue;
-          }
-          console.error('messages.upsert handler error:', err?.message || err);
-        }
-      }
-    });
-
-    // Listen for chats.upsert — captures chats from on-demand sync and delayed history
-    inst.sock.ev.on('chats.upsert', (chats) => {
-      let created = 0;
-      for (const chat of chats) {
-        try {
-          const jid = chat.id;
-          if (!jid || jid === 'status@broadcast') continue;
-          buildLidMapping(inst, chat);
-          const resolved = resolveLidPhone(inst, jid);
-          rememberChat(inst, chat, resolved.jid);
-          const phone = '+' + resolved.phone;
-          const isGroup = jid.endsWith('@g.us');
-          getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup, getChatActivityTimestamp(chat));
-          created++;
-        } catch {}
-      }
-      if (created > 0) {
-        console.log(`📇 [${userId}] chats.upsert: created/updated ${created} contacts`);
-        emit(userId, 'contacts_sync', { count: created });
-      }
-    });
-
-    inst.sock.ev.on('chats.update', (updates) => {
-      let changed = 0;
-      for (const chat of updates) {
-        try {
-          const jid = chat.id;
-          if (!jid || jid === 'status@broadcast') continue;
-          const resolved = resolveLidPhone(inst, jid);
-          rememberChat(inst, chat, resolved.jid);
-          const phone = '+' + resolved.phone;
-          const isGroup = jid.endsWith('@g.us');
-
-          getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup, getChatActivityTimestamp(chat));
-          changed++;
-
-          // Sync archive status from WhatsApp
-          if (typeof chat.archive === 'boolean' || typeof chat.archived === 'boolean') {
-            const isArchived = chat.archive ?? chat.archived ? 1 : 0;
-            try {
-              db.prepare("UPDATE contacts SET is_archived = ? WHERE jid = ? AND user_id = ?").run(isArchived, resolved.jid, userId);
-              emit(userId, 'chat_update', { jid: resolved.jid, is_archived: isArchived });
-            } catch {}
-          }
-
-          // Sync unread count from WhatsApp
-          if (typeof chat.unreadCount === 'number') {
-            try {
-              db.prepare("UPDATE contacts SET unread_count = ? WHERE jid = ? AND user_id = ?").run(chat.unreadCount, resolved.jid, userId);
-            } catch {}
-          }
-        } catch {}
-      }
-      if (changed > 0) emit(userId, 'contacts_sync', { count: changed });
-    });
-
-    inst.sock.ev.on('messaging-history.set', async ({ chats, contacts: syncedContacts, messages: historyMsgs, syncType }) => {
-      const syncLabel = syncType === 2 ? 'ON_DEMAND' : syncType === 1 ? 'PUSH' : `type=${syncType ?? 'initial'}`;
-      console.log(`📜 [${userId}] History sync [${syncLabel}]: ${chats?.length || 0} chats, ${syncedContacts?.length || 0} contacts, ${historyMsgs?.length || 0} messages`);
-
-      // Update sync state
-      updateSyncState(userId, db, {
-        phase: 'importing',
-        lastHistorySyncAt: new Date().toISOString(),
-        lastProgressAt: new Date().toISOString(),
-        historyChats: (inst.syncState.historyChats || 0) + (chats?.length || 0),
-        historyContacts: (inst.syncState.historyContacts || 0) + (syncedContacts?.length || 0),
-        historyMessages: (inst.syncState.historyMessages || 0) + (historyMsgs?.length || 0),
-      });
-      // Reset grace timer since we got data
-      scheduleSyncGrace(userId, db);
-
-      let contactChanges = 0;
-      let historyDebugCount = 0;
-
-      // First pass: build LID mappings from synced contacts
-      if (syncedContacts?.length) {
-        for (const c of syncedContacts) {
-          buildLidMapping(inst, c);
-          if (historyDebugCount < 15) {
-            console.log(`🔍 [DEBUG] history contact raw:`, JSON.stringify({
-              id: c.id,
-              name: c.name,
-              notify: c.notify,
-              verifiedName: c.verifiedName,
-              pushName: c.pushName,
-              lid: c.lid,
-              lidJid: c.lidJid,
-              phoneNumber: c.phoneNumber,
-              phone: c.phone,
-              allKeys: Object.keys(c),
-            }));
-            historyDebugCount++;
-          }
-        }
-      }
-
-      if (syncedContacts?.length) {
-        for (const c of syncedContacts) {
-          try {
-            const jid = c.id;
-            if (!jid || jid === 'status@broadcast') continue;
-            const resolved = resolveLidPhone(inst, jid);
-            const phone = '+' + resolved.phone;
-            const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(c), isGroup);
-            contactChanges++;
-          } catch {}
-        }
-      }
-
-      if (chats?.length) {
-        for (const chat of chats) {
-          try {
-            const jid = chat.id;
-            if (!jid || jid === 'status@broadcast') continue;
-            buildLidMapping(inst, chat);
-            const resolved = resolveLidPhone(inst, jid);
-            rememberChat(inst, chat, resolved.jid);
-            const phone = '+' + resolved.phone;
-            const isGroup = jid.endsWith('@g.us');
-            getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup, getChatActivityTimestamp(chat));
-            contactChanges++;
-          } catch {}
-        }
-      }
-
-      if (historyMsgs?.length) {
-        let msgDebugCount = 0;
-        for (const msg of historyMsgs) {
-          try {
-            if (!msg?.message) continue;
-            const jid = msg.key?.remoteJid;
-            if (!jid || jid === 'status@broadcast') continue;
-
-            if (msgDebugCount < 20) {
-              console.log(`🔍 [DEBUG] history msg with @lid:`, JSON.stringify({
-                remoteJid: msg.key.remoteJid,
-                senderPn: msg.key.senderPn,
-                remoteJidAlt: msg.key.remoteJidAlt,
-                participant: msg.key.participant,
-                participantAlt: msg.key.participantAlt,
-                pushName: msg.pushName,
-                allKeyFields: Object.keys(msg.key),
-              }));
-              msgDebugCount++;
-            }
-
-            // Extract alt mappings from history messages too
-            extractAltMappings(inst, msg);
-
-            const isFromMe = msg.key.fromMe;
-            const resolved = resolveLidPhone(inst, jid);
-            const phone = '+' + resolved.phone;
-            const resolvedJid = resolved.jid;
-            const isGroup = jid.endsWith('@g.us');
-            const contactCandidate = getNameCandidate(
-              inst.store?.contacts?.[jid],
-              inst.store?.contacts?.[resolvedJid],
-              msg,
-              { pushName: msg.pushName || null }
-            );
-
-            const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup, toIsoTimestamp(msg.messageTimestamp));
-            if (!contactId) continue; // Skip unresolved @lid contacts
-
-            const payload = getMessagePayload(msg.message);
-            const msgId = msg.key.id || uuid();
-            const mediaPath = payload.isVoice
-              ? await saveVoiceMedia(userId, inst, msg, msgId, payload.mimetype)
-              : null;
-
-            upsertMessageRecord(db, {
-              id: msgId,
-              userId,
-              contactId,
-              jid: resolvedJid,
-              content: payload.content,
-              type: payload.msgType,
-              direction: isFromMe ? 'sent' : 'received',
-              timestamp: toIsoTimestamp(msg.messageTimestamp),
-              status: isFromMe ? 'sent' : 'delivered',
-              duration: payload.duration,
-              mediaPath,
-            });
-          } catch {}
-        }
-      }
-
-      // Second pass: reconcile any LIDs that got resolved during message processing
-      if (inst.lidMap.size > 0) {
-        let reconciled = 0;
-        for (const [lidJid, phone] of inst.lidMap.entries()) {
-          try {
-            reconcileLidContacts(db, userId, lidJid, phone);
-            reconciled++;
-          } catch {}
-        }
-        if (reconciled > 0) {
-          console.log(`🔗 [${userId}] Post-history reconciled ${reconciled} LID contacts`);
-        }
-      }
-
-      if (contactChanges > 0) {
-        emit(userId, 'contacts_sync', { count: contactChanges });
-      }
-      emit(userId, 'history_sync', { chats: chats?.length || 0, messages: historyMsgs?.length || 0 });
-
-      // Don't mark ready just because one batch arrived.
-      // Wait until enough data has arrived AND progress has gone quiet for a while.
-      const lastProgressAt = inst.syncState.lastProgressAt ? new Date(inst.syncState.lastProgressAt).getTime() : Date.now();
-      const quietForMs = Date.now() - lastProgressAt;
-      const enoughData = inst.syncState.historyMessages > 100 && inst.syncState.historyContacts > 5;
-      const unresolvedNames = db.prepare(`
-        SELECT COUNT(*) as c FROM contacts
-        WHERE user_id = ? AND is_group = 0 AND jid LIKE '%@s.whatsapp.net'
-          AND (name IS NULL OR name = '' OR name LIKE '+%' OR name LIKE 'WhatsApp contact%' OR name GLOB '[0-9]*')
-      `).get(userId)?.c || 0;
-
-      if (enoughData && quietForMs > 30000 && unresolvedNames === 0) {
-        updateSyncState(userId, db, { phase: 'ready' });
-        console.log(`✅ [${userId}] History sync complete: ${inst.syncState.historyMessages} msgs, ${inst.syncState.historyContacts} contacts, unnamed ${unresolvedNames}`);
+        emit(userId, 'status', { status: 'disconnected' });
       } else {
-        updateSyncState(userId, db, { phase: 'importing' });
-        console.log(`⏳ [${userId}] Still importing: ${inst.syncState.historyMessages} msgs, ${inst.syncState.historyContacts} contacts, unnamed ${unresolvedNames}, quiet ${Math.round(quietForMs / 1000)}s`);
+        inst.connectionStatus = 'reconnecting';
+        emit(userId, 'status', { status: 'reconnecting' });
+        if (inst.reconnectTimer) clearTimeout(inst.reconnectTimer);
+        const delays = [3000, 5000, 10000];
+        const delay = delays[Math.min(inst.reconnectAttempt, delays.length - 1)];
+        inst.reconnectAttempt++;
+        inst.reconnectTimer = setTimeout(() => {
+          if (generation !== inst.connectionGeneration) return;
+          inst.reconnectTimer = null;
+          startConnection(userId, db, { force: true });
+        }, delay);
       }
-
-      // Schedule a deferred LID sweep to catch any late-arriving mappings
-      schedulelidSweep(userId, db, inst);
     });
 
-    inst.sock.ev.on('contacts.update', (updates) => {
-      let changed = 0;
-      for (const update of updates) {
-        try {
-          const jid = update.id;
-          if (!jid || jid === 'status@broadcast') continue;
-          buildLidMapping(inst, update);
-          const resolved = resolveLidPhone(inst, jid);
-          const phone = '+' + resolved.phone;
-          const isGroup = jid.endsWith('@g.us');
-          const candidate = getNameCandidate(inst.store?.contacts?.[jid], inst.store?.contacts?.[resolved.jid], update);
-          getOrCreateContact(db, userId, resolved.jid, phone, candidate, isGroup);
-          changed++;
-        } catch {}
-      }
-      if (changed > 0) emit(userId, 'contacts_sync', { count: changed });
+    // ── Authentication failure ──
+    client.on('auth_failure', (msg) => {
+      console.error(`❌ [${userId}] Auth failure:`, msg);
+      inst.connectionStatus = 'disconnected';
+      emit(userId, 'status', { status: 'disconnected' });
     });
 
-    // Handle status deletions / revocations
-    inst.sock.ev.on('messages.update', (updates) => {
-      for (const update of updates) {
-        try {
-          const jid = update.key?.remoteJid;
-          if (jid !== 'status@broadcast') continue;
-          
-          // Check if status was deleted/revoked
-          const msgUpdate = update.update;
-          if (msgUpdate?.messageStubType === 1 || msgUpdate?.message === null || msgUpdate?.status === 5) {
-            const statusId = update.key?.id;
-            if (!statusId) continue;
-            
-            const row = db.prepare("SELECT media_path FROM statuses WHERE id = ? AND user_id = ?").get(statusId, userId);
-            if (row?.media_path) {
-              const filePath = path.join(STATUS_MEDIA_DIR, row.media_path);
-              try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
-            }
-            db.prepare("DELETE FROM statuses WHERE id = ? AND user_id = ?").run(statusId, userId);
-            emit(userId, 'status_update', { deleted: true, statusId });
-            console.log(`🗑️ [${userId}] Status deleted: ${statusId}`);
+    // ── Incoming messages ──
+    client.on('message_create', async (msg) => {
+      try {
+        if (generation !== inst.connectionGeneration) return;
+
+        const chat = await msg.getChat();
+        const contact = await msg.getContact();
+        const jid = toJid(msg.from);
+        const isFromMe = msg.fromMe;
+        const isGroup = chat.isGroup;
+
+        // Skip status broadcasts
+        if (jid === 'status@broadcast' || msg.isStatus) {
+          captureStatusUpdate(userId, db, inst, msg).catch(err => {
+            console.error('Status capture error:', err?.message || err);
+          });
+          return;
+        }
+
+        // Resolve phone and name
+        const phone = '+' + phoneFromJid(isFromMe ? toJid(msg.to) : jid);
+        const resolvedJid = isFromMe ? toJid(msg.to) : jid;
+        const contactName = contact?.pushname || contact?.name || contact?.shortName || null;
+        const candidate = getNameCandidate(
+          { name: contactName, pushName: contact?.pushname, notify: contact?.shortName }
+        );
+
+        const contactId = getOrCreateContact(db, userId, resolvedJid, phone, candidate, isGroup);
+        if (!contactId) return;
+
+        // Determine message type and content
+        const { msgType, content, duration, mimetype } = getMessagePayload(msg);
+        const direction = isFromMe ? 'sent' : 'received';
+        const msgId = msg.id?._serialized || msg.id?.id || uuid();
+
+        // Save voice media
+        let mediaPath = null;
+        if (msgType === 'voice' && msg.hasMedia) {
+          mediaPath = await saveVoiceMedia(userId, msg, msgId, mimetype);
+        }
+
+        upsertMessageRecord(db, {
+          id: msgId,
+          userId,
+          contactId,
+          jid: resolvedJid,
+          content,
+          type: msgType,
+          direction,
+          timestamp: new Date(msg.timestamp * 1000).toISOString(),
+          status: isFromMe ? 'sent' : 'delivered',
+          duration,
+          mediaPath,
+        });
+
+        emit(userId, 'message', { contactId, msgId });
+
+        if (!isFromMe) {
+          // Increment unread count
+          try {
+            db.prepare("UPDATE contacts SET unread_count = unread_count + 1 WHERE id = ? AND user_id = ?").run(contactId, userId);
+          } catch {}
+
+          db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'message_received', ?)`).run(userId, JSON.stringify({ contactId }));
+
+          if (!isGroup) {
+            handleAutoReply(userId, db, contactId, resolvedJid, phone, contactName, msg).catch(err => {
+              console.error('Auto-reply error:', err?.message || err);
+            });
           }
-        } catch (err) {
-          console.error('messages.update (status) error:', err?.message || err);
         }
+      } catch (err) {
+        console.error('message_create handler error:', err?.message || err);
       }
     });
 
-    // ── Call events (missed calls) ──────────────────────────
-    inst.sock.ev.on('call', (calls) => {
-      for (const call of calls) {
+    // ── Call events ──
+    client.on('call', async (call) => {
+      try {
+        const callerJid = toJid(call.from);
+        const phone = '+' + phoneFromJid(callerJid);
+        let callerName = null;
         try {
-          // Only capture incoming calls (offer status)
-          if (call.status !== 'offer' && call.status !== 'timeout' && call.status !== 'reject') continue;
-          if (call.isGroup && call.status !== 'offer') continue;
-
-          const callerJid = call.from;
-          if (!callerJid || callerJid === 'status@broadcast') continue;
-
-          const resolved = resolveLidPhone(inst, callerJid);
-          const phone = '+' + resolved.phone;
-          const callerName = inst.store?.contacts?.[callerJid]?.name
-            || inst.store?.contacts?.[resolved.jid]?.name
-            || inst.store?.contacts?.[callerJid]?.notify
-            || null;
-
-          const callId = call.id || uuid();
-          const isVideo = !!call.isVideo;
-          const isGroup = !!call.isGroup;
-          const callStatus = call.status === 'offer' ? 'missed' : call.status;
-
-          db.prepare(`
-            INSERT OR REPLACE INTO call_logs (id, user_id, caller_jid, caller_phone, caller_name, is_video, is_group, status, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(callId, userId, resolved.jid, phone, callerName, isVideo ? 1 : 0, isGroup ? 1 : 0, callStatus, new Date().toISOString());
-
-          emit(userId, 'call', { callId, callerJid: resolved.jid, callerName, callerPhone: phone, isVideo, status: callStatus });
-          console.log(`📞 [${userId}] ${callStatus} ${isVideo ? 'video' : 'voice'} call from ${callerName || phone}`);
-        } catch (err) {
-          console.error('Call event error:', err?.message || err);
-        }
-      }
-    });
-
-    inst.sock.ev.on('contacts.upsert', (contacts) => {
-      let changed = 0;
-      for (const c of contacts) {
-        try {
-          const jid = c.id;
-          if (!jid || jid === 'status@broadcast') continue;
-          buildLidMapping(inst, c);
-          const resolved = resolveLidPhone(inst, jid);
-          const phone = '+' + resolved.phone;
-          const isGroup = jid.endsWith('@g.us');
-          getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(inst.store?.contacts?.[jid], inst.store?.contacts?.[resolved.jid], c), isGroup);
-          changed++;
+          const contact = await inst.client.getContactById(call.from);
+          callerName = contact?.pushname || contact?.name || null;
         } catch {}
+
+        const callId = call.id || uuid();
+        const isVideo = !!call.isVideo;
+        const isGroup = !!call.isGroup;
+        const callStatus = 'missed';
+
+        db.prepare(`
+          INSERT OR REPLACE INTO call_logs (id, user_id, caller_jid, caller_phone, caller_name, is_video, is_group, status, timestamp)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(callId, userId, callerJid, phone, callerName, isVideo ? 1 : 0, isGroup ? 1 : 0, callStatus, new Date().toISOString());
+
+        emit(userId, 'call', { callId, callerJid, callerName, callerPhone: phone, isVideo, status: callStatus });
+        console.log(`📞 [${userId}] ${callStatus} ${isVideo ? 'video' : 'voice'} call from ${callerName || phone}`);
+      } catch (err) {
+        console.error('Call event error:', err?.message || err);
       }
-      if (changed > 0) emit(userId, 'contacts_sync', { count: changed });
     });
+
+    // Initialize client
+    await client.initialize();
+    console.log(`🔄 [${userId}] WhatsApp client initializing...`);
   } catch (err) {
-    if (isSignalSessionError(err)) {
-      triggerSignalSessionRepair(userId, db, err);
-      return;
-    }
     console.error(`startConnection error [${userId}]:`, err?.message || err);
     inst.connectionStatus = 'reconnecting';
     emit(userId, 'status', { status: 'reconnecting' });
@@ -1368,62 +505,87 @@ async function startConnection(userId, db, options = {}) {
   }
 }
 
-function extractDisconnectStatusCode(error) {
-  try {
-    if (!error) return null;
-    if (error?.output?.statusCode) return error.output.statusCode;
-    return new Boom(error)?.output?.statusCode ?? null;
-  } catch { return null; }
+// ── Message payload extraction ──
+
+function getMessagePayload(msg) {
+  let msgType = 'text';
+  let content = msg.body || '';
+  let duration = null;
+  let mimetype = null;
+
+  if (msg.type === 'ptt' || msg.type === 'audio') {
+    msgType = 'voice';
+    content = msg.body || '🎤 Voice message';
+    duration = msg.duration || null;
+    mimetype = msg.mimetype || 'audio/ogg; codecs=opus';
+  } else if (msg.type === 'image') {
+    msgType = 'image';
+    content = msg.body || msg.caption || '';
+  } else if (msg.type === 'video') {
+    msgType = 'video';
+    content = msg.body || msg.caption || '';
+  } else if (msg.type === 'document') {
+    msgType = 'document';
+    content = msg.body || msg.caption || '';
+  }
+
+  return { msgType, content, duration, mimetype, isVoice: msgType === 'voice' };
 }
 
-function toIsoTimestamp(value) {
-  if (typeof value === 'bigint') return new Date(Number(value) * 1000).toISOString();
-  if (typeof value === 'number') return new Date(value * 1000).toISOString();
-  if (value && typeof value === 'object') {
-    if (typeof value.toNumber === 'function') return new Date(value.toNumber() * 1000).toISOString();
-    if (typeof value.low === 'number') return new Date(value.low * 1000).toISOString();
+// ── Voice media download ──
+
+async function saveVoiceMedia(userId, msg, msgId, mimetype) {
+  try {
+    if (!fs.existsSync(VOICE_MEDIA_DIR)) fs.mkdirSync(VOICE_MEDIA_DIR, { recursive: true });
+    const filename = `${msgId}.${getAudioFileExtension(mimetype)}`;
+    const filePath = path.join(VOICE_MEDIA_DIR, filename);
+
+    if (hasSavedVoiceFile(filePath)) return filename;
+
+    const media = await msg.downloadMedia();
+    if (!media?.data) return null;
+
+    const buffer = Buffer.from(media.data, 'base64');
+    if (buffer.length === 0) return null;
+
+    fs.writeFileSync(filePath, buffer);
+    return filename;
+  } catch (err) {
+    console.log(`🎤 [${userId}] Voice download failed: ${err?.message}`);
+    return null;
   }
-  return new Date().toISOString();
 }
+
+// ── Contact management ──
 
 function formatUnresolvedContactName(jid, candidateName) {
   if (candidateName) return candidateName;
-  const suffix = jid.replace('@lid', '').slice(-4);
+  const suffix = phoneFromJid(jid).slice(-4);
   return suffix ? `WhatsApp contact • ${suffix}` : 'WhatsApp contact';
 }
 
 function mergeContactRecords(db, userId, sourceContactId, targetContactId, targetJid) {
   if (!sourceContactId || !targetContactId || sourceContactId === targetContactId) return;
-
-  db.prepare(
-    'UPDATE messages SET contact_id = ?, jid = ? WHERE contact_id = ? AND user_id = ?'
-  ).run(targetContactId, targetJid, sourceContactId, userId);
-
+  db.prepare('UPDATE messages SET contact_id = ?, jid = ? WHERE contact_id = ? AND user_id = ?')
+    .run(targetContactId, targetJid, sourceContactId, userId);
   db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(sourceContactId, userId);
 }
 
 function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, activityAt = null) {
-  const isUnresolvedLid = jid.endsWith('@lid');
-  const safePhone = !isUnresolvedLid && phone && phone !== '+' ? phone : null;
+  const safePhone = phone && phone !== '+' ? phone : null;
   const existing = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
-  const phoneMatch = !isUnresolvedLid && safePhone
+
+  const phoneMatch = safePhone
     ? db.prepare(`
         SELECT id, jid, name, phone
         FROM contacts
         WHERE user_id = ? AND phone = ? AND is_group = ?
-        ORDER BY CASE
-          WHEN jid = ? THEN 0
-          WHEN jid LIKE '%@lid' THEN 1
-          ELSE 2
-        END,
-        updated_at DESC
+        ORDER BY updated_at DESC
         LIMIT 1
-      `).get(userId, safePhone, isGroup ? 1 : 0, jid)
+      `).get(userId, safePhone, isGroup ? 1 : 0)
     : null;
-  const resolvedName = isUnresolvedLid
-    ? formatUnresolvedContactName(jid, candidate?.name || null)
-    : (candidate?.name || phone);
 
+  const resolvedName = candidate?.name || phone || formatUnresolvedContactName(jid, null);
   let target = existing;
 
   if (existing && phoneMatch && phoneMatch.id !== existing.id) {
@@ -1444,16 +606,15 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
 
   if (target) {
     const comparisonPhone = safePhone || target.phone || '';
-    const shouldUpdateName = shouldReplaceName(candidate, target.name, comparisonPhone) || (isUnresolvedLid && !target.name);
+    const shouldUpdateName = shouldReplaceName(candidate, target.name, comparisonPhone);
     const nextName = shouldUpdateName ? resolvedName : target.name;
-    const nextJid = isUnresolvedLid ? target.jid : jid;
 
     db.prepare("UPDATE contacts SET jid = ?, name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = COALESCE(?, datetime('now')) WHERE id = ?")
-      .run(nextJid, nextName, safePhone, isGroup ? 1 : 0, activityAt, target.id);
+      .run(jid, nextName, safePhone, isGroup ? 1 : 0, activityAt, target.id);
 
-    if (!isUnresolvedLid && target.jid !== nextJid) {
+    if (target.jid !== jid) {
       db.prepare('UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?')
-        .run(nextJid, target.id, userId);
+        .run(jid, target.id, userId);
     }
 
     return target.id;
@@ -1466,238 +627,218 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
   return id;
 }
 
-function syncContacts(userId, db) {
+// ── Contact Sync ──
+
+async function syncContacts(userId, db) {
   const inst = getInstance(userId);
-  if (!inst.store?.contacts) return;
+  if (!inst.client || inst.connectionStatus !== 'connected') return;
+
   console.log(`📇 [${userId}] Contact sync initiated`);
 
   try {
-    const contacts = Object.values(inst.store.contacts);
-    console.log(`📇 [${userId}] Found ${contacts.length} contacts in store`);
+    const contacts = await inst.client.getContacts();
+    console.log(`📇 [${userId}] Found ${contacts.length} contacts`);
     updateSyncState(userId, db, { storeContacts: contacts.length });
-
-    // First pass: build all LID mappings
-    for (const c of contacts) {
-      buildLidMapping(inst, c);
-    }
-    console.log(`📇 [${userId}] Built ${inst.lidMap.size} LID mappings`);
 
     let syncedCount = 0;
     for (const c of contacts) {
       try {
-        const jid = c.id;
-        if (!jid || jid === 'status@broadcast') continue;
-        const resolved = resolveLidPhone(inst, jid);
-        const phone = '+' + resolved.phone;
-        const isGroup = jid.endsWith('@g.us');
-        getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(c, inst.store?.contacts?.[resolved.jid]), isGroup);
+        if (!c.id?._serialized) continue;
+        const jid = toJid(c.id._serialized);
+        if (jid === 'status@broadcast') continue;
+        const phone = '+' + phoneFromJid(jid);
+        const isGroup = c.isGroup || jid.endsWith('@g.us');
+        const candidate = getNameCandidate({ name: c.name, pushName: c.pushname, notify: c.shortName, verifiedName: c.verifiedName });
+        getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
+
+        // Cache for later use
+        inst.contactCache.set(jid, { name: c.name || c.pushname || c.shortName, phone });
         syncedCount++;
       } catch {}
     }
 
     if (syncedCount > 0) {
       emit(userId, 'contacts_sync', { count: syncedCount });
+      console.log(`📇 [${userId}] Synced ${syncedCount} contacts`);
     }
+
+    // Now sync chats
+    await syncChats(userId, db);
   } catch (err) {
     console.error(`Contact sync error [${userId}]:`, err?.message || err);
   }
 }
 
-// ── Active Recovery Sync ──────────────────────────────────
-// Goes beyond passive history events: reads live chats from the socket store
-// and backfills recent messages for chats missing from the local DB.
+async function syncChats(userId, db) {
+  const inst = getInstance(userId);
+  if (!inst.client || inst.connectionStatus !== 'connected') return;
+
+  try {
+    const chats = await inst.client.getChats();
+    console.log(`📇 [${userId}] Found ${chats.length} chats`);
+    updateSyncState(userId, db, {
+      phase: 'importing',
+      lastHistorySyncAt: new Date().toISOString(),
+      historyChats: chats.length,
+    });
+
+    let contactChanges = 0;
+    let messageCount = 0;
+
+    for (const chat of chats) {
+      try {
+        const jid = toJid(chat.id._serialized);
+        if (jid === 'status@broadcast') continue;
+        const phone = '+' + phoneFromJid(jid);
+        const isGroup = chat.isGroup;
+        const candidate = getNameCandidate({ name: chat.name, pushName: chat.name });
+
+        const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
+        if (!contactId) continue;
+        contactChanges++;
+
+        // Sync archive status
+        if (chat.archived) {
+          try {
+            db.prepare("UPDATE contacts SET is_archived = 1 WHERE id = ? AND user_id = ?").run(contactId, userId);
+          } catch {}
+        }
+
+        // Sync unread count
+        if (chat.unreadCount > 0) {
+          try {
+            db.prepare("UPDATE contacts SET unread_count = ? WHERE id = ? AND user_id = ?").run(chat.unreadCount, contactId, userId);
+          } catch {}
+        }
+
+        // Fetch recent messages for this chat
+        try {
+          const messages = await chat.fetchMessages({ limit: 50 });
+          for (const msg of messages) {
+            try {
+              if (!msg.body && !msg.hasMedia) continue;
+
+              const { msgType, content, duration, mimetype } = getMessagePayload(msg);
+              const msgId = msg.id?._serialized || msg.id?.id || uuid();
+              const direction = msg.fromMe ? 'sent' : 'received';
+
+              let mediaPath = null;
+              if (msgType === 'voice' && msg.hasMedia) {
+                mediaPath = await saveVoiceMedia(userId, msg, msgId, mimetype);
+              }
+
+              upsertMessageRecord(db, {
+                id: msgId,
+                userId,
+                contactId,
+                jid,
+                content,
+                type: msgType,
+                direction,
+                timestamp: new Date(msg.timestamp * 1000).toISOString(),
+                status: msg.fromMe ? 'sent' : 'delivered',
+                duration,
+                mediaPath,
+              });
+              messageCount++;
+            } catch {}
+          }
+        } catch (err) {
+          console.log(`📜 [${userId}] Failed to fetch messages for ${jid}: ${err?.message}`);
+        }
+      } catch {}
+    }
+
+    console.log(`📇 [${userId}] Synced ${contactChanges} chats, ${messageCount} messages`);
+    updateSyncState(userId, db, {
+      phase: 'ready',
+      historyContacts: contactChanges,
+      historyMessages: messageCount,
+      lastProgressAt: new Date().toISOString(),
+    });
+
+    if (contactChanges > 0) {
+      emit(userId, 'contacts_sync', { count: contactChanges });
+    }
+    emit(userId, 'history_sync', { chats: contactChanges, messages: messageCount });
+  } catch (err) {
+    console.error(`Chat sync error [${userId}]:`, err?.message || err);
+    updateSyncState(userId, db, { phase: 'partial' });
+  }
+}
+
+// ── Recovery Sync ──
+
 async function recoverSync(userId, db) {
   const inst = getInstance(userId);
-  if (!inst.sock || inst.connectionStatus !== 'connected') {
-    syncContacts(userId, db);
-    return;
-  }
+  if (!inst.client || inst.connectionStatus !== 'connected') return;
 
   console.log(`🔄 [${userId}] Recovery sync started`);
   updateSyncState(userId, db, { phase: 'recovering' });
   emit(userId, 'sync_state', inst.syncState);
 
-  // Step 1: Sync contacts from store
-  syncContacts(userId, db);
+  await syncContacts(userId, db);
 
-  // Step 2: Fetch group info
-  try {
-    await inst.sock.groupFetchAllParticipating?.();
-  } catch (err) {
-    console.log(`📇 [${userId}] Group fetch skipped: ${err?.message}`);
-  }
-
-  // Step 3: Create missing contact entries + collect chats needing history
-  const chatsToRecover = [];
-  try {
-    const storeContacts = inst.store?.contacts || {};
-    const storeChats = inst.store?.chats || {};
-    const candidateJids = Array.from(new Set([
-      ...Object.keys(storeContacts),
-      ...Object.keys(storeChats),
-    ])).filter(
-      jid => jid.endsWith('@s.whatsapp.net') && jid !== 'status@broadcast'
-    );
-
-    const dbContacts = db.prepare(`
-      SELECT c.jid, c.id, COUNT(m.id) as msg_count, MAX(m.timestamp) as latest_timestamp
-      FROM contacts c
-      LEFT JOIN messages m ON m.contact_id = c.id AND m.user_id = ?
-      WHERE c.user_id = ? AND c.is_group = 0
-      GROUP BY c.jid
-    `).all(userId, userId);
-
-    const dbContactMap = new Map(dbContacts.map(c => [c.jid, { id: c.id, count: c.msg_count, latestTimestamp: c.latest_timestamp || null }]));
-
-    let recovered = 0;
-    const sortedJids = candidateJids.sort((a, b) => {
-      const bTs = toEpochSeconds(storeChats[b]?.lastMessage?.messageTimestamp || storeChats[b]?.conversationTimestamp || storeChats[b]?.lastMessageRecvTimestamp) || 0;
-      const aTs = toEpochSeconds(storeChats[a]?.lastMessage?.messageTimestamp || storeChats[a]?.conversationTimestamp || storeChats[a]?.lastMessageRecvTimestamp) || 0;
-      return bTs - aTs;
-    });
-
-    for (const jid of sortedJids) {
-      const resolved = resolveLidPhone(inst, jid);
-      const existing = dbContactMap.get(resolved.jid) || dbContactMap.get(jid);
-
-      if (!existing || existing.count === 0) {
-        const phone = '+' + resolved.phone;
-        const contact = storeContacts[jid] || storeChats[jid] || storeChats[resolved.jid];
-        getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(contact), false, getChatActivityTimestamp(storeChats[jid] || storeChats[resolved.jid] || contact));
-        chatsToRecover.push({ jid: resolved.jid, contactDbId: existing?.id || null });
-        recovered++;
-      }
-    }
-
-    console.log(`🔄 [${userId}] Recovery: ${candidateJids.length} candidate chats, ${dbContacts.length} DB contacts, ${recovered} missing`);
-    if (recovered > 0) {
-      emit(userId, 'contacts_sync', { count: recovered });
-    }
-  } catch (err) {
-    console.error(`Recovery sync contacts error [${userId}]:`, err?.message || err);
-  }
-
-  // Step 4: On-demand history fetch for chats with 0 messages
-  const fetchTargets = chatsToRecover.slice(0, 20);
-  if (fetchTargets.length > 0) {
-    console.log(`🔄 [${userId}] Requesting history for ${fetchTargets.length} empty chats`);
-    for (const target of fetchTargets) {
-      try {
-        const oldestMsg = db.prepare(
-          'SELECT id, jid, direction, timestamp FROM messages WHERE jid = ? AND user_id = ? ORDER BY timestamp ASC LIMIT 1'
-        ).get(target.jid, userId);
-        const dbAnchor = buildHistoryAnchorFromDbRow(oldestMsg, target.jid);
-        const chatAnchor = buildHistoryAnchorFromChat(target.jid, inst.store?.chats?.[target.jid]);
-        const anchor = dbAnchor || chatAnchor;
-
-        if (anchor && typeof inst.sock.fetchMessageHistory === 'function') {
-          await inst.sock.fetchMessageHistory(50, anchor.key, anchor.timestamp);
-          console.log(`📜 [${userId}] fetchMessageHistory sent for ${target.jid} (anchored)`);
-        } else {
-          console.log(`📜 [${userId}] Skipping history request for ${target.jid}: no valid anchor available yet`);
-        }
-        await new Promise(r => setTimeout(r, 500));
-      } catch (err) {
-        console.log(`📜 [${userId}] History request for ${target.jid} failed: ${err?.message}`);
-      }
-    }
-  }
-
-  // Step 5: Enrich unnamed contacts from store (no onWhatsApp — it doesn't return names)
-  await enrichUnnamedContacts(userId, db, inst);
-
-  // Step 6: Run LID sweep
-  runLidSweep(userId, db, inst);
-
-  // Step 7: Update sync state
   const phase = (inst.syncState.totalDbMessages > 10 && inst.syncState.totalDbContacts > 0) ? 'ready' : 'partial';
   updateSyncState(userId, db, { phase });
   console.log(`🔄 [${userId}] Recovery sync complete — phase: ${phase}`);
 }
 
-// ── Enrich unnamed contacts from store (store-first, no onWhatsApp for names) ──
-async function enrichUnnamedContacts(userId, db, inst) {
-  try {
-    // Find contacts with phone-like names or placeholder names
-    const unnamed = db.prepare(`
-      SELECT id, jid, name, phone FROM contacts
-      WHERE user_id = ? AND is_group = 0
-        AND jid LIKE '%@s.whatsapp.net'
-        AND (name IS NULL OR name = '' OR name LIKE '+%' OR name LIKE 'WhatsApp contact%' OR name GLOB '[0-9]*')
-      LIMIT 50
-    `).all(userId);
+// ── Recover single chat ──
 
-    if (unnamed.length === 0) return;
-    console.log(`📇 [${userId}] Enriching ${unnamed.length} unnamed contacts`);
-
-    let enriched = 0;
-    for (const contact of unnamed) {
-      // Check store for any name (name, notify, verifiedName, pushName)
-      const storeContact = inst.store?.contacts?.[contact.jid];
-      const candidate = getNameCandidate(storeContact);
-      const phone = contact.phone || '+' + contact.jid.replace('@s.whatsapp.net', '');
-
-      if (candidate.name && !isPhoneLikeName(candidate.name, phone)) {
-        db.prepare("UPDATE contacts SET name = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
-          .run(candidate.name, contact.id, userId);
-        // Also update the store to keep it in sync
-        if (storeContact) {
-          inst.store.contacts[contact.jid] = { ...storeContact, name: candidate.name };
-        }
-        enriched++;
-      }
-    }
-
-    if (enriched > 0) {
-      console.log(`📇 [${userId}] Enriched ${enriched} contact names from store`);
-      emit(userId, 'contacts_sync', { count: enriched });
-    } else {
-      console.log(`📇 [${userId}] No new names found in store for ${unnamed.length} unnamed contacts`);
-    }
-  } catch (err) {
-    console.error(`enrichUnnamedContacts error [${userId}]:`, err?.message || err);
-  }
-}
-
-// ── Recover a single chat's history on demand ──
 export async function recoverSingleChat(userId, db, contactId) {
   const inst = getInstance(userId);
-  if (!inst.sock || inst.connectionStatus !== 'connected') {
+  if (!inst.client || inst.connectionStatus !== 'connected') {
     throw new Error('WhatsApp not connected');
   }
 
   const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (!contact) throw new Error('Contact not found');
 
-  const jid = contact.jid;
-  if (!jid.endsWith('@s.whatsapp.net')) {
-    throw new Error('Can only recover history for individual chats');
-  }
+  const chatId = fromJid(contact.jid);
+  console.log(`📜 [${userId}] On-demand history request for ${contact.jid}`);
 
-  console.log(`📜 [${userId}] On-demand history request for ${jid}`);
+  try {
+    const chat = await inst.client.getChatById(chatId);
+    const messages = await chat.fetchMessages({ limit: 100 });
 
-  // Check for an existing oldest message to use as anchor
-  const oldestMsg = db.prepare(
-    'SELECT id, jid, direction, timestamp FROM messages WHERE contact_id = ? AND user_id = ? ORDER BY timestamp ASC LIMIT 1'
-  ).get(contactId, userId);
-  const dbAnchor = buildHistoryAnchorFromDbRow(oldestMsg, jid);
-  const chatAnchor = buildHistoryAnchorFromChat(jid, inst.store?.chats?.[jid]);
-  const anchor = dbAnchor || chatAnchor;
+    let count = 0;
+    for (const msg of messages) {
+      try {
+        if (!msg.body && !msg.hasMedia) continue;
+        const { msgType, content, duration, mimetype } = getMessagePayload(msg);
+        const msgId = msg.id?._serialized || msg.id?.id || uuid();
 
-  if (anchor && typeof inst.sock.fetchMessageHistory === 'function') {
-    try {
-      await inst.sock.fetchMessageHistory(50, anchor.key, anchor.timestamp);
-      console.log(`📜 [${userId}] fetchMessageHistory sent for ${jid} (anchored)`);
-      return { success: true, message: 'History request sent with valid anchor. Messages will appear shortly.' };
-    } catch (err) {
-      console.error(`fetchMessageHistory error for ${jid}:`, err?.message);
+        let mediaPath = null;
+        if (msgType === 'voice' && msg.hasMedia) {
+          mediaPath = await saveVoiceMedia(userId, msg, msgId, mimetype);
+        }
+
+        upsertMessageRecord(db, {
+          id: msgId,
+          userId,
+          contactId,
+          jid: contact.jid,
+          content,
+          type: msgType,
+          direction: msg.fromMe ? 'sent' : 'received',
+          timestamp: new Date(msg.timestamp * 1000).toISOString(),
+          status: msg.fromMe ? 'sent' : 'delivered',
+          duration,
+          mediaPath,
+        });
+        count++;
+      } catch {}
     }
-  }
 
-  return { success: true, message: 'No valid sync anchor yet for this chat. Keep the session connected a bit longer and try again.' };
+    emit(userId, 'history_sync', { chats: 1, messages: count });
+    return { success: true, message: `Recovered ${count} messages for this chat.` };
+  } catch (err) {
+    return { success: false, message: `Failed to recover chat: ${err?.message}` };
+  }
 }
 
-// ─── Human-like timing helpers ───
+// ── Auto-reply ──
 
 function getConfigValue(db, userId, key, fallback) {
   const row = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = ?").get(userId, key);
@@ -1708,8 +849,7 @@ function isWithinActiveHours(db, userId) {
   const start = getConfigValue(db, userId, 'ai_active_hours_start', '10:00');
   const end = getConfigValue(db, userId, 'ai_active_hours_end', '23:00');
   const timezone = getConfigValue(db, userId, 'ai_timezone', 'America/New_York');
-  
-  // Use the user's configured timezone
+
   let now;
   try {
     const formatter = new Intl.DateTimeFormat('en-US', {
@@ -1721,11 +861,10 @@ function isWithinActiveHours(db, userId) {
     const minute = parseInt(parts.find(p => p.type === 'minute')?.value || '0');
     now = hour * 60 + minute;
   } catch {
-    // Fallback to server time if timezone is invalid
     const d = new Date();
     now = d.getHours() * 60 + d.getMinutes();
   }
-  
+
   const [sh, sm] = start.split(':').map(Number);
   const [eh, em] = end.split(':').map(Number);
   const startMin = sh * 60 + sm;
@@ -1748,21 +887,21 @@ function calculateDelay(messageLength, speed) {
   return Math.floor(Math.random() * (range[1] - range[0])) + range[0];
 }
 
-async function sendReaction(userId, jid, messageKey, emoji) {
+async function sendReaction(userId, jid, msg, emoji) {
   const inst = getInstance(userId);
-  if (!inst.sock || inst.connectionStatus !== 'connected') return;
+  if (!inst.client || inst.connectionStatus !== 'connected') return;
   try {
-    await inst.sock.sendMessage(jid, { react: { text: emoji, key: messageKey } });
+    await msg.react(emoji);
   } catch (err) {
     console.error('Failed to send reaction:', err?.message);
   }
 }
 
-async function handleAutoReply(userId, db, contactId, jid, phone, contactName, messageKey) {
+async function handleAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg) {
   const autoConfig = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'automation_enabled'").get(userId);
   if (!autoConfig || autoConfig.value !== 'true') return;
 
-  // Skip archived chats — no AI replies
+  // Skip archived chats
   const contactRow = db.prepare('SELECT is_archived FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (contactRow?.is_archived) return;
 
@@ -1771,9 +910,9 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, m
   const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
   if (Math.random() * 100 > replyChance) {
     const reactionEmoji = shouldReact();
-    if (reactionEmoji && messageKey) {
+    if (reactionEmoji && originalMsg) {
       const reactDelay = Math.floor(Math.random() * 5000) + 2000;
-      setTimeout(() => sendReaction(userId, jid, messageKey, reactionEmoji), reactDelay);
+      setTimeout(() => sendReaction(userId, jid, originalMsg, reactionEmoji), reactDelay);
     }
     return;
   }
@@ -1782,12 +921,12 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, m
   const existing = inst.messageBatchBuffers.get(jid);
   if (existing) clearTimeout(existing.timer);
 
-  const batchEntry = existing || { messages: [], contactId, phone, contactName, messageKey };
-  batchEntry.messageKey = messageKey;
+  const batchEntry = existing || { messages: [], contactId, phone, contactName, originalMsg };
+  batchEntry.originalMsg = originalMsg;
 
   batchEntry.timer = setTimeout(() => {
     inst.messageBatchBuffers.delete(jid);
-    executeAutoReply(userId, db, contactId, jid, phone, contactName, messageKey).catch(err => {
+    executeAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg).catch(err => {
       console.error('Batched auto-reply error:', err?.message || err);
     });
   }, 8000);
@@ -1795,7 +934,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, m
   inst.messageBatchBuffers.set(jid, batchEntry);
 }
 
-async function executeAutoReply(userId, db, contactId, jid, phone, contactName, messageKey) {
+async function executeAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg) {
   const inst = getInstance(userId);
   const now = Date.now();
   const lastReply = inst.autoReplyCooldowns.get(jid) || 0;
@@ -1819,9 +958,9 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   const speed = getConfigValue(db, userId, 'ai_response_speed', 'normal');
 
   const reactionEmoji = shouldReact();
-  if (reactionEmoji && messageKey) {
+  if (reactionEmoji && originalMsg) {
     const reactDelay = Math.floor(Math.random() * 3000) + 1000;
-    setTimeout(() => sendReaction(userId, jid, messageKey, reactionEmoji), reactDelay);
+    setTimeout(() => sendReaction(userId, jid, originalMsg, reactionEmoji), reactDelay);
     if (!shouldAlsoReplyAfterReaction()) {
       inst.autoReplyCooldowns.set(jid, Date.now());
       return;
@@ -1829,23 +968,30 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   }
 
   let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
-  // Strip em dashes and en dashes from AI output
   replyText = replyText.replace(/[—–-]{2,}/g, ' ').replace(/—/g, ' ').replace(/–/g, ' ');
   const delay = calculateDelay(lastMsgContent.length, speed);
 
   setTimeout(async () => {
     try {
-      if (inst.sock && inst.connectionStatus === 'connected') {
-        await inst.sock.sendPresenceUpdate('composing', jid);
-      }
+      // Send typing indicator
+      const chatId = fromJid(jid);
+      try {
+        const chat = await inst.client.getChatById(chatId);
+        await chat.sendStateTyping();
+      } catch {}
+
       const typingDuration = Math.floor(Math.random() * 2000) + 2000;
       setTimeout(async () => {
         try {
           const sent = await sendTextMessage(userId, jid, replyText);
-          const replyId = sent?.key?.id || uuid();
-          if (inst.sock && inst.connectionStatus === 'connected') {
-            await inst.sock.sendPresenceUpdate('paused', jid);
-          }
+          const replyId = sent?.id?._serialized || uuid();
+
+          // Clear typing
+          try {
+            const chat = await inst.client.getChatById(chatId);
+            await chat.clearState();
+          } catch {}
+
           db.prepare(`
             INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
             VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent')
@@ -1862,47 +1008,44 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   }, delay - 3000);
 }
 
+// ── Send messages ──
+
 async function sendTextMessage(userId, jid, text) {
   const inst = getInstance(userId);
-  if (!inst.sock || inst.connectionStatus !== 'connected') {
+  if (!inst.client || inst.connectionStatus !== 'connected') {
     throw new Error('WhatsApp not connected');
   }
-  return await inst.sock.sendMessage(jid, { text });
+  const chatId = fromJid(jid);
+  return await inst.client.sendMessage(chatId, text);
 }
 
 async function sendVoiceNote(userId, jid, audioBuffer) {
   const inst = getInstance(userId);
-  if (!inst.sock || inst.connectionStatus !== 'connected') {
+  if (!inst.client || inst.connectionStatus !== 'connected') {
     throw new Error('WhatsApp not connected');
   }
+  const chatId = fromJid(jid);
 
-  // Attempt 1: PTT mode (normal voice note)
   try {
-    const result = await inst.sock.sendMessage(jid, {
-      audio: audioBuffer,
-      mimetype: 'audio/ogg; codecs=opus',
-      ptt: true,
-    });
-    console.log(`🎤 [${userId}] Voice note sent to ${jid} (key: ${result?.key?.id})`);
+    const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
+    const result = await inst.client.sendMessage(chatId, media, { sendAudioAsVoice: true });
+    console.log(`🎤 [${userId}] Voice note sent to ${jid}`);
     return result;
   } catch (pttErr) {
-    console.warn(`⚠️ [${userId}] PTT send failed, retrying as regular audio: ${pttErr?.message}`);
-  }
-
-  // Attempt 2: Fallback — send as regular audio (not PTT)
-  try {
-    const result = await inst.sock.sendMessage(jid, {
-      audio: audioBuffer,
-      mimetype: 'audio/ogg; codecs=opus',
-      ptt: false,
-    });
-    console.log(`🎤 [${userId}] Voice note sent as audio to ${jid} (key: ${result?.key?.id})`);
-    return result;
-  } catch (audioErr) {
-    console.error(`❌ [${userId}] Both PTT and audio send failed for ${jid}: ${audioErr?.message}`);
-    throw new Error(`Voice note delivery failed: ${audioErr?.message || 'unknown error'}`);
+    console.warn(`⚠️ [${userId}] PTT send failed, retrying as audio: ${pttErr?.message}`);
+    try {
+      const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
+      const result = await inst.client.sendMessage(chatId, media);
+      console.log(`🎤 [${userId}] Voice note sent as audio to ${jid}`);
+      return result;
+    } catch (audioErr) {
+      console.error(`❌ [${userId}] Both PTT and audio send failed: ${audioErr?.message}`);
+      throw new Error(`Voice note delivery failed: ${audioErr?.message || 'unknown error'}`);
+    }
   }
 }
+
+// ── Clear session ──
 
 async function clearSession(userId, db) {
   const inst = getInstance(userId);
@@ -1911,15 +1054,12 @@ async function clearSession(userId, db) {
   inst.pairingCode = null;
   inst.pendingPairingPhone = null;
   inst.reconnectAttempt = 0;
-  inst.badMacTimestamps = [];
-  inst.repairInProgress = false;
   inst.autoReplyCooldowns.clear();
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
 
-  // Reset sync state
   inst.syncState = {
     phase: 'idle',
     connectedAt: null,
@@ -1933,25 +1073,10 @@ async function clearSession(userId, db) {
     totalDbMessages: 0,
   };
 
-  if (inst.sock) {
-    try { inst.sock.ev.removeAllListeners('connection.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('messages.upsert'); } catch {}
-    try { inst.sock.ev.removeAllListeners('messages.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('connection.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('messages.upsert'); } catch {}
-    try { inst.sock.ev.removeAllListeners('messages.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('call'); } catch {}
-    try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('contacts.upsert'); } catch {}
-    try { inst.sock.ev.removeAllListeners('chats.upsert'); } catch {}
-    try { inst.sock.ev.removeAllListeners('chats.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('lid-mapping.update'); } catch {}
-    try { inst.sock.ev.removeAllListeners('messaging-history.set'); } catch {}
-    try { inst.sock.ev.removeAllListeners('creds.update'); } catch {}
-    try { await inst.sock.logout(); } catch {}
-    try { inst.sock.end?.(undefined); } catch {}
-    inst.sock = null;
+  if (inst.client) {
+    try { await inst.client.logout(); } catch {}
+    try { await inst.client.destroy(); } catch {}
+    inst.client = null;
   }
 
   // Wipe user data
@@ -1971,91 +1096,77 @@ async function clearSession(userId, db) {
   }
   fs.mkdirSync(authDir, { recursive: true });
 
+  // Also remove the wwebjs LocalAuth data
+  const wwLocalAuth = path.join(DATA_DIR, 'auth', `.wwebjs_auth`, `session-${userId}`);
+  if (fs.existsSync(wwLocalAuth)) {
+    fs.rmSync(wwLocalAuth, { recursive: true, force: true });
+  }
+
   inst.isConnecting = false;
   emit(userId, 'status', { status: 'disconnected' });
   emit(userId, 'sync_state', inst.syncState);
   console.log(`🗑️ [${userId}] Session fully cleared.`);
 }
 
-// ── Status (Stories) capture ──────────────────────────────
-const STATUS_MEDIA_DIR = path.join(DATA_DIR, 'status-media');
+// ── Status (Stories) capture ──
 
 async function captureStatusUpdate(userId, db, inst, msg) {
-  const senderJid = msg.key.participant || msg.key.remoteJid;
-  if (!senderJid || senderJid === 'status@broadcast') return;
+  try {
+    if (!msg.isStatus && msg.from !== 'status@broadcast') return;
+    const contact = await msg.getContact();
+    const senderJid = toJid(contact?.id?._serialized || msg.author || msg.from);
+    const phone = '+' + phoneFromJid(senderJid);
+    const senderName = contact?.pushname || contact?.name || null;
 
-  const resolved = resolveLidPhone(inst, senderJid);
-  const phone = '+' + resolved.phone;
-  const senderName = msg.pushName || inst.store?.contacts?.[senderJid]?.name || inst.store?.contacts?.[resolved.jid]?.name || null;
+    const isImage = msg.type === 'image';
+    const isVideo = msg.type === 'video';
 
-  // Unwrap viewOnceMessage / ephemeralMessage / documentWithCaptionMessage wrappers
-  let innerMsg = msg.message;
-  if (innerMsg?.viewOnceMessage?.message) innerMsg = innerMsg.viewOnceMessage.message;
-  if (innerMsg?.viewOnceMessageV2?.message) innerMsg = innerMsg.viewOnceMessageV2.message;
-  if (innerMsg?.ephemeralMessage?.message) innerMsg = innerMsg.ephemeralMessage.message;
-  if (innerMsg?.documentWithCaptionMessage?.message) innerMsg = innerMsg.documentWithCaptionMessage.message;
+    let mediaType = 'text';
+    let content = msg.body || '';
+    let mediaPath = null;
 
-  const isImage = !!innerMsg?.imageMessage;
-  const isVideo = !!innerMsg?.videoMessage;
-  const isText = !isImage && !isVideo;
+    if (isImage) mediaType = 'image';
+    else if (isVideo) mediaType = 'video';
 
-  let mediaType = 'text';
-  let content = '';
-  let mediaPath = null;
-
-  if (isImage) {
-    mediaType = 'image';
-    content = innerMsg.imageMessage?.caption || '';
-  } else if (isVideo) {
-    mediaType = 'video';
-    content = innerMsg.videoMessage?.caption || '';
-  } else {
-    content = innerMsg?.conversation
-      || innerMsg?.extendedTextMessage?.text
-      || innerMsg?.editedMessage?.message?.protocolMessage?.editedMessage?.conversation
-      || innerMsg?.editedMessage?.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text
-      || '';
-  }
-
-  console.log(`📸 [${userId}] Status from ${senderName || phone}: type=${mediaType}, content="${(content || '').slice(0, 50)}", msgKeys=${Object.keys(innerMsg || {}).join(',')}`);
-
-
-  // Download media if applicable
-  if (!isText && inst.sock) {
-    try {
-      if (!fs.existsSync(STATUS_MEDIA_DIR)) fs.mkdirSync(STATUS_MEDIA_DIR, { recursive: true });
-      const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: inst.sock.updateMediaMessage });
-      const ext = isImage ? 'jpg' : 'mp4';
-      const filename = `${uuid()}.${ext}`;
-      const filePath = path.join(STATUS_MEDIA_DIR, filename);
-      fs.writeFileSync(filePath, buffer);
-      mediaPath = filename;
-    } catch (err) {
-      console.error('Status media download failed:', err?.message || err);
+    // Download media
+    if ((isImage || isVideo) && msg.hasMedia) {
+      try {
+        if (!fs.existsSync(STATUS_MEDIA_DIR)) fs.mkdirSync(STATUS_MEDIA_DIR, { recursive: true });
+        const media = await msg.downloadMedia();
+        if (media?.data) {
+          const ext = isImage ? 'jpg' : 'mp4';
+          const filename = `${uuid()}.${ext}`;
+          const filePath = path.join(STATUS_MEDIA_DIR, filename);
+          fs.writeFileSync(filePath, Buffer.from(media.data, 'base64'));
+          mediaPath = filename;
+        }
+      } catch (err) {
+        console.error('Status media download failed:', err?.message || err);
+      }
     }
+
+    const ts = new Date(msg.timestamp * 1000).toISOString();
+    const expiresAt = new Date(msg.timestamp * 1000 + 24 * 60 * 60 * 1000).toISOString();
+    const statusId = msg.id?._serialized || msg.id?.id || uuid();
+
+    db.prepare(`
+      INSERT OR IGNORE INTO statuses (id, user_id, sender_jid, sender_phone, sender_name, content, media_type, media_path, timestamp, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(statusId, userId, senderJid, phone, senderName, content, mediaType, mediaPath, ts, expiresAt);
+
+    emit(userId, 'status_update', { senderJid, senderName, mediaType });
+  } catch (err) {
+    console.error('captureStatusUpdate error:', err?.message || err);
   }
-
-  const ts = toIsoTimestamp(msg.messageTimestamp);
-  const expiresAt = new Date(new Date(ts).getTime() + 24 * 60 * 60 * 1000).toISOString();
-  const statusId = msg.key.id || uuid();
-
-  db.prepare(`
-    INSERT OR IGNORE INTO statuses (id, user_id, sender_jid, sender_phone, sender_name, content, media_type, media_path, timestamp, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(statusId, userId, resolved.jid, phone, senderName, content, mediaType, mediaPath, ts, expiresAt);
-
-  emit(userId, 'status_update', { senderJid: resolved.jid, senderName, mediaType });
 }
 
 export function getStatuses(db, userId) {
-  // Cleanup expired
   db.prepare("DELETE FROM statuses WHERE user_id = ? AND expires_at < datetime('now')").run(userId);
 
   const rows = db.prepare(`
     SELECT * FROM statuses WHERE user_id = ? ORDER BY timestamp ASC
   `).all(userId);
 
-  // Group by sender
   const grouped = {};
   for (const row of rows) {
     const key = row.sender_jid;
@@ -2067,7 +1178,6 @@ export function getStatuses(db, userId) {
         statuses: [],
       };
     }
-    // Update name if newer status has a name
     if (row.sender_name) grouped[key].senderName = row.sender_name;
     grouped[key].statuses.push({
       id: row.id,
@@ -2087,7 +1197,8 @@ export function getCallLogs(db, userId) {
   `).all(userId);
 }
 
-// ── Sync Diagnostics ──────────────────────────────────────
+// ── Sync Diagnostics ──
+
 export function getSyncDiagnostics(userId, db) {
   const inst = getInstance(userId);
 
@@ -2103,7 +1214,6 @@ export function getSyncDiagnostics(userId, db) {
       AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.contact_id = c.id AND m.user_id = ?)
   `).get(userId, userId)?.c || 0;
   const totalMessages = db.prepare('SELECT COUNT(*) as c FROM messages WHERE user_id = ?').get(userId)?.c || 0;
-  const unresolvedLids = db.prepare("SELECT COUNT(*) as c FROM contacts WHERE user_id = ? AND jid LIKE '%@lid'").get(userId)?.c || 0;
 
   const topUnnamed = db.prepare(`
     SELECT id, jid, name, phone FROM contacts
@@ -2112,78 +1222,85 @@ export function getSyncDiagnostics(userId, db) {
     ORDER BY updated_at DESC LIMIT 10
   `).all(userId);
 
-  const storeContactCount = inst.store?.contacts ? Object.keys(inst.store.contacts).length : 0;
-
   return {
     totalContacts,
     unnamedContacts,
     emptyChats,
     totalMessages,
-    unresolvedLids,
-    storeContactCount,
-    lidMapSize: inst.lidMap.size,
+    unresolvedLids: 0,
+    storeContactCount: inst.contactCache.size,
+    lidMapSize: 0,
     syncState: { ...inst.syncState },
     topUnnamed: topUnnamed.map(c => ({ id: c.id, jid: c.jid, name: c.name, phone: c.phone })),
   };
 }
 
-// ── Delete message from WhatsApp + local DB ──
+// ── Delete message ──
+
 export async function deleteMessage(userId, db, messageId) {
   const inst = getInstance(userId);
   const msg = db.prepare('SELECT id, contact_id, jid, direction FROM messages WHERE id = ? AND user_id = ?').get(messageId, userId);
   if (!msg) throw new Error('Message not found');
 
   // Delete from WhatsApp if connected
-  if (inst.sock && inst.connectionStatus === 'connected') {
+  if (inst.client && inst.connectionStatus === 'connected') {
     try {
-      await inst.sock.sendMessage(msg.jid, { delete: { remoteJid: msg.jid, fromMe: msg.direction === 'sent', id: messageId } });
+      const chatId = fromJid(msg.jid);
+      const chat = await inst.client.getChatById(chatId);
+      const messages = await chat.fetchMessages({ limit: 50 });
+      const waMsg = messages.find(m => (m.id?._serialized === messageId || m.id?.id === messageId));
+      if (waMsg && msg.direction === 'sent') {
+        await waMsg.delete(true); // delete for everyone
+      }
       console.log(`🗑️ [${userId}] Deleted message ${messageId} from WhatsApp`);
     } catch (err) {
       console.log(`🗑️ [${userId}] WhatsApp delete failed (removing locally): ${err?.message}`);
     }
   }
 
-  // Always delete locally
   db.prepare('DELETE FROM messages WHERE id = ? AND user_id = ?').run(messageId, userId);
   return { success: true };
 }
 
-// ── Delete entire conversation (all messages) from WhatsApp + local DB ──
+// ── Delete conversation ──
+
 export async function deleteConversation(userId, db, contactId) {
   const inst = getInstance(userId);
   const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (!contact) throw new Error('Contact not found');
 
-  // Clear chat on WhatsApp if connected
-  if (inst.sock && inst.connectionStatus === 'connected') {
+  if (inst.client && inst.connectionStatus === 'connected') {
     try {
-      await inst.sock.chatModify({ delete: true, lastMessages: [{ key: { remoteJid: contact.jid, fromMe: true, id: '' }, messageTimestamp: undefined }] }, contact.jid);
+      const chatId = fromJid(contact.jid);
+      const chat = await inst.client.getChatById(chatId);
+      await chat.clearMessages();
       console.log(`🗑️ [${userId}] Cleared chat ${contact.jid} on WhatsApp`);
     } catch (err) {
       console.log(`🗑️ [${userId}] WhatsApp chat clear failed: ${err?.message}`);
     }
   }
 
-  // Delete all local messages for this contact
   const deleted = db.prepare('DELETE FROM messages WHERE contact_id = ? AND user_id = ?').run(contactId, userId);
   db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(contactId, userId);
   return { success: true, deletedMessages: deleted.changes };
 }
 
 // ── Archive / Unarchive chat ──
+
 export async function archiveChat(userId, db, contactId, archive) {
   const inst = getInstance(userId);
   const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (!contact) throw new Error('Contact not found');
 
-  // Sync to WhatsApp if connected
-  if (inst.sock && inst.connectionStatus === 'connected') {
+  if (inst.client && inst.connectionStatus === 'connected') {
     try {
-      const lastMsg = db.prepare('SELECT id, jid, direction, timestamp FROM messages WHERE contact_id = ? AND user_id = ? ORDER BY timestamp DESC LIMIT 1').get(contactId, userId);
-      const lastMessages = lastMsg
-        ? [{ key: { remoteJid: contact.jid, fromMe: lastMsg.direction === 'sent', id: lastMsg.id }, messageTimestamp: Math.floor(new Date(lastMsg.timestamp).getTime() / 1000) }]
-        : [{ key: { remoteJid: contact.jid, fromMe: true, id: '' }, messageTimestamp: undefined }];
-      await inst.sock.chatModify({ archive, lastMessages }, contact.jid);
+      const chatId = fromJid(contact.jid);
+      const chat = await inst.client.getChatById(chatId);
+      if (archive) {
+        await chat.archive();
+      } else {
+        await chat.unarchive();
+      }
       console.log(`📦 [${userId}] ${archive ? 'Archived' : 'Unarchived'} chat ${contact.jid} on WhatsApp`);
     } catch (err) {
       console.log(`📦 [${userId}] WhatsApp archive failed: ${err?.message}`);
@@ -2195,19 +1312,17 @@ export async function archiveChat(userId, db, contactId, archive) {
 }
 
 // ── Mark chat as read ──
+
 export async function markChatRead(userId, db, contactId) {
   const inst = getInstance(userId);
   const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (!contact) throw new Error('Contact not found');
 
-  // Sync to WhatsApp if connected
-  if (inst.sock && inst.connectionStatus === 'connected') {
+  if (inst.client && inst.connectionStatus === 'connected') {
     try {
-      const lastMsg = db.prepare('SELECT id, jid, direction, timestamp FROM messages WHERE contact_id = ? AND user_id = ? ORDER BY timestamp DESC LIMIT 1').get(contactId, userId);
-      const lastMessages = lastMsg
-        ? [{ key: { remoteJid: contact.jid, fromMe: lastMsg.direction === 'sent', id: lastMsg.id }, messageTimestamp: Math.floor(new Date(lastMsg.timestamp).getTime() / 1000) }]
-        : [{ key: { remoteJid: contact.jid, fromMe: true, id: '' }, messageTimestamp: undefined }];
-      await inst.sock.chatModify({ markRead: true, lastMessages }, contact.jid);
+      const chatId = fromJid(contact.jid);
+      const chat = await inst.client.getChatById(chatId);
+      await chat.sendSeen();
     } catch (err) {
       console.log(`📖 [${userId}] WhatsApp mark-read failed: ${err?.message}`);
     }

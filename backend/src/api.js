@@ -426,7 +426,7 @@ export function createApiRouter(db) {
 
       // Send voice note — captures message key or throws on complete failure
       const sendResult = await wa.sendVoiceNote(contact.jid, audioBuffer);
-      const waKeyId = sendResult?.key?.id;
+      const waKeyId = sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id;
       const msgId = waKeyId || uuid();
 
       // Only insert to DB after confirmed send
