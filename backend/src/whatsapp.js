@@ -643,6 +643,33 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
+    // Handle message/status revocations (delete for everyone)
+    client.on('message_revoke_everyone', async (after, before) => {
+      try {
+        if (!before) return;
+        const jid = toJid(before.from);
+
+        // If it's a status broadcast deletion, remove from statuses table
+        if (jid === 'status@broadcast' || before.isStatus) {
+          const statusId = before.id?._serialized || before.id;
+          if (statusId) {
+            // Also delete the media file if present
+            const row = db.prepare('SELECT media_path FROM statuses WHERE id = ? AND user_id = ?').get(statusId, userId);
+            if (row?.media_path) {
+              const fullPath = path.join(STATUS_MEDIA_DIR, row.media_path);
+              fs.unlink(fullPath).catch(() => {});
+            }
+            db.prepare('DELETE FROM statuses WHERE id = ? AND user_id = ?').run(statusId, userId);
+            emit(userId, 'status_deleted', { statusId });
+            console.log(`🗑️ [${userId}] Status deleted: ${statusId}`);
+          }
+          return;
+        }
+      } catch (err) {
+        console.error('message_revoke_everyone error:', err?.message || err);
+      }
+    });
+
     // Initialize client
     await client.initialize();
     console.log(`🔄 [${userId}] WhatsApp client initializing...`);
