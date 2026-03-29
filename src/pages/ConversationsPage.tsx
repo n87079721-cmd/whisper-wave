@@ -1517,41 +1517,16 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   </div>
                 ) : (
                   <>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => { setReplyMode('text'); setPreviewUrl(null); }}
-                        className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                          replyMode === 'text' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
-                        }`}
-                      >Text</button>
-                      <button
-                        onClick={() => setReplyMode('voice')}
-                        className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                          replyMode === 'voice' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
-                        }`}
-                      >🎤 AI Voice</button>
-                      {replyMode === 'voice' && voices.length > 0 && (
-                        <select
-                          value={selectedVoice}
-                          onChange={(e) => setSelectedVoice(e.target.value)}
-                          className="ml-auto px-2 py-1 rounded-full bg-secondary border border-border text-xs text-foreground max-w-[120px]"
-                        >
-                          {voices.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                        </select>
-                      )}
-                    </div>
-
                     <div className="flex gap-2">
-                      {replyMode === 'text' && (
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors flex-shrink-0"
-                          title="Attach photo or file"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      )}
+                      {/* Attach photo/file */}
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors flex-shrink-0"
+                        title="Attach photo or file"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
                       <input
                         value={replyText}
                         onChange={(e) => {
@@ -1561,20 +1536,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                           setPreviewUrl(null);
                         }}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
-                        placeholder={replyMode === 'voice' ? 'Text to voice...' : pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
+                        placeholder={pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
                         className="flex-1 px-4 py-2.5 rounded-full bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
                       />
-                      {replyMode === 'voice' && (
-                        <button
-                          onClick={handlePreviewVoice}
-                          disabled={!replyText.trim() || previewing}
-                          className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors disabled:opacity-40 flex-shrink-0"
-                        >
-                          {previewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Volume2 className="w-4 h-4" />}
-                        </button>
-                      )}
-                      {/* Mic button for live recording (only in text mode when no text typed) */}
-                      {replyMode === 'text' && !replyText.trim() && !pendingAttachment ? (
+                      {/* Mic button for live recording (only when no text typed) */}
+                      {!replyText.trim() && !pendingAttachment ? (
                         <button
                           onMouseDown={startRecording}
                           onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
@@ -1586,7 +1552,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       ) : (
                         <button
                           onClick={handleSendReply}
-                          disabled={replyMode === 'voice' ? !replyText.trim() || sending : (!replyText.trim() && !pendingAttachment) || sending}
+                          disabled={(!replyText.trim() && !pendingAttachment) || sending}
                           className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
                         >
                           {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
