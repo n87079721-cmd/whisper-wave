@@ -1616,6 +1616,7 @@ async function sendVoiceNote(userId, jid, audioBuffer) {
 async function clearSession(userId, db) {
   const inst = getInstance(userId);
   inst.connectionGeneration++;
+  stopHeartbeat(userId);
   inst.connectionStatus = 'disconnected';
   inst.qrCode = null;
   inst.pairingCode = null;
