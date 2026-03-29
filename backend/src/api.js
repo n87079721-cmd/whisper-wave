@@ -8,7 +8,9 @@ import { v4 as uuid } from 'uuid';
 import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation, streamMediaForMessage } from './whatsapp.js';
 import { initWhatsApp } from './whatsapp.js';
 import { archiveChat, markChatRead, syncArchiveStates } from './whatsapp.js';
-import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
+import { generateVoiceNote, generatePreviewAudio, BG_SOUND_PROMPTS } from './elevenlabs.js';
+import multer from 'multer';
+import { execSync } from 'child_process';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
 import QRCode from 'qrcode';
 
@@ -789,7 +791,7 @@ export function createApiRouter(db) {
   // ── Send Voice Note ─────────────────────────────────────
   router.post('/send/voice', async (req, res) => {
     try {
-      const { contactId, text, voiceId, modelId, backgroundSound } = req.body;
+      const { contactId, text, voiceId, modelId, backgroundSound, bgVolume } = req.body;
       if (!contactId || !text) return res.status(400).json({ error: 'Missing contactId or text' });
 
       const apiKey = getConfig(db, req.userId, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
@@ -799,7 +801,8 @@ export function createApiRouter(db) {
       if (!contact) return res.status(404).json({ error: 'Contact not found' });
 
       const wa = getWA(req);
-      const audioBuffer = await generateVoiceNote(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null);
+      const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
+      const audioBuffer = await generateVoiceNote(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
 
       // Send voice note — captures message key or throws on complete failure
       const sendResult = await wa.sendVoiceNote(contact.jid, audioBuffer);
@@ -868,13 +871,14 @@ export function createApiRouter(db) {
 
   router.post('/voice/preview', async (req, res) => {
     try {
-      const { text, voiceId, modelId, backgroundSound } = req.body;
+      const { text, voiceId, modelId, backgroundSound, bgVolume } = req.body;
       if (!text) return res.status(400).json({ error: 'Missing text' });
 
       const apiKey = getConfig(db, req.userId, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
       if (!apiKey) return res.status(400).json({ error: 'ElevenLabs API key not configured' });
 
-      const audioBuffer = await generatePreviewAudio(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null);
+      const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
+      const audioBuffer = await generatePreviewAudio(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
       res.set('Content-Type', 'audio/mpeg');
       res.send(audioBuffer);
     } catch (err) {
