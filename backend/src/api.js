@@ -1218,6 +1218,84 @@ RULES:
     }
   });
 
+  // ── Admin: List all users ──────────────────────────────
+  router.get('/admin/users', (req, res) => {
+    try {
+      // Only first registered user (by created_at) is admin
+      const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
+      if (!firstUser || firstUser.id !== req.userId) {
+        return res.status(403).json({ error: 'Admin access required' });
+      }
+
+      const users = db.prepare(`
+        SELECT u.id, u.username, u.display_name, u.created_at,
+          COALESCE(mc.msg_count, 0) as message_count,
+          COALESCE(cc.contact_count, 0) as contact_count
+        FROM users u
+        LEFT JOIN (SELECT user_id, COUNT(*) as msg_count FROM messages GROUP BY user_id) mc ON mc.user_id = u.id
+        LEFT JOIN (SELECT user_id, COUNT(*) as contact_count FROM contacts WHERE is_group = 0 GROUP BY user_id) cc ON cc.user_id = u.id
+        ORDER BY u.created_at ASC
+      `).all();
+
+      res.json(users.map(u => ({ ...u, is_current: u.id === req.userId })));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Admin: Delete a user ───────────────────────────────
+  router.delete('/admin/users/:userId', async (req, res) => {
+    try {
+      const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
+      if (!firstUser || firstUser.id !== req.userId) {
+        return res.status(403).json({ error: 'Admin access required' });
+      }
+
+      const targetId = req.params.userId;
+      if (targetId === req.userId) {
+        return res.status(400).json({ error: "Cannot delete your own account" });
+      }
+
+      const target = db.prepare('SELECT id FROM users WHERE id = ?').get(targetId);
+      if (!target) return res.status(404).json({ error: 'User not found' });
+
+      // Try to disconnect their WhatsApp session
+      try {
+        const { getOrInitWhatsApp } = await import('./whatsapp.js');
+        const wa = getOrInitWhatsApp(targetId, db);
+        await wa.clearSession();
+      } catch {}
+
+      // Delete all user data (CASCADE should handle most, but be thorough)
+      db.prepare('DELETE FROM messages WHERE user_id = ?').run(targetId);
+      db.prepare('DELETE FROM contacts WHERE user_id = ?').run(targetId);
+      db.prepare('DELETE FROM stats WHERE user_id = ?').run(targetId);
+      db.prepare('DELETE FROM config WHERE user_id = ?').run(targetId);
+      db.prepare('DELETE FROM call_logs WHERE user_id = ?').run(targetId);
+      db.prepare('DELETE FROM statuses WHERE user_id = ?').run(targetId);
+      db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+
+      // Clean up auth directories
+      const path = await import('path');
+      const fs = await import('fs');
+      const { fileURLToPath } = await import('url');
+      const dataDir = path.default.join(path.default.dirname(fileURLToPath(import.meta.url)), '..', 'data');
+
+      const authDir = path.default.join(dataDir, 'auth', targetId);
+      if (fs.default.existsSync(authDir)) {
+        fs.default.rmSync(authDir, { recursive: true, force: true });
+      }
+      const wwDir = path.default.join(dataDir, 'wwebjs_auth', `session-${targetId}`);
+      if (fs.default.existsSync(wwDir)) {
+        fs.default.rmSync(wwDir, { recursive: true, force: true });
+      }
+
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
 

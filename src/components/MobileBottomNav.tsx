@@ -11,9 +11,10 @@ import {
   X,
   CircleDot,
   Phone,
+  Shield,
 } from 'lucide-react';
 
-type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status' | 'calls';
+type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status' | 'calls' | 'admin';
 
 interface MobileBottomNavProps {
   activePage: Page;
@@ -33,6 +34,7 @@ const moreItems: { id: Page; label: string; icon: React.ElementType }[] = [
   { id: 'calls', label: 'Calls', icon: Phone },
   { id: 'voice', label: 'Voice Studio', icon: Mic },
   { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'admin', label: 'Admin', icon: Shield },
 ];
 
 const MobileBottomNav = ({ activePage, onPageChange, theme, onToggleTheme }: MobileBottomNavProps) => {

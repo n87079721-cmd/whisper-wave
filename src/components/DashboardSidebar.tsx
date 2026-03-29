@@ -13,10 +13,11 @@ import {
   Moon,
   CircleDot,
   Phone,
+  Shield,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
-type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status' | 'calls';
+type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status' | 'calls' | 'admin';
 
 interface DashboardSidebarProps {
   activePage: Page;
@@ -33,6 +34,7 @@ const navItems: { id: Page; label: string; icon: React.ElementType }[] = [
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'voice', label: 'Voice Studio', icon: Mic },
   { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'admin', label: 'Admin', icon: Shield },
 ];
 
 const DashboardSidebar = ({ activePage, onPageChange, theme, onToggleTheme }: DashboardSidebarProps) => {
