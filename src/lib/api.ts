@@ -348,7 +348,7 @@ export const api = {
     return requestJson<{ synced: number }>('/api/sync-archives', { method: 'POST' });
   },
 
-
+  markChatRead(contactId: string) {
     return requestJson<{ success: boolean }>(`/api/mark-read/${contactId}`, { method: 'POST' });
   },
 
