@@ -750,7 +750,45 @@ export function createApiRouter(db) {
     }
   });
 
-  // ── Preview voice ──────────────────────────────────────
+  // ── Send Live Voice Recording ────────────────────────────
+  router.post('/send/voice-recording', async (req, res) => {
+    try {
+      const { contactId, jid, data: audioData } = req.body;
+      if (!audioData || (!contactId && !jid)) return res.status(400).json({ error: 'Missing target or audio data' });
+
+      const wa = getWA(req);
+      const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId, jid });
+
+      // Convert base64 audio to buffer
+      const normalizedBase64 = String(audioData).replace(/^data:[^;]+;base64,/, '');
+      const audioBuffer = Buffer.from(normalizedBase64, 'base64');
+
+      const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
+      const msgId = getSentMessageId(sendResult);
+
+      // Don't persist to disk - use wa: reference
+      const mediaRef = `wa:${msgId}`;
+
+      db.prepare(`
+        INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
+        VALUES (?, ?, ?, ?, ?, 'voice', 'sent', ?, 'sent', ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          content = excluded.content,
+          timestamp = excluded.timestamp,
+          status = excluded.status,
+          media_path = COALESCE(excluded.media_path, messages.media_path),
+          media_name = COALESCE(excluded.media_name, messages.media_name),
+          media_mime = COALESCE(excluded.media_mime, messages.media_mime)
+      `).run(msgId, req.userId, contactRow.id, targetJid, '🎤 Voice note', new Date().toISOString(), mediaRef, 'voice-note.ogg', 'audio/ogg; codecs=opus');
+      db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(req.userId);
+
+      res.json({ success: true, messageId: msgId, contactId: contactRow.id });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+
   router.post('/voice/preview', async (req, res) => {
     try {
       const { text, voiceId, modelId, backgroundSound } = req.body;
