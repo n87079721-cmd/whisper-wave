@@ -1025,6 +1025,22 @@ async function startConnection(userId, db, options = {}) {
           if (!jid || jid === 'status@broadcast') continue;
           const resolved = resolveLidPhone(inst, jid);
           rememberChat(inst, chat, resolved.jid);
+
+          // Sync archive status from WhatsApp
+          if (typeof chat.archive === 'boolean' || typeof chat.archived === 'boolean') {
+            const isArchived = chat.archive ?? chat.archived ? 1 : 0;
+            try {
+              db.prepare("UPDATE contacts SET is_archived = ? WHERE jid = ? AND user_id = ?").run(isArchived, resolved.jid, userId);
+              emit(userId, 'chat_update', { jid: resolved.jid, is_archived: isArchived });
+            } catch {}
+          }
+
+          // Sync unread count from WhatsApp
+          if (typeof chat.unreadCount === 'number') {
+            try {
+              db.prepare("UPDATE contacts SET unread_count = ? WHERE jid = ? AND user_id = ?").run(chat.unreadCount, resolved.jid, userId);
+            } catch {}
+          }
         } catch {}
       }
     });
@@ -1709,6 +1725,10 @@ async function sendReaction(userId, jid, messageKey, emoji) {
 async function handleAutoReply(userId, db, contactId, jid, phone, contactName, messageKey) {
   const autoConfig = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'automation_enabled'").get(userId);
   if (!autoConfig || autoConfig.value !== 'true') return;
+
+  // Skip archived chats — no AI replies
+  const contactRow = db.prepare('SELECT is_archived FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+  if (contactRow?.is_archived) return;
 
   if (!isWithinActiveHours(db, userId)) return;
 
