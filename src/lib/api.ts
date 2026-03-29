@@ -449,6 +449,20 @@ export const api = {
     return requestJson<{ success: boolean }>(`/api/sounds/${id}`, { method: 'DELETE' });
   },
 
+  renameSound(id: number, name: string) {
+    return requestJson<{ success: boolean; name: string }>(`/api/sounds/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+  },
+
+  getSoundStreamUrl(soundId: string) {
+    const token = getAuthToken();
+    const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
+    return toUrl(`/api/sounds/${encodeURIComponent(soundId)}/stream`) + suffix;
+  },
+
   // Contact Media
   getContactMedia(contactId: string) {
     return requestJson<Message[]>(`/api/contacts/${contactId}/media`);
