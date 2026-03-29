@@ -1192,27 +1192,27 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                       >
                                         {deletingMessage === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                                       </button>
-                                  {deleteMenuMsgId === msg.id && (
-                                    <div className={`absolute z-20 bottom-full mb-1 ${msg.direction === 'sent' ? 'right-0' : 'left-0'} bg-popover border border-border rounded-lg shadow-xl py-1 min-w-[160px]`}>
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); handleDeleteMessage(msg.id, 'me'); }}
-                                        className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-secondary transition-colors"
-                                      >
-                                        Delete for me
-                                      </button>
-                                      {msg.direction === 'sent' && (
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); handleDeleteMessage(msg.id, 'everyone'); }}
-                                          className="w-full text-left px-3 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
-                                        >
-                                          Delete for everyone
-                                        </button>
+                                      {deleteMenuMsgId === msg.id && (
+                                        <div className={`absolute z-20 bottom-full mb-1 ${msg.direction === 'sent' ? 'right-0' : 'left-0'} bg-popover border border-border rounded-lg shadow-xl py-1 min-w-[160px]`}>
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); handleDeleteMessage(msg.id, 'me'); }}
+                                            className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-secondary transition-colors"
+                                          >
+                                            Delete for me
+                                          </button>
+                                          {msg.direction === 'sent' && (
+                                            <button
+                                              onClick={(e) => { e.stopPropagation(); handleDeleteMessage(msg.id, 'everyone'); }}
+                                              className="w-full text-left px-3 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                                            >
+                                              Delete for everyone
+                                            </button>
+                                          )}
+                                        </div>
                                       )}
                                     </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
+                                  </div>
+                                )}
                           </div>
                           );
                         })}
