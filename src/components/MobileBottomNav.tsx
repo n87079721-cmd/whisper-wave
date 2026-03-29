@@ -9,9 +9,10 @@ import {
   Moon,
   MoreHorizontal,
   X,
+  CircleDot,
 } from 'lucide-react';
 
-type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings';
+type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status';
 
 interface MobileBottomNavProps {
   activePage: Page;
@@ -23,6 +24,7 @@ interface MobileBottomNavProps {
 const primaryItems: { id: Page; label: string; icon: React.ElementType }[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'conversations', label: 'Chats', icon: MessageSquare },
+  { id: 'status', label: 'Status', icon: CircleDot },
   { id: 'contacts', label: 'Contacts', icon: Users },
 ];
 
@@ -37,7 +39,6 @@ const MobileBottomNav = ({ activePage, onPageChange, theme, onToggleTheme }: Mob
 
   return (
     <>
-      {/* More menu overlay */}
       {showMore && (
         <div className="fixed inset-0 z-50 md:hidden" onClick={() => setShowMore(false)}>
           <div className="absolute inset-0 bg-background/60 backdrop-blur-sm" />
@@ -77,7 +78,6 @@ const MobileBottomNav = ({ activePage, onPageChange, theme, onToggleTheme }: Mob
         </div>
       )}
 
-      {/* Bottom nav bar */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-sidebar-border bg-sidebar/95 backdrop-blur md:hidden safe-bottom shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
         <div className="mx-auto flex max-w-xl items-center justify-around px-1 py-1.5">
           {primaryItems.map((item) => {

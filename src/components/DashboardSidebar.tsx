@@ -11,10 +11,11 @@ import {
   LogOut,
   Sun,
   Moon,
+  CircleDot,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
-type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings';
+type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status';
 
 interface DashboardSidebarProps {
   activePage: Page;
@@ -26,6 +27,7 @@ interface DashboardSidebarProps {
 const navItems: { id: Page; label: string; icon: React.ElementType }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'conversations', label: 'Chats', icon: MessageSquare },
+  { id: 'status', label: 'Status', icon: CircleDot },
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'voice', label: 'Voice Studio', icon: Mic },
   { id: 'settings', label: 'Settings', icon: Settings },
@@ -70,7 +72,6 @@ const DashboardSidebar = ({ activePage, onPageChange, theme, onToggleTheme }: Da
       </nav>
 
       <div className="px-2 pb-2 space-y-1">
-        {/* Theme toggle */}
         <button
           onClick={onToggleTheme}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
