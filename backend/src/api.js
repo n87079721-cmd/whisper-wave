@@ -8,7 +8,7 @@ import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWit
 import { initWhatsApp } from './whatsapp.js';
 import { archiveChat, markChatRead, syncArchiveStates } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
-import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
+import { authMiddleware, registerUser, loginUser, createToken, verifyPassword, hashPassword } from './auth.js';
 import QRCode from 'qrcode';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,10 +32,8 @@ export function createApiRouter(db) {
       if (newPassword.length < 6) {
         return res.status(400).json({ error: 'New password must be at least 6 characters' });
       }
-      // Verify current credentials first
       const user = db.prepare('SELECT id, password_hash FROM users WHERE username = ?').get(username);
       if (!user) return res.status(404).json({ error: 'User not found' });
-      const { verifyPassword, hashPassword } = await import('./auth.js');
       if (!verifyPassword(currentPassword, user.password_hash)) {
         return res.status(401).json({ error: 'Current password is incorrect' });
       }
