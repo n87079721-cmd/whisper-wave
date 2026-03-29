@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import DashboardSidebar from '@/components/DashboardSidebar';
 import MobileBottomNav from '@/components/MobileBottomNav';
 import DashboardPage from '@/pages/DashboardPage';
@@ -12,10 +12,34 @@ import { useTheme } from '@/hooks/useTheme';
 
 type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status';
 
+const VALID_PAGES: Page[] = ['dashboard', 'contacts', 'conversations', 'voice', 'settings', 'status'];
+
+function getInitialPage(): Page {
+  const hash = window.location.hash.replace('#', '');
+  if (VALID_PAGES.includes(hash as Page)) return hash as Page;
+  return 'dashboard';
+}
+
 const Index = () => {
-  const [activePage, setActivePage] = useState<Page>('dashboard');
+  const [activePage, setActivePage] = useState<Page>(getInitialPage);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const { theme, toggleTheme } = useTheme();
+
+  // Sync hash ↔ activePage
+  useEffect(() => {
+    window.location.hash = activePage;
+  }, [activePage]);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (VALID_PAGES.includes(hash as Page)) {
+        setActivePage(hash as Page);
+      }
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   const handleOpenChat = (contact: Contact) => {
     setSelectedContact(contact);
@@ -34,13 +58,15 @@ const Index = () => {
   };
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <div className="hidden md:block">
+    <div className="flex h-[100dvh] bg-background overflow-hidden">
+      <div className="hidden md:block flex-shrink-0">
         <DashboardSidebar activePage={activePage} onPageChange={setActivePage} theme={theme} onToggleTheme={toggleTheme} />
       </div>
-      <main className="flex-1 overflow-y-auto px-3 pb-24 pt-3 md:px-6 md:pb-6 md:pt-5">
-        <div className="mx-auto w-full max-w-7xl">
-          {renderPage()}
+      <main className="flex-1 flex flex-col min-w-0 min-h-0">
+        <div className="flex-1 overflow-y-auto px-3 pb-20 pt-3 md:px-6 md:pb-6 md:pt-5">
+          <div className="mx-auto w-full max-w-7xl h-full">
+            {renderPage()}
+          </div>
         </div>
       </main>
       <MobileBottomNav activePage={activePage} onPageChange={setActivePage} theme={theme} onToggleTheme={toggleTheme} />
