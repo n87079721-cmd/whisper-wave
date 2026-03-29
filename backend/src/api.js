@@ -1088,6 +1088,16 @@ RULES:
     }
   });
 
+  router.post('/disconnect', async (req, res) => {
+    try {
+      const wa = getWA(req);
+      await wa.disconnect();
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.post('/pair-phone', async (req, res) => {
     try {
       const { phoneNumber } = req.body;

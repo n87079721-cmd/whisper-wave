@@ -586,6 +586,7 @@ export function initWhatsApp(userId, db) {
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
     editMessage: (messageId, newContent) => editMessage(userId, db, messageId, newContent),
     reconnect: () => startConnection(userId, db, { force: true }),
+    disconnect: () => softDisconnect(userId),
     clearSession: () => clearSession(userId, db),
     getSocket: () => getInstance(userId).client,
     getMessageById: (msgId) => getInstance(userId).client?.getMessageById(msgId),
@@ -603,6 +604,7 @@ export function getOrInitWhatsApp(userId, db) {
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
     editMessage: (messageId, newContent) => editMessage(userId, db, messageId, newContent),
     reconnect: () => startConnection(userId, db, { force: true }),
+    disconnect: () => softDisconnect(userId),
     clearSession: () => clearSession(userId, db),
     getSocket: () => inst.client,
     getMessageById: (msgId) => inst.client?.getMessageById(msgId),
@@ -1898,6 +1900,43 @@ async function sendVoiceNote(userId, jid, audioBuffer) {
       throw new Error(`Voice note delivery failed: ${audioErr?.message || 'unknown error'}`);
     }
   }
+}
+
+// ── Soft disconnect (preserve session) ──
+
+async function softDisconnect(userId) {
+  const inst = getInstance(userId);
+  inst.connectionGeneration++;
+  stopHeartbeat(userId);
+  clearConnectionWatchdog(userId);
+  clearRecoverySyncTimer(userId);
+  inst.connectionStatus = 'disconnected';
+  inst.qrCode = null;
+  inst.pairingCode = null;
+  inst.pendingPairingPhone = null;
+  inst.reconnectAttempt = 0;
+  inst.connectionPhase = 'idle';
+  inst.connectionStartedAtMs = 0;
+  inst.lastConnectionActivityAtMs = 0;
+  inst.lastDisconnectReason = 'manual';
+  inst.historySyncInProgress = false;
+  inst.contactSyncInProgress = false;
+  inst.autoReplyCooldowns.clear();
+  inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
+  inst.messageBatchBuffers.clear();
+  if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
+  if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
+  if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
+
+  if (inst.client) {
+    const clientRef = inst.client;
+    inst.client = null;
+    // Only destroy — do NOT call .logout() so session is preserved
+    try { await clientRef.destroy(); } catch {}
+  }
+
+  emit(userId, 'status', { status: 'disconnected' });
+  console.log(`🔌 [${userId}] Soft disconnect — session preserved.`);
 }
 
 // ── Clear session ──
