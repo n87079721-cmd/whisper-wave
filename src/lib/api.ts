@@ -435,6 +435,13 @@ export interface Message {
   is_view_once?: number;
   is_deleted?: number;
   is_edited?: number;
+  is_starred?: number;
+  reply_to_id?: string | null;
+  reply_to_content?: string | null;
+  reply_to_sender?: string | null;
+  // joined fields for starred view
+  contact_name?: string | null;
+  contact_phone?: string | null;
 }
 
 export interface Stats {
