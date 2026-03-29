@@ -186,6 +186,7 @@ export function createApiRouter(db) {
     const normalized = String(mimeType || '').toLowerCase();
     if (normalized.startsWith('image/')) return 'image';
     if (normalized.startsWith('video/')) return 'video';
+    if (normalized.startsWith('audio/')) return 'audio';
     return 'document';
   }
 
@@ -782,6 +783,24 @@ export function createApiRouter(db) {
       );
 
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
+
+      // Auto-delete audio files from disk after successful send
+      const normalizedMime = String(mimeType || '').toLowerCase();
+      if (normalizedMime.startsWith('audio/') && savedMedia.mediaPath && !savedMedia.mediaPath.startsWith('wa:')) {
+        try {
+          const mediaDir = path.join(__dirname, '..', 'data', 'message-media');
+          const filePath = path.join(mediaDir, savedMedia.mediaPath);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            // Clear media_path in DB so it doesn't try to serve a deleted file
+            db.prepare(`UPDATE messages SET media_path = NULL WHERE id = ?`).run(msgId);
+            console.log(`🗑️ Auto-deleted audio file after send: ${savedMedia.mediaPath}`);
+          }
+        } catch (delErr) {
+          console.log('⚠️ Failed to auto-delete audio file:', delErr?.message);
+        }
+      }
+
       res.json({ success: true, messageId: msgId, contactId: contactRow.id });
     } catch (err) {
       res.status(500).json({ error: err.message });

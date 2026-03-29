@@ -53,7 +53,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [pendingAttachment, setPendingAttachment] = useState<{
     file: File;
     previewUrl: string | null;
-    kind: 'image' | 'video' | 'document';
+    kind: 'image' | 'video' | 'audio' | 'document';
     viewOnce: boolean;
   } | null>(null);
   const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
@@ -320,9 +320,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       ? 'image'
       : mimeType.startsWith('video/')
         ? 'video'
-        : 'document';
+        : mimeType.startsWith('audio/')
+          ? 'audio'
+          : 'document';
 
-    const previewUrl = kind === 'document' ? null : URL.createObjectURL(file);
+    const previewUrl = (kind === 'document') ? null : URL.createObjectURL(file);
     setPendingAttachment(prev => {
       if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
       return { file, previewUrl, kind, viewOnce: false };
@@ -1391,6 +1393,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       <img src={pendingAttachment.previewUrl} alt={pendingAttachment.file.name} className="h-12 w-12 rounded-xl object-cover" />
                     ) : pendingAttachment.kind === 'video' && pendingAttachment.previewUrl ? (
                       <video src={pendingAttachment.previewUrl} className="h-12 w-12 rounded-xl object-cover" muted playsInline />
+                    ) : pendingAttachment.kind === 'audio' && pendingAttachment.previewUrl ? (
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                          <Volume2 className="w-5 h-5" />
+                        </div>
+                        <audio src={pendingAttachment.previewUrl} controls className="h-8 max-w-[180px]" />
+                      </div>
                     ) : (
                       <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-background text-muted-foreground">
                         <FileText className="w-5 h-5" />
@@ -1399,7 +1408,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-foreground">{pendingAttachment.file.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {formatFileSize(pendingAttachment.file.size)} • {pendingAttachment.kind === 'document' ? 'File' : pendingAttachment.kind}
+                        {formatFileSize(pendingAttachment.file.size)} • {pendingAttachment.kind === 'audio' ? '🔊 Audio (deletes after send)' : pendingAttachment.kind === 'document' ? 'File' : pendingAttachment.kind}
                       </p>
                     </div>
                     {/* View-once toggle for images/videos */}
