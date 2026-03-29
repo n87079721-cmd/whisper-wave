@@ -62,6 +62,7 @@ const StatusPage = () => {
     try {
       es = api.createEventSource();
       es.addEventListener('status_update', fetchStatuses);
+      es.addEventListener('status_deleted', fetchStatuses);
     } catch {
       // backend not configured
     }
