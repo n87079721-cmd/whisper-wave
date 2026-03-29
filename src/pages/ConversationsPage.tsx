@@ -1380,6 +1380,73 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 </div>
               </div>
             </>
+          ) : null}
+
+          {/* Profile Panel */}
+          {showProfile && selectedContact && (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center bg-background/80 backdrop-blur-sm" onClick={() => setShowProfile(false)}>
+              <div className="w-full max-w-md max-h-[85vh] bg-card border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+                  <button onClick={() => setShowProfile(false)} className="p-1 text-muted-foreground hover:text-foreground">
+                    <X className="w-5 h-5" />
+                  </button>
+                  <h3 className="text-sm font-semibold text-foreground">Contact Info</h3>
+                </div>
+                <div className="flex flex-col items-center py-6 gap-2 border-b border-border">
+                  <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center border-2 border-border">
+                    {selectedContact.avatar_url
+                      ? <img src={selectedContact.avatar_url} alt="" className="w-20 h-20 rounded-full object-cover" />
+                      : <User className="w-8 h-8 text-muted-foreground" />
+                    }
+                  </div>
+                  <p className="text-lg font-semibold text-foreground">{getContactDisplayName(selectedContact)}</p>
+                  <p className="text-sm text-muted-foreground">{getContactDisplayMeta(selectedContact)}</p>
+                </div>
+                <div className="px-4 py-3 border-b border-border">
+                  <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                    Media ({profileMedia.filter(m => m.type === 'image' || m.type === 'video').length})
+                  </h4>
+                  {profileMediaLoading ? (
+                    <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-1 max-h-[200px] overflow-y-auto rounded-lg">
+                      {profileMedia.filter(m => m.type === 'image' || m.type === 'video').map((m) => (
+                        <div key={m.id} className="aspect-square rounded-md overflow-hidden bg-muted">
+                          {m.type === 'image' && m.media_path && (
+                            <img src={api.getMessageMediaUrl(m.media_path)} alt="" className="w-full h-full object-cover" />
+                          )}
+                          {m.type === 'video' && m.media_path && (
+                            <video src={api.getMessageMediaUrl(m.media_path)} className="w-full h-full object-cover" muted playsInline />
+                          )}
+                        </div>
+                      ))}
+                      {profileMedia.filter(m => m.type === 'image' || m.type === 'video').length === 0 && (
+                        <p className="col-span-3 text-xs text-muted-foreground text-center py-4">No media shared yet</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="px-4 py-3">
+                  <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                    Documents ({profileMedia.filter(m => m.type === 'document').length})
+                  </h4>
+                  <div className="space-y-1 max-h-[120px] overflow-y-auto">
+                    {profileMedia.filter(m => m.type === 'document').map((m) => (
+                      <div key={m.id} className="flex items-center gap-2 rounded-lg bg-secondary/50 p-2 text-sm">
+                        <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                        <span className="truncate text-foreground text-xs">{m.media_name || 'Document'}</span>
+                      </div>
+                    ))}
+                    {profileMedia.filter(m => m.type === 'document').length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-2">No documents shared yet</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+            </>
           ) : (
             /* Empty state */
             <div className="flex-1 flex flex-col items-center justify-center text-center px-6 bg-chat-bg">
