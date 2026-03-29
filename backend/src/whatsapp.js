@@ -1479,35 +1479,45 @@ async function recoverSync(userId, db) {
   const chatsToRecover = [];
   try {
     const storeContacts = inst.store?.contacts || {};
-    const contactJids = Object.keys(storeContacts).filter(
+    const storeChats = inst.store?.chats || {};
+    const candidateJids = Array.from(new Set([
+      ...Object.keys(storeContacts),
+      ...Object.keys(storeChats),
+    ])).filter(
       jid => jid.endsWith('@s.whatsapp.net') && jid !== 'status@broadcast'
     );
 
     const dbContacts = db.prepare(`
-      SELECT c.jid, c.id, COUNT(m.id) as msg_count
+      SELECT c.jid, c.id, COUNT(m.id) as msg_count, MAX(m.timestamp) as latest_timestamp
       FROM contacts c
       LEFT JOIN messages m ON m.contact_id = c.id AND m.user_id = ?
       WHERE c.user_id = ? AND c.is_group = 0
       GROUP BY c.jid
     `).all(userId, userId);
 
-    const dbContactMap = new Map(dbContacts.map(c => [c.jid, { id: c.id, count: c.msg_count }]));
+    const dbContactMap = new Map(dbContacts.map(c => [c.jid, { id: c.id, count: c.msg_count, latestTimestamp: c.latest_timestamp || null }]));
 
     let recovered = 0;
-    for (const jid of contactJids) {
+    const sortedJids = candidateJids.sort((a, b) => {
+      const bTs = toEpochSeconds(storeChats[b]?.lastMessage?.messageTimestamp || storeChats[b]?.conversationTimestamp || storeChats[b]?.lastMessageRecvTimestamp) || 0;
+      const aTs = toEpochSeconds(storeChats[a]?.lastMessage?.messageTimestamp || storeChats[a]?.conversationTimestamp || storeChats[a]?.lastMessageRecvTimestamp) || 0;
+      return bTs - aTs;
+    });
+
+    for (const jid of sortedJids) {
       const resolved = resolveLidPhone(inst, jid);
       const existing = dbContactMap.get(resolved.jid) || dbContactMap.get(jid);
 
       if (!existing || existing.count === 0) {
         const phone = '+' + resolved.phone;
-        const contact = storeContacts[jid];
+        const contact = storeContacts[jid] || storeChats[jid] || storeChats[resolved.jid];
         getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(contact), false);
         chatsToRecover.push({ jid: resolved.jid, contactDbId: existing?.id || null });
         recovered++;
       }
     }
 
-    console.log(`🔄 [${userId}] Recovery: ${contactJids.length} store contacts, ${dbContacts.length} DB contacts, ${recovered} missing`);
+    console.log(`🔄 [${userId}] Recovery: ${candidateJids.length} candidate chats, ${dbContacts.length} DB contacts, ${recovered} missing`);
     if (recovered > 0) {
       emit(userId, 'contacts_sync', { count: recovered });
     }
@@ -1521,24 +1531,18 @@ async function recoverSync(userId, db) {
     console.log(`🔄 [${userId}] Requesting history for ${fetchTargets.length} empty chats`);
     for (const target of fetchTargets) {
       try {
-        // First check if there's an oldest message in DB we can use as anchor
         const oldestMsg = db.prepare(
-          'SELECT id, jid, timestamp FROM messages WHERE jid = ? AND user_id = ? ORDER BY timestamp ASC LIMIT 1'
+          'SELECT id, jid, direction, timestamp FROM messages WHERE jid = ? AND user_id = ? ORDER BY timestamp ASC LIMIT 1'
         ).get(target.jid, userId);
+        const dbAnchor = buildHistoryAnchorFromDbRow(oldestMsg, target.jid);
+        const chatAnchor = buildHistoryAnchorFromChat(target.jid, inst.store?.chats?.[target.jid]);
+        const anchor = dbAnchor || chatAnchor;
 
-        if (oldestMsg && typeof inst.sock.fetchMessageHistory === 'function') {
-          // Valid anchor: use real message key + timestamp
-          const ts = Math.floor(new Date(oldestMsg.timestamp).getTime() / 1000);
-          await inst.sock.fetchMessageHistory(50, { remoteJid: target.jid, fromMe: false, id: oldestMsg.id }, ts);
+        if (anchor && typeof inst.sock.fetchMessageHistory === 'function') {
+          await inst.sock.fetchMessageHistory(50, anchor.key, anchor.timestamp);
           console.log(`📜 [${userId}] fetchMessageHistory sent for ${target.jid} (anchored)`);
         } else {
-          // No messages at all — use chatModify to mark unread (triggers server-side sync)
-          try {
-            await inst.sock.chatModify({ markRead: false, lastMessages: [{ key: { remoteJid: target.jid, fromMe: false, id: '' }, messageTimestamp: undefined }] }, target.jid);
-            console.log(`📜 [${userId}] chatModify(markUnread) sent for ${target.jid}`);
-          } catch (modErr) {
-            console.log(`📜 [${userId}] chatModify for ${target.jid} failed: ${modErr?.message}`);
-          }
+          console.log(`📜 [${userId}] Skipping history request for ${target.jid}: no valid anchor available yet`);
         }
         await new Promise(r => setTimeout(r, 500));
       } catch (err) {
@@ -1622,29 +1626,23 @@ export async function recoverSingleChat(userId, db, contactId) {
 
   // Check for an existing oldest message to use as anchor
   const oldestMsg = db.prepare(
-    'SELECT id, jid, timestamp FROM messages WHERE contact_id = ? AND user_id = ? ORDER BY timestamp ASC LIMIT 1'
+    'SELECT id, jid, direction, timestamp FROM messages WHERE contact_id = ? AND user_id = ? ORDER BY timestamp ASC LIMIT 1'
   ).get(contactId, userId);
+  const dbAnchor = buildHistoryAnchorFromDbRow(oldestMsg, jid);
+  const chatAnchor = buildHistoryAnchorFromChat(jid, inst.store?.chats?.[jid]);
+  const anchor = dbAnchor || chatAnchor;
 
-  if (oldestMsg && typeof inst.sock.fetchMessageHistory === 'function') {
+  if (anchor && typeof inst.sock.fetchMessageHistory === 'function') {
     try {
-      const ts = Math.floor(new Date(oldestMsg.timestamp).getTime() / 1000);
-      await inst.sock.fetchMessageHistory(50, { remoteJid: jid, fromMe: false, id: oldestMsg.id }, ts);
-      console.log(`📜 [${userId}] fetchMessageHistory sent for ${jid} (anchored to ${oldestMsg.id})`);
+      await inst.sock.fetchMessageHistory(50, anchor.key, anchor.timestamp);
+      console.log(`📜 [${userId}] fetchMessageHistory sent for ${jid} (anchored)`);
       return { success: true, message: 'History request sent with valid anchor. Messages will appear shortly.' };
     } catch (err) {
       console.error(`fetchMessageHistory error for ${jid}:`, err?.message);
     }
   }
 
-  // Fallback: use chatModify to mark unread (may trigger server-side sync)
-  try {
-    await inst.sock.chatModify({ markRead: false, lastMessages: [{ key: { remoteJid: jid, fromMe: false, id: '' }, messageTimestamp: undefined }] }, jid);
-    console.log(`📜 [${userId}] chatModify(markUnread) sent for ${jid}`);
-  } catch (modErr) {
-    console.log(`📜 [${userId}] chatModify for ${jid} failed: ${modErr?.message}`);
-  }
-
-  return { success: true, message: 'History recovery requested. Results depend on WhatsApp server availability.' };
+  return { success: true, message: 'No valid sync anchor yet for this chat. Keep the session connected a bit longer and try again.' };
 }
 
 // ─── Human-like timing helpers ───
