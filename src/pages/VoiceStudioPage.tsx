@@ -1,9 +1,14 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2, Search } from 'lucide-react';
-import { api, type Contact, type Voice } from '@/lib/api';
+import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2, Search, Upload, X, Volume2 } from 'lucide-react';
+import { api, type Contact, type Voice, type SoundItem } from '@/lib/api';
 import { getContactDisplayMeta, getContactDisplayName } from '@/lib/contactDisplay';
 import { toast } from 'sonner';
+
+const PRESET_EMOJIS: Record<string, string> = {
+  cafe: '☕', rain: '🌧', street: '🏙', nature: '🌳', office: '💼',
+  car: '🚗', crowd: '👥', ocean: '🌊', fireplace: '🔥',
+};
 
 const MODELS = [
   { id: 'eleven_v3', name: 'v3 Human Mode ✨', desc: 'Most natural & expressive — recommended' },
