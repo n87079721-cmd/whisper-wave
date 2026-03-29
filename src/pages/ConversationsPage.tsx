@@ -1402,52 +1402,53 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   <p className="text-lg font-semibold text-foreground">{getContactDisplayName(selectedContact)}</p>
                   <p className="text-sm text-muted-foreground">{getContactDisplayMeta(selectedContact)}</p>
                 </div>
-                <div className="px-4 py-3 border-b border-border">
-                  <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                    Media ({profileMedia.filter(m => m.type === 'image' || m.type === 'video').length})
-                  </h4>
-                  {profileMediaLoading ? (
-                    <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
-                  ) : (
-                    <div className="grid grid-cols-3 gap-1 max-h-[200px] overflow-y-auto rounded-lg">
-                      {profileMedia.filter(m => m.type === 'image' || m.type === 'video').map((m) => (
-                        <div key={m.id} className="aspect-square rounded-md overflow-hidden bg-muted">
-                          {m.type === 'image' && m.media_path && (
-                            <img src={api.getMessageMediaUrl(m.media_path)} alt="" className="w-full h-full object-cover" />
-                          )}
-                          {m.type === 'video' && m.media_path && (
-                            <video src={api.getMessageMediaUrl(m.media_path)} className="w-full h-full object-cover" muted playsInline />
-                          )}
+                <div className="flex-1 overflow-y-auto">
+                  <div className="px-4 py-3 border-b border-border">
+                    <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                      Media ({profileMedia.filter(m => m.type === 'image' || m.type === 'video').length})
+                    </h4>
+                    {profileMediaLoading ? (
+                      <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-1 max-h-[200px] overflow-y-auto rounded-lg">
+                        {profileMedia.filter(m => m.type === 'image' || m.type === 'video').map((m) => (
+                          <div key={m.id} className="aspect-square rounded-md overflow-hidden bg-muted">
+                            {m.type === 'image' && m.media_path && (
+                              <img src={api.getMessageMediaUrl(m.media_path)} alt="" className="w-full h-full object-cover" />
+                            )}
+                            {m.type === 'video' && m.media_path && (
+                              <video src={api.getMessageMediaUrl(m.media_path)} className="w-full h-full object-cover" muted playsInline />
+                            )}
+                          </div>
+                        ))}
+                        {profileMedia.filter(m => m.type === 'image' || m.type === 'video').length === 0 && (
+                          <p className="col-span-3 text-xs text-muted-foreground text-center py-4">No media shared yet</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="px-4 py-3">
+                    <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                      Documents ({profileMedia.filter(m => m.type === 'document').length})
+                    </h4>
+                    <div className="space-y-1 max-h-[120px] overflow-y-auto">
+                      {profileMedia.filter(m => m.type === 'document').map((m) => (
+                        <div key={m.id} className="flex items-center gap-2 rounded-lg bg-secondary/50 p-2 text-sm">
+                          <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                          <span className="truncate text-foreground text-xs">{m.media_name || 'Document'}</span>
                         </div>
                       ))}
-                      {profileMedia.filter(m => m.type === 'image' || m.type === 'video').length === 0 && (
-                        <p className="col-span-3 text-xs text-muted-foreground text-center py-4">No media shared yet</p>
+                      {profileMedia.filter(m => m.type === 'document').length === 0 && (
+                        <p className="text-xs text-muted-foreground text-center py-2">No documents shared yet</p>
                       )}
                     </div>
-                  )}
-                </div>
-                <div className="px-4 py-3">
-                  <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                    Documents ({profileMedia.filter(m => m.type === 'document').length})
-                  </h4>
-                  <div className="space-y-1 max-h-[120px] overflow-y-auto">
-                    {profileMedia.filter(m => m.type === 'document').map((m) => (
-                      <div key={m.id} className="flex items-center gap-2 rounded-lg bg-secondary/50 p-2 text-sm">
-                        <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                        <span className="truncate text-foreground text-xs">{m.media_name || 'Document'}</span>
-                      </div>
-                    ))}
-                    {profileMedia.filter(m => m.type === 'document').length === 0 && (
-                      <p className="text-xs text-muted-foreground text-center py-2">No documents shared yet</p>
-                    )}
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-            </>
-          ) : (
+          {!selectedContact && (
             /* Empty state */
             <div className="flex-1 flex flex-col items-center justify-center text-center px-6 bg-chat-bg">
               <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
