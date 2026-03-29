@@ -392,6 +392,24 @@ export const api = {
   getCallLogs() {
     return requestJson<CallLog[]>('/api/call-logs');
   },
+
+  // Star Messages
+  starMessage(messageId: string, starred: boolean) {
+    return requestJson<{ success: boolean }>(`/api/messages/${messageId}/star`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ starred }),
+    });
+  },
+
+  getStarredMessages() {
+    return requestJson<Message[]>('/api/starred-messages');
+  },
+
+  // Contact Media
+  getContactMedia(contactId: string) {
+    return requestJson<Message[]>(`/api/contacts/${contactId}/media`);
+  },
 };
 
 // Types
