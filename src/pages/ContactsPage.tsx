@@ -45,7 +45,7 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
   const sortedKeys = Object.keys(grouped).sort((a, b) => a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b));
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-w-2xl mx-auto">
       <div>
         <h1 className="text-lg font-bold text-foreground">Contacts</h1>
         <p className="text-sm text-muted-foreground">
