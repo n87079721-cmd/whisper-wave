@@ -585,6 +585,14 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 >
                   <Search className="w-4 h-4" />
                 </button>
+                <button
+                  onClick={handleDeleteConversation}
+                  disabled={deletingConversation}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-destructive/15 hover:text-destructive transition-colors"
+                  title="Delete conversation"
+                >
+                  {deletingConversation ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                </button>
               </div>
 
               {/* In-chat search bar */}
@@ -707,15 +715,25 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                             >
                               {msg.type === 'voice' ? (
                                 <div className="flex items-center gap-2">
-                                  <Mic className="w-4 h-4 text-primary" />
-                                  <div className="flex gap-0.5">
+                                  <button
+                                    onClick={() => handlePlayVoice(msg)}
+                                    className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 hover:bg-primary/30 transition-colors"
+                                  >
+                                    {playingVoiceId === msg.id ? (
+                                      <Pause className="w-3.5 h-3.5 text-primary" />
+                                    ) : (
+                                      <Play className="w-3.5 h-3.5 text-primary ml-0.5" />
+                                    )}
+                                  </button>
+                                  <div className="flex gap-0.5 items-center">
                                     {Array.from({ length: 20 }).map((_, j) => (
-                                      <div key={j} className="w-0.5 bg-primary/60 rounded-full" style={{ height: `${Math.random() * 16 + 4}px` }} />
+                                      <div key={j} className={`w-0.5 rounded-full transition-colors ${playingVoiceId === msg.id ? 'bg-primary' : 'bg-primary/60'}`} style={{ height: `${Math.random() * 16 + 4}px` }} />
                                     ))}
                                   </div>
                                   <span className="text-xs text-muted-foreground ml-1">
                                     {msg.duration ? `0:${String(msg.duration).padStart(2, '0')}` : ''}
                                   </span>
+                                  {!msg.media_path && <span className="text-[9px] text-muted-foreground/60">no audio</span>}
                                 </div>
                               ) : (
                                 <span className="whitespace-pre-wrap break-words">{msg.content}</span>
@@ -723,6 +741,14 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
                                 <span className={`text-[10px] ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
                                 {msg.direction === 'sent' && <StatusLabel status={msg.status} />}
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteMessage(msg.id); }}
+                                  disabled={deletingMessage === msg.id}
+                                  className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive text-muted-foreground/50 transition-all"
+                                  title="Delete message"
+                                >
+                                  {deletingMessage === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                                </button>
                               </div>
                             </div>
                           </div>
