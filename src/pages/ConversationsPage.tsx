@@ -306,8 +306,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setReplyText('');
       setPreviewUrl(null);
       if (replyMode === 'voice' && !selectedContact.id.startsWith('temp-')) {
-        const msgs = await api.getMessages(selectedContact.id);
-        setMessages(msgs);
+        const result = await api.getMessages(selectedContact.id, { limit: 100 });
+        setMessages(result.messages);
+        setHasMoreMessages(result.hasMore);
         await refreshConversations();
       }
       scrollMessagesToBottom('smooth');
