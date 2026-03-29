@@ -1153,12 +1153,22 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                   className="inline-btn w-full text-left mb-1.5 rounded-lg border-l-2 border-primary bg-background/20 px-2.5 py-1.5 text-[12px] hover:bg-background/30 transition-colors cursor-pointer"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    if (!msg.reply_to_id) return;
-                                    const el = messagesViewportRef.current?.querySelector(`[data-msg-id="${msg.reply_to_id}"]`);
-                                    if (el) {
-                                      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                      el.classList.add('ring-2', 'ring-primary', 'rounded-2xl');
-                                      setTimeout(() => el.classList.remove('ring-2', 'ring-primary', 'rounded-2xl'), 2000);
+                                    const targetId = msg.reply_to_id;
+                                    if (!targetId) return;
+                                    // Find the outer wrapper by data-msg-id
+                                    const wrapper = messagesViewportRef.current?.querySelector(`[data-msg-id="${CSS.escape(targetId)}"]`) as HTMLElement | null;
+                                    if (wrapper) {
+                                      wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                      // Highlight the bubble (first child div)
+                                      const bubble = wrapper.querySelector(':scope > div') as HTMLElement | null;
+                                      const target = bubble || wrapper;
+                                      target.style.transition = 'box-shadow 0.3s ease';
+                                      target.style.boxShadow = '0 0 0 2px hsl(211 100% 50%)';
+                                      target.style.borderRadius = '1rem';
+                                      setTimeout(() => {
+                                        target.style.boxShadow = '';
+                                        setTimeout(() => { target.style.transition = ''; target.style.borderRadius = ''; }, 300);
+                                      }, 2000);
                                     }
                                   }}
                                 >
