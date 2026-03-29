@@ -614,6 +614,7 @@ async function startConnection(userId, db, options = {}) {
       console.warn(`⚠️ [${userId}] WhatsApp disconnected: ${reason}`);
 
       if (reason === 'LOGOUT' || reason === 'CONFLICT') {
+        if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
         inst.connectionStatus = 'disconnected';
         inst.reconnectAttempt = 0;
         emit(userId, 'status', { status: 'disconnected' });
