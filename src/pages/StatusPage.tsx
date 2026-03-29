@@ -231,9 +231,10 @@ const StatusPage = () => {
   if (viewerGroup && currentStatus) {
     const variant = getStatusVariant(viewerGroup.senderJid);
 
-    return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-foreground text-background">
-        <div className="flex gap-1 px-2 pt-2">
+    return createPortal(
+      <div className="fixed inset-0 z-[100] flex flex-col bg-foreground text-background" style={{ height: '100dvh' }}>
+        {/* Progress bars */}
+        <div className="flex gap-1 px-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
           {viewerGroup.statuses.map((_, i) => {
             const width = i < viewerIdx ? '100%' : i === viewerIdx ? `${progress}%` : '0%';
             return (
@@ -244,8 +245,9 @@ const StatusPage = () => {
           })}
         </div>
 
+        {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3">
-          <button onClick={closeViewer} className="text-background" aria-label="Close status viewer">
+          <button onClick={closeViewer} className="text-background flex-shrink-0" aria-label="Close status viewer">
             <X className="h-6 w-6" />
           </button>
           <div className="min-w-0 flex-1">
@@ -259,16 +261,17 @@ const StatusPage = () => {
           {currentStatus.mediaPath && (currentStatus.mediaType === 'image' || currentStatus.mediaType === 'video') && (
             <button
               onClick={(e) => handleDownload(e, currentStatus.mediaPath!, currentStatus.mediaType)}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-background/20 text-background hover:bg-background/30 transition-colors"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-background/20 text-background hover:bg-background/30 transition-colors flex-shrink-0"
               title="Save to device"
             >
               <Download className="h-4 w-4" />
             </button>
           )}
-          <span className="text-xs text-background/70">{viewerIdx + 1}/{viewerGroup.statuses.length}</span>
+          <span className="text-xs text-background/70 flex-shrink-0">{viewerIdx + 1}/{viewerGroup.statuses.length}</span>
         </div>
 
-        <div className="relative flex flex-1 items-center justify-center overflow-hidden">
+        {/* Content area */}
+        <div className="relative flex flex-1 items-center justify-center overflow-hidden min-h-0">
           <button
             type="button"
             className="absolute left-0 top-0 z-20 h-full w-1/3"
@@ -298,8 +301,8 @@ const StatusPage = () => {
           />
 
           {currentStatus.mediaType === 'text' && (
-            <div className={`flex h-full w-full items-center justify-center p-8 ${variant.container}`}>
-              <p className={`max-w-lg text-center text-xl font-medium leading-relaxed md:text-2xl ${variant.text}`}>
+            <div className={`flex h-full w-full items-center justify-center p-6 sm:p-8 ${variant.container}`}>
+              <p className={`max-w-lg text-center text-lg sm:text-xl md:text-2xl font-medium leading-relaxed ${variant.text}`}>
                 {currentStatus.content || 'Status update'}
               </p>
             </div>
@@ -309,7 +312,7 @@ const StatusPage = () => {
             <div className="relative flex h-full w-full items-center justify-center">
               {!mediaReady && !mediaError && (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-foreground/70 text-background">
-                  <RefreshCw className="h-5 w-5 animate-spin" />
+                  <Loader2 className="h-5 w-5 animate-spin" />
                   <p className="text-sm text-background/80">Loading status…</p>
                 </div>
               )}
@@ -331,7 +334,7 @@ const StatusPage = () => {
                 />
               )}
               {currentStatus.content && !mediaError && (
-                <div className="absolute bottom-16 left-0 right-0 bg-foreground/60 px-6 py-3">
+                <div className="absolute bottom-16 left-0 right-0 bg-foreground/60 px-4 sm:px-6 py-3">
                   <p className="text-center text-sm text-background">{currentStatus.content}</p>
                 </div>
               )}
@@ -342,7 +345,7 @@ const StatusPage = () => {
             <div className="relative flex h-full w-full items-center justify-center">
               {!mediaReady && !mediaError && (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-foreground/70 text-background">
-                  <RefreshCw className="h-5 w-5 animate-spin" />
+                  <Loader2 className="h-5 w-5 animate-spin" />
                   <p className="text-sm text-background/80">Loading status…</p>
                 </div>
               )}
@@ -360,6 +363,7 @@ const StatusPage = () => {
                   src={api.getStatusMediaUrl(currentStatus.mediaPath)}
                   controls
                   autoPlay
+                  playsInline
                   className="max-h-full max-w-full"
                   onLoadedData={() => setMediaReady(true)}
                   onError={() => setMediaError(true)}
@@ -367,7 +371,7 @@ const StatusPage = () => {
                 />
               )}
               {currentStatus.content && !mediaError && (
-                <div className="absolute bottom-16 left-0 right-0 bg-foreground/60 px-6 py-3">
+                <div className="absolute bottom-16 left-0 right-0 bg-foreground/60 px-4 sm:px-6 py-3">
                   <p className="text-center text-sm text-background">{currentStatus.content}</p>
                 </div>
               )}
@@ -376,7 +380,7 @@ const StatusPage = () => {
         </div>
 
         {/* Reply bar */}
-        <div className="flex items-center gap-2 px-4 py-3 bg-foreground/90 border-t border-background/10">
+        <div className="flex items-center gap-2 px-4 py-3 bg-foreground/90 border-t border-background/10" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
           <input
             ref={replyInputRef}
             type="text"
@@ -391,12 +395,13 @@ const StatusPage = () => {
           <button
             onClick={handleSendReply}
             disabled={!replyText.trim() || sendingReply}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors flex-shrink-0"
           >
             <Send className="h-4 w-4" />
           </button>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
