@@ -679,6 +679,20 @@ async function startConnection(userId, db, options = {}) {
           resolvedMediaMime = savedMedia?.mediaMime || mimetype || null;
         }
 
+        // Capture quoted message context
+        let replyToId = null, replyToContent = null, replyToSender = null;
+        try {
+          if (msg.hasQuotedMsg) {
+            const quoted = await msg.getQuotedMessage();
+            if (quoted) {
+              replyToId = quoted.id?._serialized || null;
+              replyToContent = (quoted.body || '').slice(0, 200);
+              const quotedContact = await quoted.getContact?.();
+              replyToSender = quotedContact?.pushname || quotedContact?.name || (quoted.fromMe ? 'You' : null);
+            }
+          }
+        } catch {}
+
         upsertMessageRecord(db, {
           id: msgId,
           userId,
@@ -694,6 +708,9 @@ async function startConnection(userId, db, options = {}) {
           mediaName: resolvedMediaName,
           mediaMime: resolvedMediaMime,
           isViewOnce,
+          replyToId,
+          replyToContent,
+          replyToSender,
         });
 
         emit(userId, 'message', { contactId, msgId });
