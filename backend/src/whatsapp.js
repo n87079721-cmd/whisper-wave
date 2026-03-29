@@ -464,6 +464,7 @@ export function initWhatsApp(userId, db) {
     sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
     sendMediaMessage: (jid, payload) => sendMediaMessage(userId, jid, payload),
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
+    editMessage: (messageId, newContent) => editMessage(userId, db, messageId, newContent),
     reconnect: () => startConnection(userId, db, { force: true }),
     clearSession: () => clearSession(userId, db),
     getSocket: () => getInstance(userId).client,
@@ -479,6 +480,7 @@ export function getOrInitWhatsApp(userId, db) {
     sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
     sendMediaMessage: (jid, payload) => sendMediaMessage(userId, jid, payload),
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
+    editMessage: (messageId, newContent) => editMessage(userId, db, messageId, newContent),
     reconnect: () => startConnection(userId, db, { force: true }),
     clearSession: () => clearSession(userId, db),
     getSocket: () => inst.client,
@@ -733,6 +735,22 @@ async function startConnection(userId, db, options = {}) {
         console.log(`📞 [${userId}] ${callStatus} ${isVideo ? 'video' : 'voice'} call from ${callerName || phone}`);
       } catch (err) {
         console.error('Call event error:', err?.message || err);
+      }
+    });
+
+    // ── Message edit events ──
+    client.on('message_edit', async (msg, newBody, prevBody) => {
+      try {
+        const msgId = msg.id?._serialized || msg.id?.id;
+        if (!msgId) return;
+        const existing = db.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(msgId, userId);
+        if (existing) {
+          db.prepare('UPDATE messages SET content = ?, is_edited = 1 WHERE id = ? AND user_id = ?').run(newBody, msgId, userId);
+          emit(userId, 'message_edited', { messageId: msgId, newContent: newBody });
+          console.log(`✏️ [${userId}] Message edited: ${msgId}`);
+        }
+      } catch (err) {
+        console.error('message_edit handler error:', err?.message || err);
       }
     });
 
