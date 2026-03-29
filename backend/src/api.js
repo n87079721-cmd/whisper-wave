@@ -1021,10 +1021,35 @@ RULES:
     try {
       const sound = db.prepare('SELECT * FROM custom_sounds WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
       if (!sound) return res.status(404).json({ error: 'Sound not found' });
-      // Delete file
       try { fs.unlinkSync(path.join(soundsDir, sound.filename)); } catch {}
       db.prepare('DELETE FROM custom_sounds WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
       res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Rename a custom sound
+  router.patch('/sounds/:id', (req, res) => {
+    try {
+      const { name } = req.body;
+      if (!name) return res.status(400).json({ error: 'Missing name' });
+      const sound = db.prepare('SELECT * FROM custom_sounds WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
+      if (!sound) return res.status(404).json({ error: 'Sound not found' });
+      db.prepare('UPDATE custom_sounds SET name = ? WHERE id = ? AND user_id = ?').run(name, req.params.id, req.userId);
+      res.json({ success: true, name });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Stream a custom sound for preview playback
+  router.get('/sounds/:soundId/stream', (req, res) => {
+    try {
+      const soundFile = path.join(soundsDir, `${req.params.soundId}.mp3`);
+      if (!fs.existsSync(soundFile)) return res.status(404).json({ error: 'Sound file not found' });
+      res.set('Content-Type', 'audio/mpeg');
+      fs.createReadStream(soundFile).pipe(res);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
