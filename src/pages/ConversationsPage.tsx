@@ -1242,6 +1242,19 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   onChange={handleSelectAttachment}
                 />
 
+                {/* Quoted message bar */}
+                {quotedMessage && (
+                  <div className="flex items-center gap-2 rounded-xl border border-border bg-secondary/60 p-2">
+                    <div className="flex-1 min-w-0 border-l-2 border-primary pl-2">
+                      <p className="text-[11px] font-medium text-primary">{quotedMessage.direction === 'sent' ? 'You' : (selectedContact ? getContactDisplayName(selectedContact) : 'Them')}</p>
+                      <p className="text-xs text-muted-foreground truncate">{quotedMessage.content || (quotedMessage.type === 'image' ? '📷 Photo' : quotedMessage.type === 'video' ? '🎥 Video' : quotedMessage.type === 'voice' ? '🎤 Voice' : quotedMessage.type)}</p>
+                    </div>
+                    <button onClick={() => setQuotedMessage(null)} className="p-1 text-muted-foreground hover:text-foreground flex-shrink-0">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
                 {pendingAttachment && (
                   <div className="flex items-center gap-3 rounded-2xl border border-border bg-secondary/60 p-2.5">
                     {pendingAttachment.kind === 'image' && pendingAttachment.previewUrl ? (
