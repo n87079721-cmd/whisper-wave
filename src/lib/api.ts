@@ -467,6 +467,14 @@ export const api = {
     return toUrl(`/api/sounds/${encodeURIComponent(soundId)}/stream`) + suffix;
   },
 
+  trimSound(id: number, start: number, end: number) {
+    return requestJson<{ success: boolean; duration: number }>(`/api/sounds/${id}/trim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start, end }),
+    });
+  },
+
   // Contact Media
   getContactMedia(contactId: string) {
     return requestJson<Message[]>(`/api/contacts/${contactId}/media`);
