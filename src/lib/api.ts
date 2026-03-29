@@ -269,6 +269,18 @@ export const api = {
     return requestJson<{ success: boolean; deletedMessages?: number }>(`/api/conversations/${contactId}`, { method: 'DELETE' });
   },
 
+  archiveChat(contactId: string, archive: boolean) {
+    return requestJson<{ success: boolean; archived: boolean }>(`/api/archive/${contactId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archive }),
+    });
+  },
+
+  markChatRead(contactId: string) {
+    return requestJson<{ success: boolean }>(`/api/mark-read/${contactId}`, { method: 'POST' });
+  },
+
   triggerSync() {
     return requestJson<{ success: boolean; syncState?: any }>('/api/trigger-sync', { method: 'POST' });
   },
