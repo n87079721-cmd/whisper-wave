@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2, Search, Upload, X, Volume2, Pencil, Pause } from 'lucide-react';
+import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2, Search, Upload, X, Volume2, Pencil, Pause, Scissors } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { api, type Contact, type Voice, type SoundItem } from '@/lib/api';
 import { getContactDisplayMeta, getContactDisplayName } from '@/lib/contactDisplay';
 import { toast } from 'sonner';
@@ -130,6 +131,14 @@ const VoiceStudioPage = () => {
   const [editingSoundId, setEditingSoundId] = useState<number | null>(null);
   const [editingSoundName, setEditingSoundName] = useState('');
   
+  // Trim modal state
+  const [trimSound, setTrimSound] = useState<SoundItem | null>(null);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
+  const [isTrimming, setIsTrimming] = useState(false);
+  const trimAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [isTrimPlaying, setIsTrimPlaying] = useState(false);
+  
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -223,6 +232,7 @@ const VoiceStudioPage = () => {
   const isV3 = selectedModel === 'eleven_v3';
 
   return (
+    <>
     <div className="space-y-4 sm:space-y-6 max-w-2xl">
       <div>
         <h1 className="text-lg sm:text-2xl font-bold text-foreground">Voice Studio</h1>
@@ -506,7 +516,22 @@ const VoiceStudioPage = () => {
                     <span className="flex-1 text-foreground truncate">🎵 {s.name} {s.duration ? <span className="text-muted-foreground">({s.duration}s)</span> : null}</span>
                   )}
                   
-                  {/* Edit name */}
+                  {/* Trim/Crop */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setTrimSound(s);
+                      setTrimStart(0);
+                      setTrimEnd(s.duration || 30);
+                    }}
+                    className="text-muted-foreground hover:text-foreground"
+                    title="Trim / Crop"
+                  >
+                    <Scissors className="w-3 h-3" />
+                  </button>
+                  
+                  {/* Rename */}
                   <button
                     type="button"
                     onClick={(e) => {
@@ -515,6 +540,7 @@ const VoiceStudioPage = () => {
                       setEditingSoundName(s.name);
                     }}
                     className="text-muted-foreground hover:text-foreground"
+                    title="Rename"
                   >
                     <Pencil className="w-3 h-3" />
                   </button>
@@ -555,23 +581,25 @@ const VoiceStudioPage = () => {
                 const files = Array.from(e.target.files || []);
                 if (!files.length) return;
                 setIsUploadingSound(true);
-                let lastSoundId = '';
+                const previousSelection = backgroundSound;
                 for (const file of files) {
                   try {
                     const name = file.name.replace(/\.[^.]+$/, '');
                     const result = await api.uploadCustomSound(file, name);
-                    lastSoundId = result.soundId;
                     toast.success(`"${result.name}" added`);
                   } catch (err: any) {
                     toast.error(`${file.name}: ${err.message || 'Upload failed'}`);
                   }
                 }
-                // Refresh full list to get dbIds
+                // Refresh full list and preserve previous selection
                 try {
                   const { custom } = await api.getSounds();
                   setCustomSounds(custom);
+                  // Only auto-select if nothing was selected before
+                  if (previousSelection === 'none' && custom.length > 0) {
+                    setBackgroundSound(custom[0].id);
+                  }
                 } catch {}
-                if (lastSoundId) setBackgroundSound(lastSoundId);
                 setIsUploadingSound(false);
                 e.target.value = '';
               }}
@@ -730,7 +758,132 @@ const VoiceStudioPage = () => {
           </motion.div>
         )}
       </motion.div>
+
+      {/* Trim Modal */}
+      <Dialog open={!!trimSound} onOpenChange={(open) => { if (!open) { setTrimSound(null); trimAudioRef.current?.pause(); setIsTrimPlaying(false); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Trim Sound: {trimSound?.name}</DialogTitle>
+          </DialogHeader>
+          {trimSound && (
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground">
+                Duration: {trimSound.duration || '?'}s — Drag the sliders to select the portion you want to keep.
+              </p>
+              
+              {/* Visual timeline bar */}
+              <div className="relative h-10 bg-secondary rounded-lg overflow-hidden">
+                <div
+                  className="absolute top-0 bottom-0 bg-primary/25 border-x-2 border-primary"
+                  style={{
+                    left: `${(trimStart / (trimSound.duration || 30)) * 100}%`,
+                    right: `${100 - (trimEnd / (trimSound.duration || 30)) * 100}%`,
+                  }}
+                />
+              </div>
+
+              {/* Start slider */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground w-10 shrink-0">Start</span>
+                <input
+                  type="range"
+                  min="0"
+                  max={trimSound.duration || 30}
+                  step="0.1"
+                  value={trimStart}
+                  onChange={e => {
+                    const v = parseFloat(e.target.value);
+                    setTrimStart(Math.min(v, trimEnd - 0.5));
+                  }}
+                  className="flex-1 h-1.5 accent-primary"
+                />
+                <span className="text-xs text-foreground w-12 text-right">{trimStart.toFixed(1)}s</span>
+              </div>
+
+              {/* End slider */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground w-10 shrink-0">End</span>
+                <input
+                  type="range"
+                  min="0"
+                  max={trimSound.duration || 30}
+                  step="0.1"
+                  value={trimEnd}
+                  onChange={e => {
+                    const v = parseFloat(e.target.value);
+                    setTrimEnd(Math.max(v, trimStart + 0.5));
+                  }}
+                  className="flex-1 h-1.5 accent-primary"
+                />
+                <span className="text-xs text-foreground w-12 text-right">{trimEnd.toFixed(1)}s</span>
+              </div>
+
+              <p className="text-xs text-muted-foreground text-center">
+                Selected: {(trimEnd - trimStart).toFixed(1)}s
+              </p>
+
+              {/* Preview trim */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (isTrimPlaying) {
+                    trimAudioRef.current?.pause();
+                    setIsTrimPlaying(false);
+                    return;
+                  }
+                  const audio = new Audio(api.getSoundStreamUrl(trimSound.id));
+                  audio.currentTime = trimStart;
+                  audio.ontimeupdate = () => {
+                    if (audio.currentTime >= trimEnd) {
+                      audio.pause();
+                      setIsTrimPlaying(false);
+                    }
+                  };
+                  audio.onended = () => setIsTrimPlaying(false);
+                  audio.play().catch(() => toast.error('Playback failed'));
+                  trimAudioRef.current = audio;
+                  setIsTrimPlaying(true);
+                }}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-secondary text-sm text-foreground hover:bg-secondary/80 border border-border"
+              >
+                {isTrimPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                {isTrimPlaying ? 'Stop Preview' : 'Preview Selection'}
+              </button>
+            </div>
+          )}
+          <DialogFooter>
+            <button
+              onClick={() => { setTrimSound(null); trimAudioRef.current?.pause(); setIsTrimPlaying(false); }}
+              className="px-4 py-2 rounded-lg bg-secondary text-sm text-foreground hover:bg-secondary/80"
+            >
+              Cancel
+            </button>
+            <button
+              disabled={isTrimming || !trimSound}
+              onClick={async () => {
+                if (!trimSound?.dbId) return;
+                setIsTrimming(true);
+                try {
+                  const res = await api.trimSound(trimSound.dbId, trimStart, trimEnd);
+                  setCustomSounds(prev => prev.map(s => s.dbId === trimSound.dbId ? { ...s, duration: res.duration } : s));
+                  toast.success(`Trimmed to ${res.duration}s`);
+                  setTrimSound(null);
+                } catch (err: any) {
+                  toast.error(err.message || 'Trim failed');
+                } finally {
+                  setIsTrimming(false);
+                }
+              }}
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40"
+            >
+              {isTrimming ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Scissors className="w-4 h-4 inline mr-1" />}
+              {isTrimming ? 'Trimming...' : 'Save Trim'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+    </>
   );
 };
 
