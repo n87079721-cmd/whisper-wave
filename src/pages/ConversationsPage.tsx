@@ -985,11 +985,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                <Avatar contact={selectedContact} size="lg" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
-                  <p className="text-xs text-muted-foreground truncate">{getContactDisplayMeta(selectedContact)}</p>
-                </div>
+                <button onClick={handleOpenProfile} className="flex items-center gap-3 min-w-0 flex-1">
+                  <Avatar contact={selectedContact} size="lg" />
+                  <div className="min-w-0 flex-1 text-left">
+                    <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
+                    <p className="text-xs text-muted-foreground truncate">{getContactDisplayMeta(selectedContact)}</p>
+                  </div>
+                </button>
                 <button
                   onClick={() => { setChatSearchOpen(o => !o); setChatSearch(''); setTimeout(() => chatSearchInputRef.current?.focus(), 100); }}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
