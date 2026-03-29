@@ -199,12 +199,22 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       if (showNewChat) scheduleContactsRefresh();
     };
 
+    const handleEditedEvent = (event: Event) => {
+      try {
+        const data = event instanceof MessageEvent ? JSON.parse(event.data) : null;
+        if (data?.messageId) {
+          setMessages(prev => prev.map(m => m.id === data.messageId ? { ...m, content: data.newContent, is_edited: 1 } : m));
+        }
+      } catch {}
+    };
+
     let es: EventSource | null = null;
     try {
       es = api.createEventSource();
       es.addEventListener('message', handleMessageEvent);
       es.addEventListener('history_sync', handleHistoryEvent);
       es.addEventListener('contacts_sync', handleContactsEvent);
+      es.addEventListener('message_edited', handleEditedEvent);
       es.onerror = () => {};
     } catch {}
 
