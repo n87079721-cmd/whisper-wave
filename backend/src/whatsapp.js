@@ -305,7 +305,6 @@ async function startConnection(userId, db, options = {}) {
         type: 'remote',
         remotePath: 'https://raw.githubusercontent.com/nicollasarquer/nicollasarquer/main/AvaliacaoEscola_17072_12082024/wpp_links_multi/wwebjs/wpp/wpp.pkg.min.js',
       },
-      webVersion: '2.3000.1036200034-alpha',
     });
 
     inst.client = client;
