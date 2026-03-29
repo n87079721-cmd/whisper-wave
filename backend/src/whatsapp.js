@@ -113,9 +113,10 @@ function getInstance(userId) {
       lidMap: new Map(),
       // Sync state tracking
       syncState: {
-        phase: 'idle',         // idle | waiting_history | importing | partial | ready
+        phase: 'idle',         // idle | waiting_history | importing | partial | ready | recovering
         connectedAt: null,
         lastHistorySyncAt: null,
+        lastProgressAt: null,
         storeContacts: 0,
         historyChats: 0,
         historyContacts: 0,
@@ -376,19 +377,23 @@ function scheduleSyncGrace(userId, db) {
   if (inst.syncGraceTimer) clearTimeout(inst.syncGraceTimer);
   inst.syncGraceTimer = setTimeout(() => {
     inst.syncGraceTimer = null;
-    // If still waiting for history and nothing arrived, mark partial
+
     if (inst.syncState.phase === 'waiting_history') {
       console.log(`⏳ [${userId}] Grace period expired — no history received, marking partial`);
       updateSyncState(userId, db, { phase: 'partial' });
+      return;
     }
-    // If importing, check if we have a meaningful amount of data
+
     if (inst.syncState.phase === 'importing') {
-      const hasEnough = inst.syncState.historyMessages > 50 && inst.syncState.historyContacts > 3;
-      const phase = hasEnough ? 'ready' : 'partial';
-      console.log(`⏳ [${userId}] Grace period expired during import — ${inst.syncState.historyMessages} msgs, ${inst.syncState.historyContacts} contacts → ${phase}`);
+      const lastProgressAt = inst.syncState.lastProgressAt ? new Date(inst.syncState.lastProgressAt).getTime() : 0;
+      const quietForMs = lastProgressAt ? Date.now() - lastProgressAt : Number.POSITIVE_INFINITY;
+      const hasEnough = inst.syncState.historyMessages > 100 && inst.syncState.historyContacts > 5;
+      const canFinalize = quietForMs > 30000;
+      const phase = hasEnough && canFinalize ? 'ready' : 'partial';
+      console.log(`⏳ [${userId}] Grace period expired during import — ${inst.syncState.historyMessages} msgs, ${inst.syncState.historyContacts} contacts, quiet ${Math.round(quietForMs / 1000)}s → ${phase}`);
       updateSyncState(userId, db, { phase });
     }
-  }, 90000); // 90s grace period — history arrives in waves over 1-3 minutes
+  }, 120000); // 2m grace period for slow history waves after QR pair
 }
 
 export function onWhatsAppEvent(userId, listener) {
@@ -654,9 +659,25 @@ async function startConnection(userId, db, options = {}) {
         inst.reconnectAttempt = 0;
         inst.badMacTimestamps = [];
         inst.repairInProgress = false;
+
+        // Fresh connection = fresh sync lifecycle. Do not keep old counters.
+        inst.syncState = {
+          phase: 'waiting_history',
+          connectedAt: new Date().toISOString(),
+          lastHistorySyncAt: null,
+          lastProgressAt: null,
+          storeContacts: 0,
+          historyChats: 0,
+          historyContacts: 0,
+          historyMessages: 0,
+          unresolvedLids: 0,
+          totalDbContacts: 0,
+          totalDbMessages: 0,
+        };
+
         emit(userId, 'connected', null);
         console.log(`✅ [${userId}] WhatsApp connected (gen ${generation})`);
-        updateSyncState(userId, db, { phase: 'waiting_history', connectedAt: new Date().toISOString() });
+        updateSyncState(userId, db, { phase: 'waiting_history', connectedAt: inst.syncState.connectedAt });
         scheduleSyncGrace(userId, db);
         syncContacts(userId, db);
         // Schedule recovery sync AFTER passive history has had plenty of time
@@ -666,7 +687,7 @@ async function startConnection(userId, db, options = {}) {
             console.log(`🔄 [${userId}] Auto recovery starting (phase: ${inst.syncState.phase}, ${inst.syncState.historyMessages} msgs so far)`);
             recoverSync(userId, db).catch(err => console.error('Auto recovery sync error:', err?.message));
           }
-        }, 120000); // 2 minutes after connect — give passive history plenty of time
+        }, 150000); // 2.5 minutes after connect
       }
 
       if (connection === 'close') {
@@ -841,6 +862,7 @@ async function startConnection(userId, db, options = {}) {
       updateSyncState(userId, db, {
         phase: 'importing',
         lastHistorySyncAt: new Date().toISOString(),
+        lastProgressAt: new Date().toISOString(),
         historyChats: (inst.syncState.historyChats || 0) + (chats?.length || 0),
         historyContacts: (inst.syncState.historyContacts || 0) + (syncedContacts?.length || 0),
         historyMessages: (inst.syncState.historyMessages || 0) + (historyMsgs?.length || 0),
@@ -988,14 +1010,23 @@ async function startConnection(userId, db, options = {}) {
       }
       emit(userId, 'history_sync', { chats: chats?.length || 0, messages: historyMsgs?.length || 0 });
 
-      // Don't rush to "ready" — keep importing while waves are still arriving
-      // Only mark ready if we have substantial data; otherwise stay importing so grace timer handles it
-      if (inst.syncState.historyMessages > 100 && inst.syncState.historyContacts > 5) {
+      // Don't mark ready just because one batch arrived.
+      // Wait until enough data has arrived AND progress has gone quiet for a while.
+      const lastProgressAt = inst.syncState.lastProgressAt ? new Date(inst.syncState.lastProgressAt).getTime() : Date.now();
+      const quietForMs = Date.now() - lastProgressAt;
+      const enoughData = inst.syncState.historyMessages > 100 && inst.syncState.historyContacts > 5;
+      const unresolvedNames = db.prepare(`
+        SELECT COUNT(*) as c FROM contacts
+        WHERE user_id = ? AND is_group = 0 AND jid LIKE '%@s.whatsapp.net'
+          AND (name IS NULL OR name = '' OR name LIKE '+%' OR name LIKE 'WhatsApp contact%' OR name GLOB '[0-9]*')
+      `).get(userId)?.c || 0;
+
+      if (enoughData && quietForMs > 30000 && unresolvedNames === 0) {
         updateSyncState(userId, db, { phase: 'ready' });
-        console.log(`✅ [${userId}] History sync looks complete: ${inst.syncState.historyMessages} msgs, ${inst.syncState.historyContacts} contacts`);
+        console.log(`✅ [${userId}] History sync complete: ${inst.syncState.historyMessages} msgs, ${inst.syncState.historyContacts} contacts, unnamed ${unresolvedNames}`);
       } else {
-        // Stay in 'importing' — more waves may arrive. Grace timer will finalize.
         updateSyncState(userId, db, { phase: 'importing' });
+        console.log(`⏳ [${userId}] Still importing: ${inst.syncState.historyMessages} msgs, ${inst.syncState.historyContacts} contacts, unnamed ${unresolvedNames}, quiet ${Math.round(quietForMs / 1000)}s`);
       }
 
       // Schedule a deferred LID sweep to catch any late-arriving mappings
