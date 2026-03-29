@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation } from './whatsapp.js';
@@ -110,6 +111,29 @@ export function createApiRouter(db) {
     return mimeMap[ext] || 'application/octet-stream';
   }
 
+  function getMediaExtension(mimeType, filename) {
+    const extFromName = path.extname(filename || '').replace(/^\./, '').toLowerCase();
+    if (extFromName) return extFromName;
+
+    const normalized = String(mimeType || '').toLowerCase();
+    if (normalized.includes('jpeg')) return 'jpg';
+    if (normalized.includes('png')) return 'png';
+    if (normalized.includes('webp')) return 'webp';
+    if (normalized.includes('gif')) return 'gif';
+    if (normalized.includes('mp4')) return 'mp4';
+    if (normalized.includes('quicktime')) return 'mov';
+    if (normalized.includes('ogg')) return 'ogg';
+    if (normalized.includes('mpeg')) return 'mp3';
+    if (normalized.includes('wav')) return 'wav';
+    if (normalized.includes('pdf')) return 'pdf';
+    if (normalized.includes('word')) return 'docx';
+    if (normalized.includes('excel') || normalized.includes('spreadsheet')) return 'xlsx';
+    if (normalized.includes('powerpoint') || normalized.includes('presentation')) return 'pptx';
+    if (normalized.includes('zip')) return 'zip';
+    if (normalized.includes('plain')) return 'txt';
+    return 'bin';
+  }
+
   function resolveMessageMediaPath(filename) {
     const safeName = path.basename(String(filename || ''));
     const candidates = [
@@ -140,6 +164,64 @@ export function createApiRouter(db) {
       mediaName: 'voice-note.ogg',
       mediaMime: 'audio/ogg; codecs=opus',
     };
+  }
+
+  function getSentMessageId(sendResult) {
+    return sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id || uuid();
+  }
+
+  function detectOutgoingMessageType(mimeType, forceDocument = false) {
+    if (forceDocument) return 'document';
+    const normalized = String(mimeType || '').toLowerCase();
+    if (normalized.startsWith('image/')) return 'image';
+    if (normalized.startsWith('video/')) return 'video';
+    return 'document';
+  }
+
+  function persistOutgoingMedia(messageId, base64Data, mimeType, fileName) {
+    const mediaDir = path.join(__dirname, '..', 'data', 'message-media');
+    if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+
+    const extension = getMediaExtension(mimeType, fileName);
+    const filename = `${messageId}.${extension}`;
+    const filePath = path.join(mediaDir, filename);
+    const normalizedBase64 = String(base64Data || '').replace(/^data:[^;]+;base64,/, '');
+    fs.writeFileSync(filePath, Buffer.from(normalizedBase64, 'base64'));
+
+    return {
+      mediaPath: filename,
+      mediaName: sanitizeDownloadName(fileName, `attachment.${extension}`),
+      mediaMime: mimeType || detectMimeTypeFromFilename(fileName),
+    };
+  }
+
+  function getBrowserPlayableAudioPath(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.mp3') return filePath;
+
+    const browserPath = filePath.replace(/\.[^.]+$/, '.browser.mp3');
+
+    try {
+      const sourceStats = fs.statSync(filePath);
+      if (fs.existsSync(browserPath)) {
+        const cachedStats = fs.statSync(browserPath);
+        if (cachedStats.size > 0 && cachedStats.mtimeMs >= sourceStats.mtimeMs) {
+          return browserPath;
+        }
+      }
+
+      execFileSync('ffmpeg', ['-y', '-i', filePath, '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', browserPath], { stdio: 'ignore' });
+      if (fs.existsSync(browserPath) && fs.statSync(browserPath).size > 0) {
+        return browserPath;
+      }
+    } catch {}
+
+    return filePath;
+  }
+
+  function toMp3DownloadName(filename) {
+    const base = sanitizeDownloadName(filename, 'voice-note');
+    return `${base.replace(/\.[^.]+$/, '')}.mp3`;
   }
 
   function mergeContactRows(userId, sourceContactId, targetContactId, targetJid) {
@@ -177,6 +259,62 @@ export function createApiRouter(db) {
       .run(canonicalJid, contact.id, userId);
 
     return { ...contact, jid: canonicalJid, phone: contact.phone || canonicalPhone };
+  }
+
+  function resolveOutgoingTarget(userId, { contactId, jid }) {
+    let contactRow = null;
+    let targetJid = jid ? getCanonicalTargetJid(jid) : null;
+
+    if (contactId && !jid) {
+      const contact = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+      if (!contact) throw new Error('Contact not found');
+      contactRow = canonicalizeContact(userId, contact);
+      targetJid = contactRow?.jid || null;
+    }
+
+    if (!targetJid) throw new Error('Invalid WhatsApp number');
+
+    if (!contactRow) {
+      contactRow = db.prepare('SELECT id, jid, phone FROM contacts WHERE jid = ? AND user_id = ?').get(targetJid, userId);
+    }
+
+    if (!contactRow) {
+      const phoneDigits = targetJid.endsWith('@s.whatsapp.net') ? normalizePhoneDigits(targetJid) : '';
+      const normalizedPhone = phoneDigits ? `+${phoneDigits}` : null;
+
+      if (normalizedPhone) {
+        contactRow = db.prepare(`
+          SELECT id, jid, phone
+          FROM contacts
+          WHERE user_id = ? AND phone = ? AND is_group = 0
+          ORDER BY CASE
+            WHEN jid = ? THEN 0
+            WHEN jid LIKE '%@lid' THEN 1
+            ELSE 2
+          END,
+          updated_at DESC
+          LIMIT 1
+        `).get(userId, normalizedPhone, targetJid);
+
+        if (contactRow) {
+          db.prepare("UPDATE contacts SET jid = ?, phone = COALESCE(?, phone), updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+            .run(targetJid, normalizedPhone, contactRow.id, userId);
+          db.prepare('UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?')
+            .run(targetJid, contactRow.id, userId);
+        }
+      }
+
+      if (!contactRow) {
+        const newId = uuid();
+        const phone = normalizedPhone || (targetJid.endsWith('@lid') ? null : '+' + targetJid.replace(/@.*$/, ''));
+        db.prepare(`
+          INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, 0)
+        `).run(newId, userId, targetJid, phone || 'WhatsApp contact', phone);
+        contactRow = { id: newId, jid: targetJid, phone };
+      }
+    }
+
+    return { contactRow, targetJid };
   }
 
   // ── Status & QR ──────────────────────────────────────────
@@ -401,60 +539,10 @@ export function createApiRouter(db) {
       if (!message || (!contactId && !jid)) return res.status(400).json({ error: 'Missing contactId/jid or message' });
 
       const wa = getWA(req);
-      let contactRow = null;
-      let targetJid = jid ? getCanonicalTargetJid(jid) : null;
-
-      if (contactId && !jid) {
-        const contact = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE id = ? AND user_id = ?').get(contactId, req.userId);
-        if (!contact) return res.status(404).json({ error: 'Contact not found' });
-        contactRow = canonicalizeContact(req.userId, contact);
-        targetJid = contactRow.jid;
-      }
-
-      if (!targetJid) return res.status(400).json({ error: 'Invalid WhatsApp number' });
+      const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId, jid });
 
       const sendResult = await wa.sendTextMessage(targetJid, message);
-      const msgId = sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id || uuid();
-
-      if (!contactRow) {
-        contactRow = db.prepare('SELECT id, jid, phone FROM contacts WHERE jid = ? AND user_id = ?').get(targetJid, req.userId);
-      }
-
-      if (!contactRow) {
-        const phoneDigits = targetJid.endsWith('@s.whatsapp.net') ? normalizePhoneDigits(targetJid) : '';
-        const normalizedPhone = phoneDigits ? `+${phoneDigits}` : null;
-
-        if (normalizedPhone) {
-          contactRow = db.prepare(`
-            SELECT id, jid, phone
-            FROM contacts
-            WHERE user_id = ? AND phone = ? AND is_group = 0
-            ORDER BY CASE
-              WHEN jid = ? THEN 0
-              WHEN jid LIKE '%@lid' THEN 1
-              ELSE 2
-            END,
-            updated_at DESC
-            LIMIT 1
-          `).get(req.userId, normalizedPhone, targetJid);
-
-          if (contactRow) {
-            db.prepare("UPDATE contacts SET jid = ?, phone = COALESCE(?, phone), updated_at = datetime('now') WHERE id = ? AND user_id = ?")
-              .run(targetJid, normalizedPhone, contactRow.id, req.userId);
-            db.prepare('UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?')
-              .run(targetJid, contactRow.id, req.userId);
-          }
-        }
-
-        if (!contactRow) {
-          const newId = uuid();
-          const phone = normalizedPhone || (targetJid.endsWith('@lid') ? null : '+' + targetJid.replace(/@.*$/, ''));
-          db.prepare(`
-            INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, 0)
-          `).run(newId, req.userId, targetJid, phone || 'WhatsApp contact', phone);
-          contactRow = { id: newId, jid: targetJid, phone };
-        }
-      }
+      const msgId = getSentMessageId(sendResult);
 
       db.prepare(`
         INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
@@ -469,6 +557,63 @@ export function createApiRouter(db) {
       `).run(msgId, req.userId, contactRow.id, targetJid, message, new Date().toISOString());
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
 
+      res.json({ success: true, messageId: msgId, contactId: contactRow.id });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/send/media', async (req, res) => {
+    try {
+      const { contactId, jid, fileName, mimeType, data, caption, sendAsDocument } = req.body;
+      if (!fileName || !mimeType || !data || (!contactId && !jid)) {
+        return res.status(400).json({ error: 'Missing target or media payload' });
+      }
+
+      const wa = getWA(req);
+      const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId, jid });
+      const normalizedBase64 = String(data || '').replace(/^data:[^;]+;base64,/, '');
+      const messageType = detectOutgoingMessageType(mimeType, !!sendAsDocument);
+
+      const sendResult = await wa.sendMediaMessage(targetJid, {
+        mimeType,
+        data: normalizedBase64,
+        fileName,
+        caption,
+        sendAsDocument: !!sendAsDocument,
+      });
+
+      const msgId = getSentMessageId(sendResult);
+      const savedMedia = persistOutgoingMedia(msgId, normalizedBase64, mimeType, fileName);
+
+      db.prepare(`
+        INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
+        VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, 'sent', ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          contact_id = excluded.contact_id,
+          jid = excluded.jid,
+          content = excluded.content,
+          type = excluded.type,
+          direction = excluded.direction,
+          timestamp = excluded.timestamp,
+          status = excluded.status,
+          media_path = COALESCE(excluded.media_path, messages.media_path),
+          media_name = COALESCE(excluded.media_name, messages.media_name),
+          media_mime = COALESCE(excluded.media_mime, messages.media_mime)
+      `).run(
+        msgId,
+        req.userId,
+        contactRow.id,
+        targetJid,
+        caption || fileName,
+        messageType,
+        new Date().toISOString(),
+        savedMedia.mediaPath,
+        savedMedia.mediaName,
+        savedMedia.mediaMime,
+      );
+
+      db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
       res.json({ success: true, messageId: msgId, contactId: contactRow.id });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -492,8 +637,7 @@ export function createApiRouter(db) {
 
       // Send voice note — captures message key or throws on complete failure
       const sendResult = await wa.sendVoiceNote(contact.jid, audioBuffer);
-      const waKeyId = sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id;
-      const msgId = waKeyId || uuid();
+      const msgId = getSentMessageId(sendResult);
       const savedVoice = persistOutgoingVoiceNote(msgId, audioBuffer);
 
       // Only insert to DB after confirmed send
@@ -716,15 +860,26 @@ RULES:
         LIMIT 1
       `).get(req.userId, safeFilename);
 
-      res.set('Content-Type', mediaRow?.media_mime || detectMimeTypeFromFilename(filePath));
+      let responsePath = filePath;
+      let responseMime = mediaRow?.media_mime || detectMimeTypeFromFilename(filePath);
+
+      if (req.query.format === 'mp3' && String(responseMime).startsWith('audio/')) {
+        responsePath = getBrowserPlayableAudioPath(filePath);
+        if (responsePath !== filePath) responseMime = 'audio/mpeg';
+      }
+
+      res.set('Content-Type', responseMime);
       res.set('Accept-Ranges', 'bytes');
 
       if (req.query.download === '1') {
-        const downloadName = sanitizeDownloadName(mediaRow?.media_name, safeFilename);
+        const fallbackName = responseMime === 'audio/mpeg'
+          ? toMp3DownloadName(mediaRow?.media_name || safeFilename)
+          : safeFilename;
+        const downloadName = sanitizeDownloadName(mediaRow?.media_name || fallbackName, fallbackName);
         res.set('Content-Disposition', `attachment; filename="${downloadName}"`);
       }
 
-      res.sendFile(filePath);
+      res.sendFile(responsePath);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
