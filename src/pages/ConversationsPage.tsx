@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Mic, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film, Eye, EyeOff } from 'lucide-react';
+import { Search, Mic, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film, Eye, EyeOff, Pencil, Check } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
@@ -53,6 +53,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [deletingMessage, setDeletingMessage] = useState<string | null>(null);
   const [deletingConversation, setDeletingConversation] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
   const [pendingAttachment, setPendingAttachment] = useState<{
     file: File;
     previewUrl: string | null;
@@ -196,12 +199,22 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       if (showNewChat) scheduleContactsRefresh();
     };
 
+    const handleEditedEvent = (event: Event) => {
+      try {
+        const data = event instanceof MessageEvent ? JSON.parse(event.data) : null;
+        if (data?.messageId) {
+          setMessages(prev => prev.map(m => m.id === data.messageId ? { ...m, content: data.newContent, is_edited: 1 } : m));
+        }
+      } catch {}
+    };
+
     let es: EventSource | null = null;
     try {
       es = api.createEventSource();
       es.addEventListener('message', handleMessageEvent);
       es.addEventListener('history_sync', handleHistoryEvent);
       es.addEventListener('contacts_sync', handleContactsEvent);
+      es.addEventListener('message_edited', handleEditedEvent);
       es.onerror = () => {};
     } catch {}
 
@@ -587,6 +600,24 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     return groups;
   }, [messages]);
 
+  const handleEditMessage = useCallback(async (messageId: string) => {
+    if (!editingText.trim()) return;
+    setSavingEdit(true);
+    try {
+      const res = await api.editMessage(messageId, editingText.trim());
+      if (res.success) {
+        setMessages(prev => prev.map(m => m.id === messageId ? { ...m, content: editingText.trim(), is_edited: 1 } : m));
+        toast.success('Message edited');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to edit message');
+    } finally {
+      setSavingEdit(false);
+      setEditingMsgId(null);
+      setEditingText('');
+    }
+  }, [editingText]);
+
   const renderMessageContent = (msg: Message) => {
     // Deleted message placeholder
     if (msg.is_deleted) {
@@ -603,6 +634,31 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         <Eye className="w-3 h-3" /> View once
       </span>
     ) : null;
+
+    const editedLabel = msg.is_edited ? (
+      <span className="text-[10px] text-muted-foreground italic ml-1">edited</span>
+    ) : null;
+
+    // Inline editing
+    if (editingMsgId === msg.id) {
+      return (
+        <div className="flex items-center gap-2 min-w-[200px]">
+          <input
+            value={editingText}
+            onChange={(e) => setEditingText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleEditMessage(msg.id); if (e.key === 'Escape') { setEditingMsgId(null); setEditingText(''); } }}
+            className="flex-1 px-2 py-1 rounded-md bg-background text-sm text-foreground focus:outline-none border border-border min-w-0"
+            autoFocus
+          />
+          <button onClick={() => handleEditMessage(msg.id)} disabled={savingEdit} className="text-primary hover:text-primary/80">
+            {savingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+          </button>
+          <button onClick={() => { setEditingMsgId(null); setEditingText(''); }} className="text-muted-foreground hover:text-foreground">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      );
+    }
 
     if (msg.type === 'voice') {
       const voiceUrl = msg.media_path ? api.getVoiceMediaUrl(msg.media_path) : null;
@@ -624,7 +680,29 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>Voice note</span>
             {msg.duration ? <span>• 0:{String(msg.duration).padStart(2, '0')}</span> : null}
+            {editedLabel}
           </div>
+        </div>
+      );
+    }
+
+    if (msg.type === 'sticker') {
+      const stickerUrl = msg.media_path ? api.getMessageMediaUrl(msg.media_path) : null;
+      return (
+        <div className="space-y-1">
+          {stickerUrl ? (
+            <img
+              src={stickerUrl}
+              alt="Sticker"
+              loading="lazy"
+              className="max-w-[180px] max-h-[180px] object-contain"
+            />
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>🎭 Sticker</span>
+            </div>
+          )}
+          {editedLabel}
         </div>
       );
     }
@@ -650,6 +728,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             </div>
           )}
           {msg.content ? <p className="whitespace-pre-wrap break-words">{msg.content}</p> : null}
+          {editedLabel}
         </div>
       );
     }
@@ -673,6 +752,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             </div>
           )}
           {msg.content ? <p className="whitespace-pre-wrap break-words">{msg.content}</p> : null}
+          {editedLabel}
         </div>
       );
     }
@@ -705,6 +785,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             </div>
           )}
           {msg.content && msg.content !== documentLabel ? <p className="whitespace-pre-wrap break-words">{msg.content}</p> : null}
+          {editedLabel}
         </div>
       );
     }
@@ -713,6 +794,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       <>
         {viewOnceBadge}
         <span className="whitespace-pre-wrap break-words">{msg.content}</span>
+        {editedLabel}
       </>
     );
   };
@@ -990,16 +1072,30 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                             className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                           >
                             <div
-                              className={`group max-w-[85%] md:max-w-[65%] px-3 py-2 rounded-2xl text-[14px] ${
-                                msg.direction === 'sent'
-                                  ? 'bg-bubble-out text-bubble-out-foreground rounded-br-md'
-                                  : 'bg-bubble-in text-bubble-in-foreground rounded-bl-md'
+                              className={`group max-w-[85%] md:max-w-[65%] ${
+                                msg.type === 'sticker'
+                                  ? 'bg-transparent'
+                                  : `px-3 py-2 rounded-2xl text-[14px] ${
+                                      msg.direction === 'sent'
+                                        ? 'bg-bubble-out text-bubble-out-foreground rounded-br-md'
+                                        : 'bg-bubble-in text-bubble-in-foreground rounded-bl-md'
+                                    }`
                               } ${isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''}`}
                             >
                               {renderMessageContent(msg)}
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
                                 <span className={`text-[10px] ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
                                 {msg.direction === 'sent' && <StatusLabel status={msg.status} />}
+                                {/* Edit button for sent text messages */}
+                                {msg.direction === 'sent' && msg.type === 'text' && !msg.is_deleted && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setEditingMsgId(msg.id); setEditingText(msg.content || ''); }}
+                                    className="opacity-70 md:opacity-0 md:group-hover:opacity-100 hover:text-primary text-muted-foreground transition-all ml-0.5"
+                                    title="Edit message"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                )}
                                 <div className="relative ml-1">
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setDeleteMenuMsgId(prev => prev === msg.id ? null : msg.id); }}

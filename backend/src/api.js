@@ -400,6 +400,8 @@ export function createApiRouter(db) {
         send('status_deleted', data);
       } else if (event === 'call') {
         send('call', data);
+      } else if (event === 'message_edited') {
+        send('message_edited', data);
       }
     });
 
@@ -572,6 +574,19 @@ export function createApiRouter(db) {
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
 
       res.json({ success: true, messageId: msgId, contactId: contactRow.id });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Edit Message ──────────────────────────────────────────
+  router.post('/edit/message', async (req, res) => {
+    try {
+      const { messageId, newContent } = req.body;
+      if (!messageId || !newContent) return res.status(400).json({ error: 'Missing messageId or newContent' });
+      const wa = getWA(req);
+      const result = await wa.editMessage(messageId, newContent);
+      res.json(result);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

@@ -340,10 +340,18 @@ function getDefaultMediaName(msgType, extension) {
   return `attachment${ext || '.bin'}`;
 }
 
-function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce }) {
+function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce, isEdited }) {
+  // Ensure is_edited column exists
+  try {
+    const cols = db.prepare("PRAGMA table_info(messages)").all().map(c => c.name);
+    if (!cols.includes('is_edited')) {
+      db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
+    }
+  } catch {}
+
   db.prepare(`
-    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once, is_edited)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       contact_id = excluded.contact_id,
       jid = excluded.jid,
@@ -362,8 +370,35 @@ function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, di
       media_path = COALESCE(excluded.media_path, messages.media_path),
       media_name = COALESCE(excluded.media_name, messages.media_name),
       media_mime = COALESCE(excluded.media_mime, messages.media_mime),
-      is_view_once = COALESCE(excluded.is_view_once, messages.is_view_once)
-  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0);
+      is_view_once = COALESCE(excluded.is_view_once, messages.is_view_once),
+      is_edited = CASE WHEN excluded.is_edited = 1 THEN 1 ELSE messages.is_edited END
+  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0, isEdited ? 1 : 0);
+}
+
+async function editMessage(userId, db, messageId, newContent) {
+  const inst = getInstance(userId);
+  if (!inst.client || inst.connectionStatus !== 'connected') {
+    throw new Error('WhatsApp not connected');
+  }
+
+  // Get the message from DB
+  const row = db.prepare('SELECT * FROM messages WHERE id = ? AND user_id = ? AND direction = ?').get(messageId, userId, 'sent');
+  if (!row) throw new Error('Message not found or not editable');
+  if (row.type !== 'text') throw new Error('Only text messages can be edited');
+
+  // Try to edit via whatsapp-web.js
+  try {
+    const msg = await inst.client.getMessageById(messageId);
+    if (!msg) throw new Error('Message not found in WhatsApp');
+    await msg.edit(newContent);
+  } catch (err) {
+    throw new Error(`Failed to edit message: ${err?.message || err}`);
+  }
+
+  // Update in DB
+  db.prepare('UPDATE messages SET content = ?, is_edited = 1 WHERE id = ? AND user_id = ?').run(newContent, messageId, userId);
+  emit(userId, 'message_edited', { messageId, newContent });
+  return { success: true };
 }
 
 function isUuidLike(value) {
@@ -429,6 +464,7 @@ export function initWhatsApp(userId, db) {
     sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
     sendMediaMessage: (jid, payload) => sendMediaMessage(userId, jid, payload),
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
+    editMessage: (messageId, newContent) => editMessage(userId, db, messageId, newContent),
     reconnect: () => startConnection(userId, db, { force: true }),
     clearSession: () => clearSession(userId, db),
     getSocket: () => getInstance(userId).client,
@@ -444,6 +480,7 @@ export function getOrInitWhatsApp(userId, db) {
     sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
     sendMediaMessage: (jid, payload) => sendMediaMessage(userId, jid, payload),
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
+    editMessage: (messageId, newContent) => editMessage(userId, db, messageId, newContent),
     reconnect: () => startConnection(userId, db, { force: true }),
     clearSession: () => clearSession(userId, db),
     getSocket: () => inst.client,
@@ -624,7 +661,7 @@ async function startConnection(userId, db, options = {}) {
           // View-once media: don't try to download, show placeholder
           const typeLabel = msgType === 'video' ? '🎥 Video' : msgType === 'voice' ? '🎤 Voice note' : '📷 Photo';
           resolvedContent = `${typeLabel} (view once) — open WhatsApp on your phone to view`;
-        } else if (msg.hasMedia && ['voice', 'image', 'video', 'document'].includes(msgType)) {
+        } else if (msg.hasMedia && ['voice', 'image', 'video', 'document', 'sticker'].includes(msgType)) {
           const savedMedia = await saveMessageMedia(userId, msg, msgId, {
             msgType,
             mimetype,
@@ -701,6 +738,22 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
+    // ── Message edit events ──
+    client.on('message_edit', async (msg, newBody, prevBody) => {
+      try {
+        const msgId = msg.id?._serialized || msg.id?.id;
+        if (!msgId) return;
+        const existing = db.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(msgId, userId);
+        if (existing) {
+          db.prepare('UPDATE messages SET content = ?, is_edited = 1 WHERE id = ? AND user_id = ?').run(newBody, msgId, userId);
+          emit(userId, 'message_edited', { messageId: msgId, newContent: newBody });
+          console.log(`✏️ [${userId}] Message edited: ${msgId}`);
+        }
+      } catch (err) {
+        console.error('message_edit handler error:', err?.message || err);
+      }
+    });
+
     // Handle message/status revocations (delete for everyone)
     client.on('message_revoke_everyone', async (after, before) => {
       try {
@@ -754,7 +807,10 @@ function getMessagePayload(msg) {
     duration = msg.duration || null;
     mimetype = msg.mimetype || 'audio/ogg; codecs=opus';
     mediaName = mediaName || 'voice-note.ogg';
-  } else if (rawType === 'image' || rawType === 'sticker') {
+  } else if (rawType === 'sticker') {
+    msgType = 'sticker';
+    content = msg.body || msg.caption || '';
+  } else if (rawType === 'image') {
     msgType = 'image';
     content = msg.body || msg.caption || '';
   } else if (rawType === 'video' || rawType === 'gif') {
@@ -1012,7 +1068,7 @@ async function syncChats(userId, db) {
               let mediaPath = null;
               let resolvedMediaName = mediaName;
               let resolvedMediaMime = mimetype;
-              if (msg.hasMedia && ['voice', 'image', 'video', 'document'].includes(msgType)) {
+              if (msg.hasMedia && ['voice', 'image', 'video', 'document', 'sticker'].includes(msgType)) {
                 const savedMedia = await saveMessageMedia(userId, msg, msgId, {
                   msgType,
                   mimetype,
@@ -1110,7 +1166,7 @@ export async function recoverSingleChat(userId, db, contactId) {
         let mediaPath = null;
         let resolvedMediaName = mediaName;
         let resolvedMediaMime = mimetype;
-        if (msg.hasMedia && ['voice', 'image', 'video', 'document'].includes(msgType)) {
+        if (msg.hasMedia && ['voice', 'image', 'video', 'document', 'sticker'].includes(msgType)) {
           const savedMedia = await saveMessageMedia(userId, msg, msgId, {
             msgType,
             mimetype,

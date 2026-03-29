@@ -323,6 +323,14 @@ export const api = {
     return requestJson<{ success: boolean }>(`/api/messages/${messageId}?mode=${mode}`, { method: 'DELETE' });
   },
 
+  // Edit
+  editMessage(messageId: string, newContent: string) {
+    return requestJson<{ success: boolean }>('/api/edit/message', {
+      method: 'POST',
+      body: JSON.stringify({ messageId, newContent }),
+    });
+  },
+
   deleteConversation(contactId: string) {
     return requestJson<{ success: boolean; deletedMessages?: number }>(`/api/conversations/${contactId}`, { method: 'DELETE' });
   },
@@ -410,7 +418,7 @@ export interface Message {
   contact_id: string;
   jid: string;
   content: string | null;
-  type: 'text' | 'voice' | 'image' | 'video' | 'document';
+  type: 'text' | 'voice' | 'image' | 'video' | 'document' | 'sticker';
   direction: 'sent' | 'received';
   timestamp: string;
   status: string;
@@ -420,6 +428,7 @@ export interface Message {
   media_mime?: string | null;
   is_view_once?: number;
   is_deleted?: number;
+  is_edited?: number;
 }
 
 export interface Stats {

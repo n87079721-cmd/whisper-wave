@@ -71,6 +71,7 @@ function ensureCurrentTables(db) {
       media_path TEXT,
        media_name TEXT,
        media_mime TEXT,
+      is_edited INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (contact_id) REFERENCES contacts(id)
@@ -143,6 +144,9 @@ function ensureCurrentTables(db) {
     }
     if (!messageCols.has('is_deleted')) {
       db.exec("ALTER TABLE messages ADD COLUMN is_deleted INTEGER DEFAULT 0");
+    }
+    if (!messageCols.has('is_edited')) {
+      db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
     }
   } catch {}
 }

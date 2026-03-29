@@ -76,13 +76,22 @@ const StatusPage = () => {
 
     const nextGroup = groups.find((group) => group.senderJid === viewerGroup.senderJid);
     if (!nextGroup || nextGroup.statuses.length === 0) {
-      closeViewer();
+      setViewerGroup(null);
+      setViewerIdx(0);
+      setIsPaused(false);
+      setProgress(0);
+      setMediaReady(true);
+      setMediaError(false);
+      setReplyText('');
+      blockTapRef.current = false;
+      holdStartedAtRef.current = null;
+      videoRef.current = null;
       return;
     }
 
     setViewerGroup(nextGroup);
     setViewerIdx((prev) => Math.min(prev, nextGroup.statuses.length - 1));
-  }, [closeViewer, groups, viewerGroup]);
+  }, [groups, viewerGroup]);
 
   const currentStatus = viewerGroup?.statuses[viewerIdx] ?? null;
 
