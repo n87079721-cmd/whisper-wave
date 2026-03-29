@@ -423,6 +423,52 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const chatSearchMatchSet = useMemo(() => new Set(chatSearchMatches), [chatSearchMatches]);
   const activeChatSearchIdx = chatSearchMatches[chatSearchIndex] ?? -1;
 
+  // Voice note playback
+  const handlePlayVoice = useCallback((msg: Message) => {
+    if (!msg.media_path) { toast.error('Voice note not available for playback'); return; }
+    if (playingVoiceId === msg.id) {
+      voiceAudioRef.current?.pause();
+      setPlayingVoiceId(null);
+      return;
+    }
+    if (voiceAudioRef.current) { voiceAudioRef.current.pause(); }
+    const url = api.getVoiceMediaUrl(msg.media_path);
+    const audio = new Audio(url);
+    voiceAudioRef.current = audio;
+    setPlayingVoiceId(msg.id);
+    audio.play().catch(() => toast.error('Could not play voice note'));
+    audio.onended = () => setPlayingVoiceId(null);
+    audio.onerror = () => { setPlayingVoiceId(null); toast.error('Voice note playback failed'); };
+  }, [playingVoiceId]);
+
+  // Delete a single message
+  const handleDeleteMessage = useCallback(async (messageId: string) => {
+    if (!confirm('Delete this message? It will also be deleted from WhatsApp.')) return;
+    setDeletingMessage(messageId);
+    try {
+      await api.deleteMessage(messageId);
+      setMessages(prev => prev.filter(m => m.id !== messageId));
+      toast.success('Message deleted');
+      refreshConversations();
+    } catch (err: any) { toast.error(err.message || 'Failed to delete'); }
+    finally { setDeletingMessage(null); }
+  }, [refreshConversations]);
+
+  // Delete entire conversation
+  const handleDeleteConversation = useCallback(async () => {
+    if (!selectedContact) return;
+    if (!confirm(`Delete entire conversation with ${getContactDisplayName(selectedContact)}? This will also clear it from WhatsApp.`)) return;
+    setDeletingConversation(true);
+    try {
+      await api.deleteConversation(selectedContact.id);
+      setSelectedContact(null);
+      setMessages([]);
+      toast.success('Conversation deleted');
+      refreshConversations();
+    } catch (err: any) { toast.error(err.message || 'Failed to delete'); }
+    finally { setDeletingConversation(false); }
+  }, [selectedContact, refreshConversations]);
+
   // Group messages by date
   const groupedMessages = useMemo(() => {
     const groups: { date: string; messages: (Message & { _idx: number })[] }[] = [];
