@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { api, type StatusGroup } from '@/lib/api';
 import { formatDistanceToNow } from 'date-fns';
-import { RefreshCw, X, ChevronRight, Eye, Download, Send } from 'lucide-react';
+import { RefreshCw, X, ChevronRight, Eye, Download, Send, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const STORY_DURATION_MS = 5000;
