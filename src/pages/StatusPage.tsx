@@ -55,6 +55,8 @@ const StatusPage = () => {
 
   useEffect(() => {
     fetchStatuses();
+    const interval = window.setInterval(fetchStatuses, 60000);
+    return () => window.clearInterval(interval);
   }, [fetchStatuses]);
 
   useEffect(() => {
@@ -68,6 +70,19 @@ const StatusPage = () => {
     }
     return () => es?.close();
   }, [fetchStatuses]);
+
+  useEffect(() => {
+    if (!viewerGroup) return;
+
+    const nextGroup = groups.find((group) => group.senderJid === viewerGroup.senderJid);
+    if (!nextGroup || nextGroup.statuses.length === 0) {
+      closeViewer();
+      return;
+    }
+
+    setViewerGroup(nextGroup);
+    setViewerIdx((prev) => Math.min(prev, nextGroup.statuses.length - 1));
+  }, [closeViewer, groups, viewerGroup]);
 
   const currentStatus = viewerGroup?.statuses[viewerIdx] ?? null;
 

@@ -130,37 +130,39 @@ function fromJid(jid) {
 async function resolveSendTargets(client, jid) {
   const candidates = new Set();
   const normalized = fromJid(jid);
+  const barePhone = jid.endsWith('@g.us') || jid === 'status@broadcast'
+    ? ''
+    : phoneFromJid(jid).replace(/[^0-9]/g, '');
+
+  try {
+    const chats = await client.getChats();
+    for (const chat of chats) {
+      const serialized = chat?.id?._serialized;
+      if (!serialized) continue;
+      const normalizedChatJid = toJid(serialized);
+      const normalizedChatPhone = normalizedChatJid.endsWith('@g.us') || normalizedChatJid === 'status@broadcast'
+        ? ''
+        : phoneFromJid(normalizedChatJid).replace(/[^0-9]/g, '');
+
+      if (normalizedChatJid === jid || (barePhone && normalizedChatPhone === barePhone)) {
+        candidates.add(serialized);
+      }
+    }
+  } catch {}
 
   if (normalized) candidates.add(normalized);
   if (jid) candidates.add(jid);
 
-  if (jid.endsWith('@s.whatsapp.net')) {
-    const phone = phoneFromJid(jid);
-    if (phone) {
-      candidates.add(`${phone}@c.us`);
-      try {
-        const numberId = await client.getNumberId(phone);
-        const serialized =
-          numberId?._serialized ||
-          numberId?.id?._serialized ||
-          (typeof numberId === 'string' ? numberId : null);
-        if (serialized) candidates.add(serialized);
-      } catch {}
-    }
-  }
-
-  if (jid.endsWith('@lid')) {
+  if (barePhone) {
+    candidates.add(`${barePhone}@c.us`);
+    candidates.add(`${barePhone}@s.whatsapp.net`);
     try {
-      const chats = await client.getChats();
-      const lidUser = phoneFromJid(jid);
-      for (const chat of chats) {
-        const serialized = chat?.id?._serialized;
-        if (!serialized) continue;
-        const normalizedChatJid = toJid(serialized);
-        if (normalizedChatJid === jid || (lidUser && phoneFromJid(normalizedChatJid) === lidUser)) {
-          candidates.add(serialized);
-        }
-      }
+      const numberId = await client.getNumberId(barePhone);
+      const serialized =
+        numberId?._serialized ||
+        numberId?.id?._serialized ||
+        (typeof numberId === 'string' ? numberId : null);
+      if (serialized) candidates.add(serialized);
     } catch {}
   }
 
@@ -202,14 +204,24 @@ async function sendToResolvedTarget(userId, jid, executor) {
 
   for (const target of targets) {
     try {
-      return await executor({ client: inst.client, target, chat: null });
+      const chat = await inst.client.getChatById(target);
+      return await executor({ client: inst.client, target, chat });
     } catch (err) {
       lastError = err;
     }
 
     try {
-      const chat = await inst.client.getChatById(target);
-      return await executor({ client: inst.client, target, chat });
+      if (typeof inst.client.getContactById === 'function') {
+        await inst.client.getContactById(target);
+        const chat = await inst.client.getChatById(target);
+        return await executor({ client: inst.client, target, chat });
+      }
+    } catch (err) {
+      lastError = lastError || err;
+    }
+
+    try {
+      return await executor({ client: inst.client, target, chat: null });
     } catch (err) {
       lastError = lastError || err;
     }
@@ -220,6 +232,52 @@ async function sendToResolvedTarget(userId, jid, executor) {
 
 function phoneFromJid(jid) {
   return jid.replace(/@(s\.whatsapp\.net|c\.us|g\.us|lid)$/, '');
+}
+
+function normalizeContactPhone(value) {
+  const digits = String(value || '').replace(/[^0-9]/g, '');
+  return digits ? `+${digits}` : null;
+}
+
+function getCanonicalPhoneCandidate(jid, phone) {
+  if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return null;
+  const normalizedPhone = normalizeContactPhone(phone);
+  if (normalizedPhone && !String(phone || '').includes('@')) return normalizedPhone;
+  if (jid.endsWith('@s.whatsapp.net')) {
+    const digits = phoneFromJid(jid).replace(/[^0-9]/g, '');
+    return digits ? `+${digits}` : null;
+  }
+  return null;
+}
+
+function getStatusMediaAbsolutePath(mediaPath) {
+  const safeName = path.basename(String(mediaPath || ''));
+  return safeName ? path.join(STATUS_MEDIA_DIR, safeName) : null;
+}
+
+function removeStatusMediaFile(mediaPath) {
+  const fullPath = getStatusMediaAbsolutePath(mediaPath);
+  if (!fullPath || !fs.existsSync(fullPath)) return;
+  try {
+    fs.unlinkSync(fullPath);
+  } catch {}
+}
+
+function purgeExpiredStatuses(db, userId) {
+  const expiredRows = db.prepare(`
+    SELECT id, media_path FROM statuses
+    WHERE user_id = ? AND datetime(expires_at) <= datetime('now')
+  `).all(userId);
+
+  for (const row of expiredRows) {
+    if (row.media_path) removeStatusMediaFile(row.media_path);
+  }
+
+  if (expiredRows.length > 0) {
+    db.prepare("DELETE FROM statuses WHERE user_id = ? AND datetime(expires_at) <= datetime('now')").run(userId);
+  }
+
+  return expiredRows.map((row) => row.id).filter(Boolean);
 }
 
 function getAudioFileExtension(mimetype) {
@@ -653,12 +711,8 @@ async function startConnection(userId, db, options = {}) {
         if (jid === 'status@broadcast' || before.isStatus) {
           const statusId = before.id?._serialized || before.id;
           if (statusId) {
-            // Also delete the media file if present
             const row = db.prepare('SELECT media_path FROM statuses WHERE id = ? AND user_id = ?').get(statusId, userId);
-            if (row?.media_path) {
-              const fullPath = path.join(STATUS_MEDIA_DIR, row.media_path);
-              fs.unlink(fullPath).catch(() => {});
-            }
+            if (row?.media_path) removeStatusMediaFile(row.media_path);
             db.prepare('DELETE FROM statuses WHERE id = ? AND user_id = ?').run(statusId, userId);
             emit(userId, 'status_deleted', { statusId });
             console.log(`🗑️ [${userId}] Status deleted: ${statusId}`);
@@ -805,7 +859,7 @@ function mergeContactRecords(db, userId, sourceContactId, targetContactId, targe
 }
 
 function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, activityAt = null) {
-  const safePhone = phone && phone !== '+' ? phone : null;
+  const safePhone = getCanonicalPhoneCandidate(jid, phone);
   const existing = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
 
   const phoneMatch = safePhone
@@ -1437,7 +1491,10 @@ async function captureStatusUpdate(userId, db, inst, msg) {
 }
 
 export function getStatuses(db, userId) {
-  db.prepare("DELETE FROM statuses WHERE user_id = ? AND expires_at < datetime('now')").run(userId);
+  const expiredIds = purgeExpiredStatuses(db, userId);
+  for (const statusId of expiredIds) {
+    emit(userId, 'status_deleted', { statusId, reason: 'expired' });
+  }
 
   const rows = db.prepare(`
     SELECT * FROM statuses WHERE user_id = ? ORDER BY timestamp ASC

@@ -62,7 +62,7 @@ export function createApiRouter(db) {
 
   function getCanonicalPhoneJid(phone) {
     const raw = String(phone || '').trim();
-    if (!raw || raw.includes('@')) return null;
+    if (!raw) return null;
 
     const digits = normalizePhoneDigits(raw);
     if (digits.length < 7 || digits.length > 15) return null;
@@ -396,6 +396,8 @@ export function createApiRouter(db) {
         send('sync_state', data);
       } else if (event === 'status_update') {
         send('status_update', data);
+      } else if (event === 'status_deleted') {
+        send('status_deleted', data);
       } else if (event === 'call') {
         send('call', data);
       }
