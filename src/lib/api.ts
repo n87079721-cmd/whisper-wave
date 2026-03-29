@@ -265,11 +265,11 @@ export const api = {
     });
   },
 
-  sendVoice(contactId: string, text: string, voiceId?: string, modelId?: string, backgroundSound?: string) {
+  sendVoice(contactId: string, text: string, voiceId?: string, modelId?: string, backgroundSound?: string, bgVolume?: number) {
     return requestJson<{ success?: boolean; messageId?: string; error?: string }>('/api/send/voice', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contactId, text, voiceId, modelId, backgroundSound }),
+      body: JSON.stringify({ contactId, text, voiceId, modelId, backgroundSound, bgVolume }),
     });
   },
 
@@ -290,11 +290,11 @@ export const api = {
     });
   },
 
-  previewVoice(text: string, voiceId?: string, modelId?: string, backgroundSound?: string): Promise<Blob> {
+  previewVoice(text: string, voiceId?: string, modelId?: string, backgroundSound?: string, bgVolume?: number): Promise<Blob> {
     return requestBlob('/api/voice/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voiceId, modelId, backgroundSound }),
+      body: JSON.stringify({ text, voiceId, modelId, backgroundSound, bgVolume }),
     });
   },
 
@@ -423,6 +423,32 @@ export const api = {
     return requestJson<Message[]>('/api/starred-messages');
   },
 
+  // Custom Sounds
+  getSounds() {
+    return requestJson<{ presets: SoundItem[]; custom: SoundItem[] }>('/api/sounds');
+  },
+
+  async uploadCustomSound(file: File, name: string) {
+    if (!getApiUrl()) throw new Error('Backend URL not configured.');
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('name', name);
+    const res = await fetch(toUrl('/api/sounds/upload'), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+      throw new Error(err.error || 'Upload failed');
+    }
+    return res.json() as Promise<{ soundId: string; name: string; duration: number }>;
+  },
+
+  deleteSound(id: number) {
+    return requestJson<{ success: boolean }>(`/api/sounds/${id}`, { method: 'DELETE' });
+  },
+
   // Contact Media
   getContactMedia(contactId: string) {
     return requestJson<Message[]>(`/api/contacts/${contactId}/media`);
@@ -540,4 +566,12 @@ export interface SyncDiagnostics {
   lidMapSize: number;
   syncState: any;
   topUnnamed: Array<{ id: string; jid: string; name: string | null; phone: string | null }>;
+}
+
+export interface SoundItem {
+  id: string;
+  name: string;
+  type: 'preset' | 'custom';
+  duration?: number;
+  dbId?: number;
 }

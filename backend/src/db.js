@@ -118,6 +118,16 @@ function ensureCurrentTables(db) {
       timestamp TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS custom_sounds (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      sound_id TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      duration INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 
   // Add archive + unread columns if missing

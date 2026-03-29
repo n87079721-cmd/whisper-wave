@@ -1,9 +1,14 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2, Search } from 'lucide-react';
-import { api, type Contact, type Voice } from '@/lib/api';
+import { Mic, Play, Square, Send, Loader2, ChevronDown, Sparkles, Info, Wand2, Undo2, Search, Upload, X, Volume2 } from 'lucide-react';
+import { api, type Contact, type Voice, type SoundItem } from '@/lib/api';
 import { getContactDisplayMeta, getContactDisplayName } from '@/lib/contactDisplay';
 import { toast } from 'sonner';
+
+const PRESET_EMOJIS: Record<string, string> = {
+  cafe: '☕', rain: '🌧', street: '🏙', nature: '🌳', office: '💼',
+  car: '🚗', crowd: '👥', ocean: '🌊', fireplace: '🔥',
+};
 
 const MODELS = [
   { id: 'eleven_v3', name: 'v3 Human Mode ✨', desc: 'Most natural & expressive — recommended' },
@@ -112,6 +117,15 @@ const VoiceStudioPage = () => {
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [originalText, setOriginalText] = useState<string | null>(null);
   const [activeTagCategory, setActiveTagCategory] = useState('Emotions');
+  
+  // Background sound state
+  const [backgroundSound, setBackgroundSound] = useState<string>('none');
+  const [bgVolume, setBgVolume] = useState(0.15);
+  const [presetSounds, setPresetSounds] = useState<SoundItem[]>([]);
+  const [customSounds, setCustomSounds] = useState<SoundItem[]>([]);
+  const [isUploadingSound, setIsUploadingSound] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -129,6 +143,11 @@ const VoiceStudioPage = () => {
         toast.error(err.message || 'Failed to load voices from ElevenLabs');
       })
       .finally(() => setLoadingVoices(false));
+    // Load sounds
+    api.getSounds().then(({ presets, custom }) => {
+      setPresetSounds(presets);
+      setCustomSounds(custom);
+    }).catch(() => {});
   }, []);
 
   const handleGenerate = async () => {
@@ -136,7 +155,8 @@ const VoiceStudioPage = () => {
     setIsGenerating(true);
     setAudioUrl(null);
     try {
-      const blob = await api.previewVoice(text, selectedVoice, selectedModel);
+      const bg = backgroundSound !== 'none' ? backgroundSound : undefined;
+      const blob = await api.previewVoice(text, selectedVoice, selectedModel, bg, bg ? bgVolume : undefined);
       const url = URL.createObjectURL(blob);
       setAudioUrl(url);
     } catch (err: any) {
@@ -161,7 +181,8 @@ const VoiceStudioPage = () => {
     if (!selectedContact || !text) return;
     setSending(true);
     try {
-      const res = await api.sendVoice(selectedContact, text, selectedVoice, selectedModel);
+      const bg = backgroundSound !== 'none' ? backgroundSound : undefined;
+      const res = await api.sendVoice(selectedContact, text, selectedVoice, selectedModel, bg, bg ? bgVolume : undefined);
       if (res.error) throw new Error(res.error);
       toast.success('Voice note sent as PTT!');
     } catch (err: any) {
@@ -388,7 +409,131 @@ const VoiceStudioPage = () => {
           </div>
         </div>
 
-        {/* Generate */}
+        {/* Background Sound */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Volume2 className="w-4 h-4 text-muted-foreground" />
+            <label className="text-sm font-medium text-foreground">Background Sound</label>
+          </div>
+          
+          <div className="flex gap-1.5 flex-wrap">
+            <button
+              onClick={() => setBackgroundSound('none')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                backgroundSound === 'none'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80'
+              }`}
+            >
+              None
+            </button>
+            {presetSounds.map(s => (
+              <button
+                key={s.id}
+                onClick={() => setBackgroundSound(s.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                  backgroundSound === s.id
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80'
+                }`}
+              >
+                {PRESET_EMOJIS[s.id] || '🔊'} {s.name}
+              </button>
+            ))}
+          </div>
+
+          {/* Custom sounds */}
+          {customSounds.length > 0 && (
+            <div className="flex gap-1.5 flex-wrap">
+              {customSounds.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => setBackgroundSound(s.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border flex items-center gap-1 ${
+                    backgroundSound === s.id
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80'
+                  }`}
+                >
+                  🎵 {s.name}
+                  {s.duration ? <span className="opacity-60">({s.duration}s)</span> : null}
+                  <span
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (!s.dbId) return;
+                      try {
+                        await api.deleteSound(s.dbId);
+                        setCustomSounds(prev => prev.filter(cs => cs.dbId !== s.dbId));
+                        if (backgroundSound === s.id) setBackgroundSound('none');
+                        toast.success('Sound deleted');
+                      } catch (err: any) {
+                        toast.error(err.message || 'Failed to delete');
+                      }
+                    }}
+                    className="ml-0.5 hover:text-destructive cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Upload button */}
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="video/*,audio/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setIsUploadingSound(true);
+                try {
+                  const name = file.name.replace(/\.[^.]+$/, '');
+                  const result = await api.uploadCustomSound(file, name);
+                  setCustomSounds(prev => [{ id: result.soundId, name: result.name, type: 'custom', duration: result.duration, dbId: undefined }, ...prev]);
+                  setBackgroundSound(result.soundId);
+                  toast.success(`"${result.name}" added to your sound library`);
+                  // Refresh to get dbId
+                  api.getSounds().then(({ custom }) => setCustomSounds(custom)).catch(() => {});
+                } catch (err: any) {
+                  toast.error(err.message || 'Failed to upload sound');
+                } finally {
+                  setIsUploadingSound(false);
+                  e.target.value = '';
+                }
+              }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploadingSound}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary text-secondary-foreground border border-border hover:bg-secondary/80 transition-colors disabled:opacity-50"
+            >
+              {isUploadingSound ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+              {isUploadingSound ? 'Extracting...' : 'Upload Video/Audio'}
+            </button>
+          </div>
+
+          {/* Volume slider */}
+          {backgroundSound !== 'none' && (
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground w-16 shrink-0">Volume</span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={Math.round(bgVolume * 100)}
+                onChange={e => setBgVolume(parseInt(e.target.value) / 100)}
+                className="flex-1 h-1.5 accent-primary"
+              />
+              <span className="text-xs text-muted-foreground w-10 text-right">{Math.round(bgVolume * 100)}%</span>
+            </div>
+          )}
+        </div>
+
+
         <button
           onClick={handleGenerate}
           disabled={!text || isGenerating}

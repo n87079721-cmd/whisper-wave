@@ -9,7 +9,7 @@ const TEMP_DIR = path.join(__dirname, '..', 'data', 'temp');
 const SOUNDS_DIR = path.join(__dirname, '..', 'data', 'sounds');
 
 // Background sound prompts for ElevenLabs Sound Effects API
-const BG_SOUND_PROMPTS = {
+export const BG_SOUND_PROMPTS = {
   cafe: 'Coffee shop ambience with quiet conversations, espresso machine, cups clinking, cozy indoor cafe background noise',
   rain: 'Gentle rain falling on a window, steady rainfall, calming rain sounds, light drizzle ambience',
   street: 'City street ambience, distant traffic, car horns, pedestrians walking, urban outdoor background',
@@ -45,9 +45,20 @@ function getFfmpeg() {
 
 // Generate or get cached background sound
 async function getBackgroundSound(apiKey, soundId) {
-  if (!BG_SOUND_PROMPTS[soundId]) return null;
-
   if (!fs.existsSync(SOUNDS_DIR)) fs.mkdirSync(SOUNDS_DIR, { recursive: true });
+
+  // Check for custom sound first
+  if (soundId.startsWith('custom-')) {
+    const customPath = path.join(SOUNDS_DIR, `${soundId}.mp3`);
+    if (fs.existsSync(customPath)) {
+      console.log(`Using custom background sound: ${soundId}`);
+      return customPath;
+    }
+    console.warn(`Custom sound not found: ${soundId}`);
+    return null;
+  }
+
+  if (!BG_SOUND_PROMPTS[soundId]) return null;
 
   const cachedPath = path.join(SOUNDS_DIR, `${soundId}.mp3`);
 
@@ -85,16 +96,16 @@ async function getBackgroundSound(apiKey, soundId) {
 }
 
 // Mix voice audio with background sound using ffmpeg
-function mixAudioWithBackground(ffmpeg, voicePath, bgPath, outputPath, outputFormat = 'mp3') {
-  // Loop the background sound, mix at lower volume (-15dB), match voice duration
+function mixAudioWithBackground(ffmpeg, voicePath, bgPath, outputPath, outputFormat = 'mp3', bgVolume = 0.15) {
+  const vol = Math.max(0, Math.min(1, bgVolume));
   if (outputFormat === 'ogg') {
     execSync(
-      `${ffmpeg} -y -i "${voicePath}" -stream_loop -1 -i "${bgPath}" -filter_complex "[1:a]volume=0.15[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[out]" -map "[out]" -c:a libopus -b:a 64k -ar 48000 -ac 1 -application voip -vbr constrained -frame_duration 60 "${outputPath}"`,
+      `${ffmpeg} -y -i "${voicePath}" -stream_loop -1 -i "${bgPath}" -filter_complex "[1:a]volume=${vol}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[out]" -map "[out]" -c:a libopus -b:a 64k -ar 48000 -ac 1 -application voip -vbr constrained -frame_duration 60 "${outputPath}"`,
       { stdio: 'pipe' }
     );
   } else {
     execSync(
-      `${ffmpeg} -y -i "${voicePath}" -stream_loop -1 -i "${bgPath}" -filter_complex "[1:a]volume=0.15[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[out]" -map "[out]" -c:a libmp3lame -b:a 128k "${outputPath}"`,
+      `${ffmpeg} -y -i "${voicePath}" -stream_loop -1 -i "${bgPath}" -filter_complex "[1:a]volume=${vol}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[out]" -map "[out]" -c:a libmp3lame -b:a 128k "${outputPath}"`,
       { stdio: 'pipe' }
     );
   }
@@ -134,7 +145,7 @@ function normalizeSpeechText(text) {
     .trim();
 }
 
-export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgroundSound) {
+export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgroundSound, bgVolume = 0.15) {
   if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
   const ffmpeg = getFfmpeg();
@@ -179,7 +190,7 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgrou
 
     if (bgPath) {
       // Mix voice with background and output as OGG
-      mixAudioWithBackground(ffmpeg, mp3Path, bgPath, mixedOggPath, 'ogg');
+      mixAudioWithBackground(ffmpeg, mp3Path, bgPath, mixedOggPath, 'ogg', bgVolume);
       const oggBuffer = fs.readFileSync(mixedOggPath);
       return oggBuffer;
     } else {
@@ -204,7 +215,7 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgrou
 }
 
 // Generate MP3 preview (not converted to OGG, for browser playback)
-export async function generatePreviewAudio(apiKey, text, voiceId, modelId, backgroundSound) {
+export async function generatePreviewAudio(apiKey, text, voiceId, modelId, backgroundSound, bgVolume = 0.15) {
   if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
   const ffmpeg = getFfmpeg();
@@ -247,7 +258,7 @@ export async function generatePreviewAudio(apiKey, text, voiceId, modelId, backg
     if (bgPath) {
       // Write voice to temp file for mixing
       fs.writeFileSync(voiceMp3Path, audioBuffer);
-      mixAudioWithBackground(ffmpeg, voiceMp3Path, bgPath, mixedMp3Path, 'mp3');
+      mixAudioWithBackground(ffmpeg, voiceMp3Path, bgPath, mixedMp3Path, 'mp3', bgVolume);
       return fs.readFileSync(mixedMp3Path);
     } else {
       return audioBuffer;
