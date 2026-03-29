@@ -1816,3 +1816,43 @@ export function getCallLogs(db, userId) {
     SELECT * FROM call_logs WHERE user_id = ? ORDER BY timestamp DESC LIMIT 200
   `).all(userId);
 }
+
+// ── Sync Diagnostics ──────────────────────────────────────
+export function getSyncDiagnostics(userId, db) {
+  const inst = getInstance(userId);
+
+  const totalContacts = db.prepare('SELECT COUNT(*) as c FROM contacts WHERE user_id = ? AND is_group = 0').get(userId)?.c || 0;
+  const unnamedContacts = db.prepare(`
+    SELECT COUNT(*) as c FROM contacts
+    WHERE user_id = ? AND is_group = 0 AND jid LIKE '%@s.whatsapp.net'
+      AND (name IS NULL OR name = '' OR name LIKE '+%' OR name LIKE 'WhatsApp contact%' OR name GLOB '[0-9]*')
+  `).get(userId)?.c || 0;
+  const emptyChats = db.prepare(`
+    SELECT COUNT(*) as c FROM contacts c
+    WHERE c.user_id = ? AND c.is_group = 0
+      AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.contact_id = c.id AND m.user_id = ?)
+  `).get(userId, userId)?.c || 0;
+  const totalMessages = db.prepare('SELECT COUNT(*) as c FROM messages WHERE user_id = ?').get(userId)?.c || 0;
+  const unresolvedLids = db.prepare("SELECT COUNT(*) as c FROM contacts WHERE user_id = ? AND jid LIKE '%@lid'").get(userId)?.c || 0;
+
+  const topUnnamed = db.prepare(`
+    SELECT id, jid, name, phone FROM contacts
+    WHERE user_id = ? AND is_group = 0 AND jid LIKE '%@s.whatsapp.net'
+      AND (name IS NULL OR name = '' OR name LIKE '+%' OR name LIKE 'WhatsApp contact%' OR name GLOB '[0-9]*')
+    ORDER BY updated_at DESC LIMIT 10
+  `).all(userId);
+
+  const storeContactCount = inst.store?.contacts ? Object.keys(inst.store.contacts).length : 0;
+
+  return {
+    totalContacts,
+    unnamedContacts,
+    emptyChats,
+    totalMessages,
+    unresolvedLids,
+    storeContactCount,
+    lidMapSize: inst.lidMap.size,
+    syncState: { ...inst.syncState },
+    topUnnamed: topUnnamed.map(c => ({ id: c.id, jid: c.jid, name: c.name, phone: c.phone })),
+  };
+}
