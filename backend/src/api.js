@@ -579,6 +579,19 @@ export function createApiRouter(db) {
     }
   });
 
+  // ── Edit Message ──────────────────────────────────────────
+  router.post('/edit/message', async (req, res) => {
+    try {
+      const { messageId, newContent } = req.body;
+      if (!messageId || !newContent) return res.status(400).json({ error: 'Missing messageId or newContent' });
+      const wa = getWA(req);
+      const result = await wa.editMessage(messageId, newContent);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.post('/send/media', async (req, res) => {
     try {
       const { contactId, jid, fileName, mimeType, data, caption, sendAsDocument, isViewOnce } = req.body;
