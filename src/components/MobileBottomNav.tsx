@@ -10,9 +10,10 @@ import {
   MoreHorizontal,
   X,
   CircleDot,
+  Phone,
 } from 'lucide-react';
 
-type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status';
+type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status' | 'calls';
 
 interface MobileBottomNavProps {
   activePage: Page;
@@ -29,6 +30,7 @@ const primaryItems: { id: Page; label: string; icon: React.ElementType }[] = [
 ];
 
 const moreItems: { id: Page; label: string; icon: React.ElementType }[] = [
+  { id: 'calls', label: 'Calls', icon: Phone },
   { id: 'voice', label: 'Voice Studio', icon: Mic },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];

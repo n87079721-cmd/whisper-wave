@@ -731,6 +731,20 @@ async function startConnection(userId, db, options = {}) {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(callId, userId, callerJid, phone, callerName, isVideo ? 1 : 0, isGroup ? 1 : 0, callStatus, new Date().toISOString());
 
+        // Also save as a message in the chat so it appears in conversation
+        const contactId = getOrCreateContact(db, userId, callerJid, phone, callerName, isGroup);
+        if (contactId) {
+          const callMsgId = `call_${callId}`;
+          const callContent = `${isVideo ? 'Video' : 'Voice'} call`;
+          const ts = new Date().toISOString();
+          db.prepare(`
+            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
+            VALUES (?, ?, ?, ?, ?, 'call', 'received', ?, 'received')
+          `).run(callMsgId, userId, contactId, callerJid, callContent, ts);
+
+          emit(userId, 'new_message', { contactId, messageId: callMsgId, type: 'call' });
+        }
+
         emit(userId, 'call', { callId, callerJid, callerName, callerPhone: phone, isVideo, status: callStatus });
         console.log(`📞 [${userId}] ${callStatus} ${isVideo ? 'video' : 'voice'} call from ${callerName || phone}`);
       } catch (err) {
