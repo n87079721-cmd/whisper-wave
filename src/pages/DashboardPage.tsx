@@ -51,7 +51,13 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
       const result = await api.pairPhone(phoneNumber.trim());
       setPairingCode(result.code);
       toast.success('Pairing code generated!');
-    } catch (err: any) { toast.error(err.message || 'Failed'); }
+    } catch (err: any) {
+      const message = err?.message || 'Failed';
+      if (message.includes('temporarily unavailable')) {
+        setPairingMode('qr');
+      }
+      toast.error(message);
+    }
     finally { setRequestingCode(false); }
   };
 
