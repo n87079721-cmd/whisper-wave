@@ -3,106 +3,106 @@
 @tailwind utilities;
 
 @layer base {
-  /* ===== LIGHT MODE — iMessage ===== */
+  /* ===== LIGHT MODE — WhatsApp Teal ===== */
   :root {
     --background: 0 0% 100%;
-    --foreground: 0 0% 0%;
+    --foreground: 210 11% 15%;
 
-    --card: 0 0% 97%;
-    --card-foreground: 0 0% 0%;
+    --card: 0 0% 100%;
+    --card-foreground: 210 11% 15%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 0%;
+    --popover-foreground: 210 11% 15%;
 
-    --primary: 211 100% 50%;
+    --primary: 160 51% 49%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 240 5% 96%;
-    --secondary-foreground: 0 0% 25%;
+    --secondary: 150 10% 95%;
+    --secondary-foreground: 210 11% 25%;
 
-    --muted: 240 5% 96%;
-    --muted-foreground: 0 0% 45%;
+    --muted: 150 8% 95%;
+    --muted-foreground: 210 5% 46%;
 
-    --accent: 211 100% 95%;
-    --accent-foreground: 211 100% 35%;
+    --accent: 160 40% 93%;
+    --accent-foreground: 160 51% 30%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
-    --ring: 211 100% 50%;
+    --border: 150 8% 89%;
+    --input: 150 8% 89%;
+    --ring: 160 51% 49%;
 
     --radius: 0.75rem;
 
-    --sidebar-background: 240 5% 97%;
-    --sidebar-foreground: 0 0% 40%;
-    --sidebar-primary: 211 100% 50%;
+    --sidebar-background: 150 10% 97%;
+    --sidebar-foreground: 210 5% 40%;
+    --sidebar-primary: 160 51% 49%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 5% 93%;
-    --sidebar-accent-foreground: 0 0% 0%;
-    --sidebar-border: 0 0% 91%;
-    --sidebar-ring: 211 100% 50%;
+    --sidebar-accent: 150 10% 93%;
+    --sidebar-accent-foreground: 210 11% 15%;
+    --sidebar-border: 150 8% 90%;
+    --sidebar-ring: 160 51% 49%;
 
     --success: 142 71% 45%;
     --warning: 38 92% 50%;
-    --info: 211 100% 50%;
+    --info: 199 89% 48%;
 
-    --bubble-out: 211 100% 50%;
-    --bubble-out-foreground: 0 0% 100%;
-    --bubble-in: 240 5% 91%;
-    --bubble-in-foreground: 0 0% 0%;
-    --chat-bg: 0 0% 100%;
+    --bubble-out: 156 60% 88%;
+    --bubble-out-foreground: 210 11% 10%;
+    --bubble-in: 0 0% 100%;
+    --bubble-in-foreground: 210 11% 10%;
+    --chat-bg: 36 33% 94%;
   }
 
-  /* ===== DARK MODE — iMessage ===== */
+  /* ===== DARK MODE — WhatsApp Dark ===== */
   .dark {
-    --background: 0 0% 0%;
-    --foreground: 0 0% 93%;
+    --background: 200 10% 10%;
+    --foreground: 150 5% 88%;
 
-    --card: 0 0% 11%;
-    --card-foreground: 0 0% 93%;
+    --card: 200 10% 14%;
+    --card-foreground: 150 5% 88%;
 
-    --popover: 0 0% 11%;
-    --popover-foreground: 0 0% 93%;
+    --popover: 200 10% 14%;
+    --popover-foreground: 150 5% 88%;
 
-    --primary: 211 100% 50%;
+    --primary: 160 51% 49%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 17%;
-    --secondary-foreground: 0 0% 80%;
+    --secondary: 200 8% 18%;
+    --secondary-foreground: 150 5% 78%;
 
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 50%;
+    --muted: 200 8% 16%;
+    --muted-foreground: 150 5% 50%;
 
-    --accent: 211 60% 20%;
-    --accent-foreground: 0 0% 95%;
+    --accent: 160 30% 18%;
+    --accent-foreground: 150 5% 92%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 0 0% 18%;
-    --input: 0 0% 18%;
-    --ring: 211 100% 50%;
+    --border: 200 8% 20%;
+    --input: 200 8% 20%;
+    --ring: 160 51% 49%;
 
-    --sidebar-background: 0 0% 7%;
-    --sidebar-foreground: 0 0% 60%;
-    --sidebar-primary: 211 100% 50%;
+    --sidebar-background: 200 10% 8%;
+    --sidebar-foreground: 150 5% 58%;
+    --sidebar-primary: 160 51% 49%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 14%;
-    --sidebar-accent-foreground: 0 0% 93%;
-    --sidebar-border: 0 0% 14%;
-    --sidebar-ring: 211 100% 50%;
+    --sidebar-accent: 200 8% 16%;
+    --sidebar-accent-foreground: 150 5% 88%;
+    --sidebar-border: 200 8% 16%;
+    --sidebar-ring: 160 51% 49%;
 
     --success: 142 71% 45%;
     --warning: 38 92% 50%;
-    --info: 211 100% 50%;
+    --info: 199 89% 48%;
 
-    --bubble-out: 211 100% 50%;
-    --bubble-out-foreground: 0 0% 100%;
-    --bubble-in: 0 0% 17%;
-    --bubble-in-foreground: 0 0% 93%;
-    --chat-bg: 0 0% 0%;
+    --bubble-out: 160 30% 22%;
+    --bubble-out-foreground: 150 5% 92%;
+    --bubble-in: 200 10% 18%;
+    --bubble-in-foreground: 150 5% 88%;
+    --chat-bg: 200 12% 7%;
   }
 }
 
