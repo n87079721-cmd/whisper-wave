@@ -663,6 +663,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 >
                   {deletingConversation ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                 </button>
+                <button
+                  onClick={() => handleArchiveChat(selectedContact.id, !selectedContact.is_archived)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
+                  title={selectedContact.is_archived ? 'Unarchive' : 'Archive'}
+                >
+                  {selectedContact.is_archived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
+                </button>
               </div>
 
               {/* In-chat search bar */}
