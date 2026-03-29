@@ -1213,8 +1213,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                     </div>
                                   </div>
                                 )}
+                              </div>
+                            </div>
                           </div>
-                          );
                         })}
                       </div>
                     </div>
