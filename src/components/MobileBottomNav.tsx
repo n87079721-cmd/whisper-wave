@@ -7,13 +7,11 @@ import {
   Settings,
   Sun,
   Moon,
-  CircleDot,
-  Phone,
   MoreHorizontal,
   X,
 } from 'lucide-react';
 
-type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status' | 'calls';
+type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings';
 
 interface MobileBottomNavProps {
   activePage: Page;
@@ -25,12 +23,10 @@ interface MobileBottomNavProps {
 const primaryItems: { id: Page; label: string; icon: React.ElementType }[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'conversations', label: 'Chats', icon: MessageSquare },
-  { id: 'calls', label: 'Calls', icon: Phone },
   { id: 'contacts', label: 'Contacts', icon: Users },
 ];
 
 const moreItems: { id: Page; label: string; icon: React.ElementType }[] = [
-  { id: 'status', label: 'Status', icon: CircleDot },
   { id: 'voice', label: 'Voice Studio', icon: Mic },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
