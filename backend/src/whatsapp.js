@@ -951,50 +951,29 @@ async function startConnection(userId, db, options = {}) {
           const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
           if (!contactId) continue; // Skip unresolved @lid contacts
 
-          const content = msg.message.conversation
-            || msg.message.extendedTextMessage?.text
-            || msg.message.imageMessage?.caption
-            || msg.message.videoMessage?.caption
-            || '';
-          const isVoice = !!msg.message.audioMessage;
-          const isImage = !!msg.message.imageMessage;
-          const isVideo = !!msg.message.videoMessage;
-          const isDocument = !!msg.message.documentMessage;
-
-          let msgType = 'text';
-          if (isVoice) msgType = 'voice';
-          else if (isImage) msgType = 'image';
-          else if (isVideo) msgType = 'video';
-          else if (isDocument) msgType = 'document';
+          const payload = getMessagePayload(msg.message);
+          const content = payload.content;
 
           const direction = isFromMe ? 'sent' : 'received';
           const msgId = msg.key.id || uuid();
 
-          // Download and save voice note audio for playback
-          let mediaPath = null;
-          if (isVoice && inst.sock) {
-            try {
-              const VOICE_MEDIA_DIR = path.join(DATA_DIR, 'voice-media');
-              if (!fs.existsSync(VOICE_MEDIA_DIR)) fs.mkdirSync(VOICE_MEDIA_DIR, { recursive: true });
-              const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: inst.sock.updateMediaMessage });
-              const filename = `${msgId}.ogg`;
-              fs.writeFileSync(path.join(VOICE_MEDIA_DIR, filename), buffer);
-              mediaPath = filename;
-            } catch (dlErr) {
-              console.log(`🎤 [${userId}] Voice download failed: ${dlErr?.message}`);
-            }
-          }
+          const mediaPath = payload.isVoice
+            ? await saveVoiceMedia(userId, inst, msg, msgId, payload.mimetype)
+            : null;
 
-          db.prepare(`
-            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
-            msgId, userId, contactId, resolvedJid, content, msgType, direction,
-            toIsoTimestamp(msg.messageTimestamp),
-            isFromMe ? 'sent' : 'delivered',
-            msg.message.audioMessage?.seconds || null,
-            mediaPath
-          );
+          upsertMessageRecord(db, {
+            id: msgId,
+            userId,
+            contactId,
+            jid: resolvedJid,
+            content,
+            type: payload.msgType,
+            direction,
+            timestamp: toIsoTimestamp(msg.messageTimestamp),
+            status: isFromMe ? 'sent' : 'delivered',
+            duration: payload.duration,
+            mediaPath,
+          });
 
           emit(userId, 'message', { contactId, msgId });
 
@@ -1026,6 +1005,7 @@ async function startConnection(userId, db, options = {}) {
           if (!jid || jid === 'status@broadcast') continue;
           buildLidMapping(inst, chat);
           const resolved = resolveLidPhone(inst, jid);
+          rememberChat(inst, chat, resolved.jid);
           const phone = '+' + resolved.phone;
           const isGroup = jid.endsWith('@g.us');
           getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup);
@@ -1038,7 +1018,18 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
-    inst.sock.ev.on('messaging-history.set', ({ chats, contacts: syncedContacts, messages: historyMsgs, syncType }) => {
+    inst.sock.ev.on('chats.update', (updates) => {
+      for (const chat of updates) {
+        try {
+          const jid = chat.id;
+          if (!jid || jid === 'status@broadcast') continue;
+          const resolved = resolveLidPhone(inst, jid);
+          rememberChat(inst, chat, resolved.jid);
+        } catch {}
+      }
+    });
+
+    inst.sock.ev.on('messaging-history.set', async ({ chats, contacts: syncedContacts, messages: historyMsgs, syncType }) => {
       const syncLabel = syncType === 2 ? 'ON_DEMAND' : syncType === 1 ? 'PUSH' : `type=${syncType ?? 'initial'}`;
       console.log(`📜 [${userId}] History sync [${syncLabel}]: ${chats?.length || 0} chats, ${syncedContacts?.length || 0} contacts, ${historyMsgs?.length || 0} messages`);
 
@@ -1100,6 +1091,7 @@ async function startConnection(userId, db, options = {}) {
             if (!jid || jid === 'status@broadcast') continue;
             buildLidMapping(inst, chat);
             const resolved = resolveLidPhone(inst, jid);
+            rememberChat(inst, chat, resolved.jid);
             const phone = '+' + resolved.phone;
             const isGroup = jid.endsWith('@g.us');
             getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(chat), isGroup);
@@ -1147,30 +1139,25 @@ async function startConnection(userId, db, options = {}) {
             const contactId = getOrCreateContact(db, userId, resolvedJid, phone, contactCandidate, isGroup);
             if (!contactId) continue; // Skip unresolved @lid contacts
 
-            const content = msg.message.conversation
-              || msg.message.extendedTextMessage?.text
-              || msg.message.imageMessage?.caption
-              || msg.message.videoMessage?.caption
-              || '';
-
-            const isVoice = !!msg.message.audioMessage;
-            let msgType = 'text';
-            if (isVoice) msgType = 'voice';
-            else if (msg.message.imageMessage) msgType = 'image';
-            else if (msg.message.videoMessage) msgType = 'video';
-            else if (msg.message.documentMessage) msgType = 'document';
-
+            const payload = getMessagePayload(msg.message);
             const msgId = msg.key.id || uuid();
-            db.prepare(`
-              INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(
-              msgId, userId, contactId, resolvedJid, content, msgType,
-              isFromMe ? 'sent' : 'received',
-              toIsoTimestamp(msg.messageTimestamp),
-              isFromMe ? 'sent' : 'delivered',
-              msg.message.audioMessage?.seconds || null
-            );
+            const mediaPath = payload.isVoice
+              ? await saveVoiceMedia(userId, inst, msg, msgId, payload.mimetype)
+              : null;
+
+            upsertMessageRecord(db, {
+              id: msgId,
+              userId,
+              contactId,
+              jid: resolvedJid,
+              content: payload.content,
+              type: payload.msgType,
+              direction: isFromMe ? 'sent' : 'received',
+              timestamp: toIsoTimestamp(msg.messageTimestamp),
+              status: isFromMe ? 'sent' : 'delivered',
+              duration: payload.duration,
+              mediaPath,
+            });
           } catch {}
         }
       }
