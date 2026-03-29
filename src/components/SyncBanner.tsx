@@ -15,7 +15,7 @@ const SyncBanner = ({ syncState, isConnected, onResync, compact }: SyncBannerPro
 
   if (phase === 'ready' && unresolvedLids === 0) return null;
 
-  const isSyncing = phase === 'waiting_history' || phase === 'importing';
+  const isSyncing = phase === 'waiting_history' || phase === 'importing' || phase === 'recovering';
   const isPartial = phase === 'partial';
   const hasUnresolved = unresolvedLids > 0;
 
@@ -33,11 +33,13 @@ const SyncBanner = ({ syncState, isConnected, onResync, compact }: SyncBannerPro
         )}
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-foreground">
-            {isSyncing
-              ? 'Syncing WhatsApp history…'
-              : isPartial
-                ? 'Partial sync — some chats may be missing'
-                : 'Some contacts are still resolving'}
+            {phase === 'recovering'
+              ? 'Recovering missing chats…'
+              : isSyncing
+                ? 'Syncing WhatsApp history…'
+                : isPartial
+                  ? 'Partial sync — some chats may be missing'
+                  : 'Some contacts are still resolving'}
           </p>
           {!compact && (
             <p className="text-xs text-muted-foreground mt-0.5">

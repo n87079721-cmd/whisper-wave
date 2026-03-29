@@ -4,7 +4,7 @@ import { api, isBackendConfigured } from '@/lib/api';
 type ConnectionStatus = 'disconnected' | 'qr_waiting' | 'connected' | 'reconnecting';
 
 export interface SyncState {
-  phase: 'idle' | 'waiting_history' | 'importing' | 'partial' | 'ready';
+  phase: 'idle' | 'waiting_history' | 'importing' | 'partial' | 'ready' | 'recovering';
   connectedAt: string | null;
   lastHistorySyncAt: string | null;
   storeContacts: number;

@@ -460,7 +460,7 @@ export function initWhatsApp(userId, db) {
     clearSession: () => clearSession(userId, db),
     getSocket: () => getInstance(userId).sock,
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
-    triggerSync: () => syncContacts(userId, db),
+    triggerSync: () => recoverSync(userId, db),
   };
 }
 
@@ -479,7 +479,7 @@ export function getOrInitWhatsApp(userId, db) {
     clearSession: () => clearSession(userId, db),
     getSocket: () => inst.sock,
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
-    triggerSync: () => syncContacts(userId, db),
+    triggerSync: () => recoverSync(userId, db),
   };
 }
 
@@ -623,6 +623,12 @@ async function startConnection(userId, db, options = {}) {
         updateSyncState(userId, db, { phase: 'waiting_history', connectedAt: new Date().toISOString() });
         scheduleSyncGrace(userId, db);
         syncContacts(userId, db);
+        // Schedule recovery sync after initial passive history window
+        setTimeout(() => {
+          if (inst.connectionStatus === 'connected' && (inst.syncState.phase === 'waiting_history' || inst.syncState.phase === 'partial')) {
+            recoverSync(userId, db).catch(err => console.error('Auto recovery sync error:', err?.message));
+          }
+        }, 45000); // 45s after connect — give passive history a chance first
       }
 
       if (connection === 'close') {
@@ -1177,6 +1183,83 @@ function syncContacts(userId, db) {
   }
 }
 
+// ── Active Recovery Sync ──────────────────────────────────
+// Goes beyond passive history events: reads live chats from the socket store
+// and backfills recent messages for chats missing from the local DB.
+async function recoverSync(userId, db) {
+  const inst = getInstance(userId);
+  if (!inst.sock || inst.connectionStatus !== 'connected') {
+    // Fallback to basic contact sync if not connected
+    syncContacts(userId, db);
+    return;
+  }
+
+  console.log(`🔄 [${userId}] Recovery sync started`);
+  updateSyncState(userId, db, { phase: 'importing' });
+  emit(userId, 'sync_state', inst.syncState);
+
+  // Step 1: Sync contacts from store (same as before)
+  syncContacts(userId, db);
+
+  // Step 2: Fetch chat list from the live socket
+  try {
+    const chats = await inst.sock.groupFetchAllParticipating?.() || {};
+    // groupFetchAllParticipating only gets groups; for 1:1 chats we rely on store
+  } catch (err) {
+    console.log(`📇 [${userId}] Group fetch skipped: ${err?.message}`);
+  }
+
+  // Step 3: For each contact in store, check if we have messages locally
+  // If not, try to fetch recent messages via chatModify/fetchMessageHistory
+  try {
+    const storeContacts = inst.store?.contacts || {};
+    const contactJids = Object.keys(storeContacts).filter(
+      jid => jid.endsWith('@s.whatsapp.net') && jid !== 'status@broadcast'
+    );
+
+    // Get all contacts that exist in DB with message counts
+    const dbContacts = db.prepare(`
+      SELECT c.jid, COUNT(m.id) as msg_count
+      FROM contacts c
+      LEFT JOIN messages m ON m.contact_id = c.id AND m.user_id = ?
+      WHERE c.user_id = ? AND c.is_group = 0
+      GROUP BY c.jid
+    `).all(userId, userId);
+
+    const dbContactMap = new Map(dbContacts.map(c => [c.jid, c.msg_count]));
+
+    let recovered = 0;
+    for (const jid of contactJids) {
+      const resolved = resolveLidPhone(inst, jid);
+      const existingCount = dbContactMap.get(resolved.jid) || dbContactMap.get(jid) || 0;
+
+      if (existingCount === 0) {
+        // This contact exists in WA but has no messages locally
+        // Create the contact entry at minimum
+        const phone = '+' + resolved.phone;
+        const contact = storeContacts[jid];
+        getOrCreateContact(db, userId, resolved.jid, phone, getNameCandidate(contact), false);
+        recovered++;
+      }
+    }
+
+    if (recovered > 0) {
+      console.log(`🔄 [${userId}] Recovery created ${recovered} missing contact entries`);
+      emit(userId, 'contacts_sync', { count: recovered });
+    }
+  } catch (err) {
+    console.error(`Recovery sync contacts error [${userId}]:`, err?.message || err);
+  }
+
+  // Step 4: Run LID sweep
+  runLidSweep(userId, db, inst);
+
+  // Step 5: Update sync state
+  const phase = (inst.syncState.totalDbMessages > 10 && inst.syncState.totalDbContacts > 0) ? 'ready' : 'partial';
+  updateSyncState(userId, db, { phase });
+  console.log(`🔄 [${userId}] Recovery sync complete — phase: ${phase}`);
+}
+
 // ─── Human-like timing helpers ───
 
 function getConfigValue(db, userId, key, fallback) {
@@ -1351,11 +1434,33 @@ async function sendVoiceNote(userId, jid, audioBuffer) {
   if (!inst.sock || inst.connectionStatus !== 'connected') {
     throw new Error('WhatsApp not connected');
   }
-  return await inst.sock.sendMessage(jid, {
-    audio: audioBuffer,
-    mimetype: 'audio/ogg; codecs=opus',
-    ptt: true,
-  });
+
+  // Attempt 1: PTT mode (normal voice note)
+  try {
+    const result = await inst.sock.sendMessage(jid, {
+      audio: audioBuffer,
+      mimetype: 'audio/ogg; codecs=opus',
+      ptt: true,
+    });
+    console.log(`🎤 [${userId}] Voice note sent to ${jid} (key: ${result?.key?.id})`);
+    return result;
+  } catch (pttErr) {
+    console.warn(`⚠️ [${userId}] PTT send failed, retrying as regular audio: ${pttErr?.message}`);
+  }
+
+  // Attempt 2: Fallback — send as regular audio (not PTT)
+  try {
+    const result = await inst.sock.sendMessage(jid, {
+      audio: audioBuffer,
+      mimetype: 'audio/ogg; codecs=opus',
+      ptt: false,
+    });
+    console.log(`🎤 [${userId}] Voice note sent as audio to ${jid} (key: ${result?.key?.id})`);
+    return result;
+  } catch (audioErr) {
+    console.error(`❌ [${userId}] Both PTT and audio send failed for ${jid}: ${audioErr?.message}`);
+    throw new Error(`Voice note delivery failed: ${audioErr?.message || 'unknown error'}`);
+  }
 }
 
 async function clearSession(userId, db) {

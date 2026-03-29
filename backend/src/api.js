@@ -264,10 +264,32 @@ export function createApiRouter(db) {
 
   // ── Messages / Conversations ─────────────────────────────
   router.get('/messages/:contactId', (req, res) => {
-    const messages = db.prepare(`
-      SELECT * FROM messages WHERE contact_id = ? AND user_id = ? ORDER BY timestamp ASC
-    `).all(req.params.contactId, req.userId);
-    res.json(messages);
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const before = req.query.before || null;
+
+    let messages;
+    if (before) {
+      messages = db.prepare(`
+        SELECT * FROM messages
+        WHERE contact_id = ? AND user_id = ? AND timestamp < ?
+        ORDER BY timestamp DESC
+        LIMIT ?
+      `).all(req.params.contactId, req.userId, before, limit).reverse();
+    } else {
+      // Get latest N messages
+      messages = db.prepare(`
+        SELECT * FROM (
+          SELECT * FROM messages
+          WHERE contact_id = ? AND user_id = ?
+          ORDER BY timestamp DESC
+          LIMIT ?
+        ) sub ORDER BY timestamp ASC
+      `).all(req.params.contactId, req.userId, limit);
+    }
+
+    // Include hasMore flag
+    const total = db.prepare('SELECT COUNT(*) as c FROM messages WHERE contact_id = ? AND user_id = ?').get(req.params.contactId, req.userId)?.c || 0;
+    res.json({ messages, hasMore: total > messages.length && !before ? total > limit : messages.length === limit });
   });
 
   router.get('/conversations', (req, res) => {
@@ -378,9 +400,13 @@ export function createApiRouter(db) {
 
       const wa = getWA(req);
       const audioBuffer = await generateVoiceNote(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null);
-      await wa.sendVoiceNote(contact.jid, audioBuffer);
 
-      const msgId = uuid();
+      // Send voice note — captures message key or throws on complete failure
+      const sendResult = await wa.sendVoiceNote(contact.jid, audioBuffer);
+      const waKeyId = sendResult?.key?.id;
+      const msgId = waKeyId || uuid();
+
+      // Only insert to DB after confirmed send
       db.prepare(`
         INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
         VALUES (?, ?, ?, ?, ?, 'voice', 'sent', ?, 'sent')

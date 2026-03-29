@@ -14,6 +14,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [conversations, setConversations] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -65,8 +67,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     options?: { forceScroll?: boolean; behavior?: ScrollBehavior },
   ) => {
     try {
-      const msgs = await api.getMessages(contactId);
-      setMessages(msgs);
+      const result = await api.getMessages(contactId, { limit: 100 });
+      setMessages(result.messages);
+      setHasMoreMessages(result.hasMore);
       const shouldScroll = options?.forceScroll ?? shouldAutoScrollRef.current;
       if (shouldScroll) {
         const behavior = options?.behavior ?? 'auto';
@@ -76,6 +79,30 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       }
     } catch {}
   }, [scrollMessagesToBottom]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!selectedContact || loadingOlder || !hasMoreMessages || messages.length === 0) return;
+    setLoadingOlder(true);
+    const viewport = messagesViewportRef.current;
+    const prevScrollHeight = viewport?.scrollHeight || 0;
+    try {
+      const oldest = messages[0]?.timestamp;
+      const result = await api.getMessages(selectedContact.id, { limit: 50, before: oldest });
+      if (result.messages.length > 0) {
+        setMessages(prev => [...result.messages, ...prev]);
+        setHasMoreMessages(result.hasMore);
+        // Maintain scroll position
+        window.requestAnimationFrame(() => {
+          if (viewport) {
+            viewport.scrollTop = viewport.scrollHeight - prevScrollHeight;
+          }
+        });
+      } else {
+        setHasMoreMessages(false);
+      }
+    } catch {}
+    setLoadingOlder(false);
+  }, [selectedContact, loadingOlder, hasMoreMessages, messages]);
 
   const refreshAllContacts = useCallback(async () => {
     try { setAllContacts(await api.getContacts()); } catch {}
@@ -279,8 +306,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setReplyText('');
       setPreviewUrl(null);
       if (replyMode === 'voice' && !selectedContact.id.startsWith('temp-')) {
-        const msgs = await api.getMessages(selectedContact.id);
-        setMessages(msgs);
+        const result = await api.getMessages(selectedContact.id, { limit: 100 });
+        setMessages(result.messages);
+        setHasMoreMessages(result.hasMore);
         await refreshConversations();
       }
       scrollMessagesToBottom('smooth');
@@ -556,6 +584,19 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   onScroll={syncAutoScrollState}
                   className="absolute inset-0 overflow-y-auto overscroll-contain p-3 md:p-4 bg-chat-bg"
                 >
+                  {/* Load older messages button */}
+                  {hasMoreMessages && (
+                    <div className="flex justify-center mb-3">
+                      <button
+                        onClick={loadOlderMessages}
+                        disabled={loadingOlder}
+                        className="px-3 py-1.5 rounded-lg bg-card/90 text-[11px] text-primary font-medium shadow-sm hover:bg-card transition-colors disabled:opacity-50"
+                      >
+                        {loadingOlder ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : null}
+                        {loadingOlder ? 'Loading...' : 'Load older messages'}
+                      </button>
+                    </div>
+                  )}
                   {groupedMessages.map((group) => (
                     <div key={group.date}>
                       {/* Date separator */}
