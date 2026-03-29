@@ -4,7 +4,7 @@ import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
-import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation } from './whatsapp.js';
+import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation, streamMediaForMessage } from './whatsapp.js';
 import { initWhatsApp } from './whatsapp.js';
 import { archiveChat, markChatRead, syncArchiveStates } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
@@ -151,16 +151,10 @@ export function createApiRouter(db) {
     return cleaned || fallback;
   }
 
+  // No longer persist outgoing voice notes to disk (stream-only mode)
   function persistOutgoingVoiceNote(messageId, audioBuffer) {
-    const mediaDir = path.join(__dirname, '..', 'data', 'message-media');
-    if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
-
-    const filename = `${messageId}.ogg`;
-    const filePath = path.join(mediaDir, filename);
-    fs.writeFileSync(filePath, audioBuffer);
-
     return {
-      mediaPath: filename,
+      mediaPath: `wa:${messageId}`,
       mediaName: 'voice-note.ogg',
       mediaMime: 'audio/ogg; codecs=opus',
     };
@@ -178,18 +172,11 @@ export function createApiRouter(db) {
     return 'document';
   }
 
+  // No longer persist outgoing media to disk (stream-only mode)
   function persistOutgoingMedia(messageId, base64Data, mimeType, fileName) {
-    const mediaDir = path.join(__dirname, '..', 'data', 'message-media');
-    if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
-
     const extension = getMediaExtension(mimeType, fileName);
-    const filename = `${messageId}.${extension}`;
-    const filePath = path.join(mediaDir, filename);
-    const normalizedBase64 = String(base64Data || '').replace(/^data:[^;]+;base64,/, '');
-    fs.writeFileSync(filePath, Buffer.from(normalizedBase64, 'base64'));
-
     return {
-      mediaPath: filename,
+      mediaPath: `wa:${messageId}`,
       mediaName: sanitizeDownloadName(fileName, `attachment.${extension}`),
       mediaMime: mimeType || detectMimeTypeFromFilename(fileName),
     };
