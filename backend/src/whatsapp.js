@@ -1090,17 +1090,22 @@ async function clearSession(userId, db) {
     console.error('Failed to clear DB tables:', err?.message || err);
   }
 
-  // Delete user auth directory
+  // Delete user auth directory (legacy Baileys path)
   const authDir = getUserAuthDir(userId);
   if (fs.existsSync(authDir)) {
     fs.rmSync(authDir, { recursive: true, force: true });
   }
   fs.mkdirSync(authDir, { recursive: true });
 
-  // Also remove the wwebjs LocalAuth data
-  const wwLocalAuth = path.join(DATA_DIR, 'auth', `.wwebjs_auth`, `session-${userId}`);
+  // Remove the wwebjs LocalAuth session data
+  const wwLocalAuth = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
   if (fs.existsSync(wwLocalAuth)) {
     fs.rmSync(wwLocalAuth, { recursive: true, force: true });
+  }
+  // Also try the default .wwebjs_auth path
+  const wwLocalAuthDefault = path.join(DATA_DIR, '.wwebjs_auth', `session-${userId}`);
+  if (fs.existsSync(wwLocalAuthDefault)) {
+    fs.rmSync(wwLocalAuthDefault, { recursive: true, force: true });
   }
 
   inst.isConnecting = false;
