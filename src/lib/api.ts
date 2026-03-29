@@ -71,6 +71,18 @@ function toPhoneJid(value: string): string {
   return `${normalizePhoneDigits(value)}@s.whatsapp.net`;
 }
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      resolve(result.includes(',') ? result.split(',').pop() || '' : result);
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   if (!getApiUrl()) {
     throw new Error('Backend URL not configured. Go to Settings → Backend URL to set it.');
@@ -216,6 +228,40 @@ export const api = {
     });
   },
 
+  async sendMedia(contactId: string, file: File, caption?: string) {
+    const mimeType = file.type || 'application/octet-stream';
+    const data = await fileToBase64(file);
+    return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/media', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contactId,
+        fileName: file.name,
+        mimeType,
+        data,
+        caption,
+        sendAsDocument: !(mimeType.startsWith('image/') || mimeType.startsWith('video/')),
+      }),
+    });
+  },
+
+  async sendMediaToPhone(phone: string, file: File, caption?: string) {
+    const mimeType = file.type || 'application/octet-stream';
+    const data = await fileToBase64(file);
+    return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/media', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jid: toPhoneJid(phone),
+        fileName: file.name,
+        mimeType,
+        data,
+        caption,
+        sendAsDocument: !(mimeType.startsWith('image/') || mimeType.startsWith('video/')),
+      }),
+    });
+  },
+
   sendVoice(contactId: string, text: string, voiceId?: string, modelId?: string, backgroundSound?: string) {
     return requestJson<{ success?: boolean; messageId?: string; error?: string }>('/api/send/voice', {
       method: 'POST',
@@ -263,7 +309,7 @@ export const api = {
 
   // Voice media playback URL
   getVoiceMediaUrl(filename: string) {
-    return withTokenQuery(`/api/message-media/${encodeURIComponent(filename)}`);
+    return withTokenQuery(`/api/message-media/${encodeURIComponent(filename)}`, { format: 'mp3' });
   },
 
   getMessageMediaUrl(filename: string, options?: { download?: boolean }) {

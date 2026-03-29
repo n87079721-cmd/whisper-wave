@@ -127,6 +127,77 @@ function fromJid(jid) {
   return jid.replace(/@s\.whatsapp\.net$/, '@c.us');
 }
 
+async function resolveSendTargets(client, jid) {
+  const candidates = new Set();
+  const normalized = fromJid(jid);
+
+  if (normalized) candidates.add(normalized);
+  if (jid) candidates.add(jid);
+
+  if (jid.endsWith('@s.whatsapp.net')) {
+    const phone = phoneFromJid(jid);
+    if (phone) {
+      candidates.add(`${phone}@c.us`);
+      try {
+        const numberId = await client.getNumberId(phone);
+        const serialized =
+          numberId?._serialized ||
+          numberId?.id?._serialized ||
+          (typeof numberId === 'string' ? numberId : null);
+        if (serialized) candidates.add(serialized);
+      } catch {}
+    }
+  }
+
+  if (jid.endsWith('@lid')) {
+    try {
+      const chats = await client.getChats();
+      const lidUser = phoneFromJid(jid);
+      for (const chat of chats) {
+        const serialized = chat?.id?._serialized;
+        if (!serialized) continue;
+        const normalizedChatJid = toJid(serialized);
+        if (normalizedChatJid === jid || (lidUser && phoneFromJid(normalizedChatJid) === lidUser)) {
+          candidates.add(serialized);
+        }
+      }
+    } catch {}
+  }
+
+  return Array.from(candidates).filter(Boolean);
+}
+
+async function sendToResolvedTarget(userId, jid, executor) {
+  const inst = getInstance(userId);
+  if (!inst.client || inst.connectionStatus !== 'connected') {
+    throw new Error('WhatsApp not connected');
+  }
+
+  const targets = await resolveSendTargets(inst.client, jid);
+  if (targets.length === 0) {
+    throw new Error('No valid WhatsApp target found');
+  }
+
+  let lastError = null;
+
+  for (const target of targets) {
+    try {
+      return await executor({ client: inst.client, target, chat: null });
+    } catch (err) {
+      lastError = err;
+    }
+
+    try {
+      const chat = await inst.client.getChatById(target);
+      return await executor({ client: inst.client, target, chat });
+    } catch (err) {
+      lastError = lastError || err;
+    }
+  }
+
+  throw new Error(lastError?.message || 'Failed to send message');
+}
+
 function phoneFromJid(jid) {
   return jid.replace(/@(s\.whatsapp\.net|c\.us|g\.us|lid)$/, '');
 }
@@ -277,6 +348,7 @@ export function initWhatsApp(userId, db) {
   return {
     getState: () => getWhatsAppState(userId),
     sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
+    sendMediaMessage: (jid, payload) => sendMediaMessage(userId, jid, payload),
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
     reconnect: () => startConnection(userId, db, { force: true }),
     clearSession: () => clearSession(userId, db),
@@ -294,6 +366,7 @@ export function getOrInitWhatsApp(userId, db) {
   return {
     getState: () => getWhatsAppState(userId),
     sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
+    sendMediaMessage: (jid, payload) => sendMediaMessage(userId, jid, payload),
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
     reconnect: () => startConnection(userId, db, { force: true }),
     clearSession: () => clearSession(userId, db),
@@ -1140,31 +1213,44 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
 // ── Send messages ──
 
 async function sendTextMessage(userId, jid, text) {
-  const inst = getInstance(userId);
-  if (!inst.client || inst.connectionStatus !== 'connected') {
-    throw new Error('WhatsApp not connected');
-  }
-  const chatId = fromJid(jid);
-  return await inst.client.sendMessage(chatId, text);
+  return sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
+    if (chat) return await chat.sendMessage(text);
+    return await client.sendMessage(target, text);
+  });
+}
+
+async function sendMediaMessage(userId, jid, payload) {
+  const { mimeType, data, fileName, caption, sendAsDocument = false } = payload || {};
+  if (!data) throw new Error('Missing media data');
+
+  return sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
+    const media = new MessageMedia(mimeType || 'application/octet-stream', data, fileName || 'attachment');
+    const options = {};
+    if (caption) options.caption = caption;
+    if (sendAsDocument) options.sendMediaAsDocument = true;
+
+    if (chat) return await chat.sendMessage(media, options);
+    return await client.sendMessage(target, media, options);
+  });
 }
 
 async function sendVoiceNote(userId, jid, audioBuffer) {
-  const inst = getInstance(userId);
-  if (!inst.client || inst.connectionStatus !== 'connected') {
-    throw new Error('WhatsApp not connected');
-  }
-  const chatId = fromJid(jid);
-
   try {
-    const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
-    const result = await inst.client.sendMessage(chatId, media, { sendAudioAsVoice: true });
+    const result = await sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
+      const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
+      if (chat) return await chat.sendMessage(media, { sendAudioAsVoice: true });
+      return await client.sendMessage(target, media, { sendAudioAsVoice: true });
+    });
     console.log(`🎤 [${userId}] Voice note sent to ${jid}`);
     return result;
   } catch (pttErr) {
     console.warn(`⚠️ [${userId}] PTT send failed, retrying as audio: ${pttErr?.message}`);
     try {
-      const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
-      const result = await inst.client.sendMessage(chatId, media);
+      const result = await sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
+        const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
+        if (chat) return await chat.sendMessage(media);
+        return await client.sendMessage(target, media);
+      });
       console.log(`🎤 [${userId}] Voice note sent as audio to ${jid}`);
       return result;
     } catch (audioErr) {
@@ -1392,10 +1478,20 @@ export async function deleteMessageForEveryone(userId, db, messageId) {
 
   if (inst.client && inst.connectionStatus === 'connected') {
     try {
-      const chatId = fromJid(msg.jid);
-      const chat = await inst.client.getChatById(chatId);
-      const messages = await chat.fetchMessages({ limit: 50 });
-      const waMsg = messages.find(m => (m.id?._serialized === messageId || m.id?.id === messageId));
+      let waMsg = null;
+      if (typeof inst.client.getMessageById === 'function') {
+        try {
+          waMsg = await inst.client.getMessageById(messageId);
+        } catch {}
+      }
+
+      if (!waMsg) {
+        const chatId = fromJid(msg.jid);
+        const chat = await inst.client.getChatById(chatId);
+        const messages = await chat.fetchMessages({ limit: 200 });
+        waMsg = messages.find(m => (m.id?._serialized === messageId || m.id?.id === messageId));
+      }
+
       if (waMsg) {
         await waMsg.delete(true); // delete for everyone
       }

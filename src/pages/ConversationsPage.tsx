@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Mic, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Pause, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film } from 'lucide-react';
+import { Search, Mic, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
@@ -29,6 +29,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
 
   const [showNewChat, setShowNewChat] = useState(false);
@@ -47,12 +48,15 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchIndex, setChatSearchIndex] = useState(0);
   const chatSearchInputRef = useRef<HTMLInputElement | null>(null);
-  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
-  const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
   const [deleteMenuMsgId, setDeleteMenuMsgId] = useState<string | null>(null);
   const [deletingMessage, setDeletingMessage] = useState<string | null>(null);
   const [deletingConversation, setDeletingConversation] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [pendingAttachment, setPendingAttachment] = useState<{
+    file: File;
+    previewUrl: string | null;
+    kind: 'image' | 'video' | 'document';
+  } | null>(null);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -266,6 +270,51 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     } catch { return ''; }
   };
 
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const clearPendingAttachment = useCallback(() => {
+    setPendingAttachment(prev => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
+
+  const handleSelectAttachment = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const mimeType = file.type || 'application/octet-stream';
+    const kind = mimeType.startsWith('image/')
+      ? 'image'
+      : mimeType.startsWith('video/')
+        ? 'video'
+        : 'document';
+
+    const previewUrl = kind === 'document' ? null : URL.createObjectURL(file);
+    setPendingAttachment(prev => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return { file, previewUrl, kind };
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (pendingAttachment?.previewUrl) URL.revokeObjectURL(pendingAttachment.previewUrl);
+    };
+  }, [pendingAttachment]);
+
+  useEffect(() => {
+    if (!deleteMenuMsgId) return;
+    const closeMenu = () => setDeleteMenuMsgId(null);
+    window.addEventListener('click', closeMenu);
+    return () => window.removeEventListener('click', closeMenu);
+  }, [deleteMenuMsgId]);
+
   const getConversationPreview = (contact: Contact) => {
     switch (contact.last_type) {
       case 'voice':
@@ -304,17 +353,27 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   };
 
   const handleSendReply = async () => {
-    if (!selectedContact || !replyText.trim()) return;
+    const trimmedReply = replyText.trim();
+    if (!selectedContact) return;
+    if (replyMode === 'text' && !trimmedReply && !pendingAttachment) return;
+    if (replyMode === 'voice' && !trimmedReply) return;
+
     setSending(true);
     try {
       const activeContactId = selectedContact.id;
       const isTemp = selectedContact.id.startsWith('temp-');
+
       if (replyMode === 'text') {
-        const res = isTemp
-          ? await api.sendTextToPhone(selectedContact.phone || '', replyText)
-          : await api.sendText(selectedContact.id, replyText);
+        const res = pendingAttachment
+          ? isTemp
+            ? await api.sendMediaToPhone(selectedContact.phone || '', pendingAttachment.file, trimmedReply)
+            : await api.sendMedia(selectedContact.id, pendingAttachment.file, trimmedReply)
+          : isTemp
+            ? await api.sendTextToPhone(selectedContact.phone || '', trimmedReply)
+            : await api.sendText(selectedContact.id, trimmedReply);
+
         if (res.error) throw new Error(res.error);
-        toast.success('Message sent');
+        toast.success(pendingAttachment ? 'Attachment sent' : 'Message sent');
 
         const refreshedConversations = await api.getConversations();
         setConversations(refreshedConversations);
@@ -337,8 +396,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         if (res.error) throw new Error(res.error);
         toast.success('Voice note sent');
       }
+
       setReplyText('');
       setPreviewUrl(null);
+      if (pendingAttachment) clearPendingAttachment();
       if (replyMode === 'voice' && !selectedContact.id.startsWith('temp-')) {
         const result = await api.getMessages(selectedContact.id, { limit: 100 });
         setMessages(result.messages);
@@ -452,24 +513,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const chatSearchMatchSet = useMemo(() => new Set(chatSearchMatches), [chatSearchMatches]);
   const activeChatSearchIdx = chatSearchMatches[chatSearchIndex] ?? -1;
 
-  // Voice note playback
-  const handlePlayVoice = useCallback((msg: Message) => {
-    if (!msg.media_path) { toast.error('Voice note not available for playback'); return; }
-    if (playingVoiceId === msg.id) {
-      voiceAudioRef.current?.pause();
-      setPlayingVoiceId(null);
-      return;
-    }
-    if (voiceAudioRef.current) { voiceAudioRef.current.pause(); }
-    const url = api.getVoiceMediaUrl(msg.media_path);
-    const audio = new Audio(url);
-    voiceAudioRef.current = audio;
-    setPlayingVoiceId(msg.id);
-    audio.play().catch(() => toast.error('Could not play voice note'));
-    audio.onended = () => setPlayingVoiceId(null);
-    audio.onerror = () => { setPlayingVoiceId(null); toast.error('Voice note playback failed'); };
-  }, [playingVoiceId]);
-
   // Delete a single message
   const handleDeleteMessage = useCallback(async (messageId: string, mode: 'me' | 'everyone') => {
     setDeleteMenuMsgId(null);
@@ -529,27 +572,25 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
   const renderMessageContent = (msg: Message) => {
     if (msg.type === 'voice') {
+      const voiceUrl = msg.media_path ? api.getVoiceMediaUrl(msg.media_path) : null;
       return (
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => handlePlayVoice(msg)}
-            className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 hover:bg-primary/30 transition-colors"
-          >
-            {playingVoiceId === msg.id ? (
-              <Pause className="w-3.5 h-3.5 text-primary" />
-            ) : (
-              <Play className="w-3.5 h-3.5 text-primary ml-0.5" />
-            )}
-          </button>
-          <div className="flex gap-0.5 items-center">
-            {Array.from({ length: 20 }).map((_, j) => (
-              <div key={j} className={`w-0.5 rounded-full transition-colors ${playingVoiceId === msg.id ? 'bg-primary' : 'bg-primary/60'}`} style={{ height: `${Math.random() * 16 + 4}px` }} />
-            ))}
+        <div className="space-y-2 min-w-[220px]">
+          {voiceUrl ? (
+            <div className="rounded-2xl border border-border/50 bg-background/30 px-2 py-2">
+              <audio controls preload="metadata" className="h-10 w-full min-w-[220px]" src={voiceUrl}>
+                Your browser does not support voice note playback.
+              </audio>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-xl border border-border/50 bg-background/30 px-3 py-2 text-xs text-muted-foreground">
+              <Volume2 className="w-4 h-4" />
+              <span>Voice note unavailable</span>
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>Voice note</span>
+            {msg.duration ? <span>• 0:{String(msg.duration).padStart(2, '0')}</span> : null}
           </div>
-          <span className="text-xs text-muted-foreground ml-1">
-            {msg.duration ? `0:${String(msg.duration).padStart(2, '0')}` : ''}
-          </span>
-          {!msg.media_path && <span className="text-[9px] text-muted-foreground/60">no audio</span>}
         </div>
       );
     }
@@ -921,7 +962,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setDeleteMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
                                     disabled={deletingMessage === msg.id}
-                                    className="opacity-0 group-hover:opacity-100 hover:text-destructive text-muted-foreground/50 transition-all"
+                                    className="opacity-70 md:opacity-0 md:group-hover:opacity-100 hover:text-destructive text-muted-foreground transition-all"
                                     title="Delete message"
                                   >
                                     {deletingMessage === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
@@ -968,6 +1009,41 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
               {/* Reply box */}
               <div className="border-t border-border bg-background p-2 md:p-3 space-y-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={handleSelectAttachment}
+                />
+
+                {pendingAttachment && (
+                  <div className="flex items-center gap-3 rounded-2xl border border-border bg-secondary/60 p-2.5">
+                    {pendingAttachment.kind === 'image' && pendingAttachment.previewUrl ? (
+                      <img src={pendingAttachment.previewUrl} alt={pendingAttachment.file.name} className="h-12 w-12 rounded-xl object-cover" />
+                    ) : pendingAttachment.kind === 'video' && pendingAttachment.previewUrl ? (
+                      <video src={pendingAttachment.previewUrl} className="h-12 w-12 rounded-xl object-cover" muted playsInline />
+                    ) : (
+                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-background text-muted-foreground">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">{pendingAttachment.file.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatFileSize(pendingAttachment.file.size)} • {pendingAttachment.kind === 'document' ? 'File' : pendingAttachment.kind}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearPendingAttachment}
+                      className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-background"
+                      title="Remove attachment"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
                 {previewUrl && (
                   <div className="flex items-center gap-2 bg-secondary rounded-lg p-2">
                     <button onClick={togglePlay} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
@@ -1008,11 +1084,21 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 </div>
 
                 <div className="flex gap-2">
+                  {replyMode === 'text' && (
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors flex-shrink-0"
+                      title="Attach photo or file"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  )}
                   <input
                     value={replyText}
                     onChange={(e) => { setReplyText(e.target.value); setPreviewUrl(null); }}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
-                    placeholder={replyMode === 'voice' ? 'Text to voice...' : 'Type a message'}
+                    placeholder={replyMode === 'voice' ? 'Text to voice...' : pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
                     className="flex-1 px-4 py-2.5 rounded-full bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
                   />
                   {replyMode === 'voice' && (
@@ -1026,7 +1112,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   )}
                   <button
                     onClick={handleSendReply}
-                    disabled={!replyText.trim() || sending}
+                    disabled={replyMode === 'voice' ? !replyText.trim() || sending : (!replyText.trim() && !pendingAttachment) || sending}
                     className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
                   >
                     {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
