@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { api, type StatusGroup } from '@/lib/api';
 import { formatDistanceToNow } from 'date-fns';
-import { RefreshCw, X, ChevronRight, Eye, Download, Send } from 'lucide-react';
+import { RefreshCw, X, ChevronRight, Eye, Download, Send, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const STORY_DURATION_MS = 5000;
@@ -230,9 +231,10 @@ const StatusPage = () => {
   if (viewerGroup && currentStatus) {
     const variant = getStatusVariant(viewerGroup.senderJid);
 
-    return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-foreground text-background">
-        <div className="flex gap-1 px-2 pt-2">
+    return createPortal(
+      <div className="fixed inset-0 z-[100] flex flex-col bg-foreground text-background" style={{ height: '100dvh' }}>
+        {/* Progress bars */}
+        <div className="flex gap-1 px-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
           {viewerGroup.statuses.map((_, i) => {
             const width = i < viewerIdx ? '100%' : i === viewerIdx ? `${progress}%` : '0%';
             return (
@@ -243,8 +245,9 @@ const StatusPage = () => {
           })}
         </div>
 
+        {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3">
-          <button onClick={closeViewer} className="text-background" aria-label="Close status viewer">
+          <button onClick={closeViewer} className="text-background flex-shrink-0" aria-label="Close status viewer">
             <X className="h-6 w-6" />
           </button>
           <div className="min-w-0 flex-1">
@@ -258,16 +261,17 @@ const StatusPage = () => {
           {currentStatus.mediaPath && (currentStatus.mediaType === 'image' || currentStatus.mediaType === 'video') && (
             <button
               onClick={(e) => handleDownload(e, currentStatus.mediaPath!, currentStatus.mediaType)}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-background/20 text-background hover:bg-background/30 transition-colors"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-background/20 text-background hover:bg-background/30 transition-colors flex-shrink-0"
               title="Save to device"
             >
               <Download className="h-4 w-4" />
             </button>
           )}
-          <span className="text-xs text-background/70">{viewerIdx + 1}/{viewerGroup.statuses.length}</span>
+          <span className="text-xs text-background/70 flex-shrink-0">{viewerIdx + 1}/{viewerGroup.statuses.length}</span>
         </div>
 
-        <div className="relative flex flex-1 items-center justify-center overflow-hidden">
+        {/* Content area */}
+        <div className="relative flex flex-1 items-center justify-center overflow-hidden min-h-0">
           <button
             type="button"
             className="absolute left-0 top-0 z-20 h-full w-1/3"
@@ -297,8 +301,8 @@ const StatusPage = () => {
           />
 
           {currentStatus.mediaType === 'text' && (
-            <div className={`flex h-full w-full items-center justify-center p-8 ${variant.container}`}>
-              <p className={`max-w-lg text-center text-xl font-medium leading-relaxed md:text-2xl ${variant.text}`}>
+            <div className={`flex h-full w-full items-center justify-center p-6 sm:p-8 ${variant.container}`}>
+              <p className={`max-w-lg text-center text-lg sm:text-xl md:text-2xl font-medium leading-relaxed ${variant.text}`}>
                 {currentStatus.content || 'Status update'}
               </p>
             </div>
@@ -308,7 +312,7 @@ const StatusPage = () => {
             <div className="relative flex h-full w-full items-center justify-center">
               {!mediaReady && !mediaError && (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-foreground/70 text-background">
-                  <RefreshCw className="h-5 w-5 animate-spin" />
+                  <Loader2 className="h-5 w-5 animate-spin" />
                   <p className="text-sm text-background/80">Loading status…</p>
                 </div>
               )}
@@ -330,7 +334,7 @@ const StatusPage = () => {
                 />
               )}
               {currentStatus.content && !mediaError && (
-                <div className="absolute bottom-16 left-0 right-0 bg-foreground/60 px-6 py-3">
+                <div className="absolute bottom-16 left-0 right-0 bg-foreground/60 px-4 sm:px-6 py-3">
                   <p className="text-center text-sm text-background">{currentStatus.content}</p>
                 </div>
               )}
@@ -341,7 +345,7 @@ const StatusPage = () => {
             <div className="relative flex h-full w-full items-center justify-center">
               {!mediaReady && !mediaError && (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-foreground/70 text-background">
-                  <RefreshCw className="h-5 w-5 animate-spin" />
+                  <Loader2 className="h-5 w-5 animate-spin" />
                   <p className="text-sm text-background/80">Loading status…</p>
                 </div>
               )}
@@ -359,6 +363,7 @@ const StatusPage = () => {
                   src={api.getStatusMediaUrl(currentStatus.mediaPath)}
                   controls
                   autoPlay
+                  playsInline
                   className="max-h-full max-w-full"
                   onLoadedData={() => setMediaReady(true)}
                   onError={() => setMediaError(true)}
@@ -366,7 +371,7 @@ const StatusPage = () => {
                 />
               )}
               {currentStatus.content && !mediaError && (
-                <div className="absolute bottom-16 left-0 right-0 bg-foreground/60 px-6 py-3">
+                <div className="absolute bottom-16 left-0 right-0 bg-foreground/60 px-4 sm:px-6 py-3">
                   <p className="text-center text-sm text-background">{currentStatus.content}</p>
                 </div>
               )}
@@ -375,7 +380,7 @@ const StatusPage = () => {
         </div>
 
         {/* Reply bar */}
-        <div className="flex items-center gap-2 px-4 py-3 bg-foreground/90 border-t border-background/10">
+        <div className="flex items-center gap-2 px-4 py-3 bg-foreground/90 border-t border-background/10" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
           <input
             ref={replyInputRef}
             type="text"
@@ -390,18 +395,19 @@ const StatusPage = () => {
           <button
             onClick={handleSendReply}
             disabled={!replyText.trim() || sendingReply}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors flex-shrink-0"
           >
             <Send className="h-4 w-4" />
           </button>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
   return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
+    <div className="h-full flex flex-col">
+      <div className="mb-4 flex items-center justify-between flex-shrink-0">
         <h1 className="text-xl font-semibold text-foreground">Status</h1>
         <button
           onClick={fetchStatuses}
@@ -413,15 +419,21 @@ const StatusPage = () => {
         </button>
       </div>
 
+      {loading && groups.length === 0 && (
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      )}
+
       {groups.length === 0 && !loading && (
-        <div className="py-16 text-center text-muted-foreground">
-          <Eye className="mx-auto mb-3 h-12 w-12 opacity-40" />
+        <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
+          <Eye className="mb-3 h-12 w-12 opacity-40" />
           <p className="text-sm">No status updates yet</p>
           <p className="mt-1 text-xs">Status updates from your contacts will appear here</p>
         </div>
       )}
 
-      <div className="space-y-1">
+      <div className="flex-1 overflow-y-auto space-y-1">
         {groups.map((group) => {
           const lastStatus = group.statuses[group.statuses.length - 1];
           const count = group.statuses.length;
@@ -431,9 +443,9 @@ const StatusPage = () => {
             <button
               key={group.senderJid}
               onClick={() => openViewer(group)}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-accent/50"
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-accent/50 active:bg-accent/70"
             >
-              <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-primary bg-muted">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-primary bg-muted flex-shrink-0">
                 <span className="text-sm font-medium text-muted-foreground">{(displayName || '?')[0].toUpperCase()}</span>
               </div>
               <div className="min-w-0 flex-1">
@@ -442,7 +454,7 @@ const StatusPage = () => {
                   {count} update{count > 1 ? 's' : ''} · {formatDistanceToNow(new Date(lastStatus.timestamp), { addSuffix: true })}
                 </p>
               </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             </button>
           );
         })}
