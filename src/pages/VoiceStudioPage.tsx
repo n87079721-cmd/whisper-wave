@@ -117,6 +117,15 @@ const VoiceStudioPage = () => {
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [originalText, setOriginalText] = useState<string | null>(null);
   const [activeTagCategory, setActiveTagCategory] = useState('Emotions');
+  
+  // Background sound state
+  const [backgroundSound, setBackgroundSound] = useState<string>('none');
+  const [bgVolume, setBgVolume] = useState(0.15);
+  const [presetSounds, setPresetSounds] = useState<SoundItem[]>([]);
+  const [customSounds, setCustomSounds] = useState<SoundItem[]>([]);
+  const [isUploadingSound, setIsUploadingSound] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -134,6 +143,11 @@ const VoiceStudioPage = () => {
         toast.error(err.message || 'Failed to load voices from ElevenLabs');
       })
       .finally(() => setLoadingVoices(false));
+    // Load sounds
+    api.getSounds().then(({ presets, custom }) => {
+      setPresetSounds(presets);
+      setCustomSounds(custom);
+    }).catch(() => {});
   }, []);
 
   const handleGenerate = async () => {
