@@ -271,8 +271,8 @@ export const api = {
   },
 
   // Delete
-  deleteMessage(messageId: string) {
-    return requestJson<{ success: boolean }>(`/api/messages/${messageId}`, { method: 'DELETE' });
+  deleteMessage(messageId: string, mode: 'me' | 'everyone' = 'me') {
+    return requestJson<{ success: boolean }>(`/api/messages/${messageId}?mode=${mode}`, { method: 'DELETE' });
   },
 
   deleteConversation(contactId: string) {

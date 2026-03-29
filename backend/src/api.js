@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
-import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteConversation } from './whatsapp.js';
+import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation } from './whatsapp.js';
 import { archiveChat, markChatRead } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
@@ -733,7 +733,13 @@ RULES:
   // ── Delete message ─────────────────────────────────────
   router.delete('/messages/:messageId', async (req, res) => {
     try {
-      const result = await deleteMessage(req.userId, db, req.params.messageId);
+      const mode = req.query.mode || 'me';
+      let result;
+      if (mode === 'everyone') {
+        result = await deleteMessageForEveryone(req.userId, db, req.params.messageId);
+      } else {
+        result = await deleteMessageForMe(req.userId, db, req.params.messageId);
+      }
       res.json(result);
     } catch (err) {
       res.status(500).json({ error: err.message });

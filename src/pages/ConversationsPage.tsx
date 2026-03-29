@@ -49,6 +49,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const chatSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [deleteMenuMsgId, setDeleteMenuMsgId] = useState<string | null>(null);
   const [deletingMessage, setDeletingMessage] = useState<string | null>(null);
   const [deletingConversation, setDeletingConversation] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -470,13 +471,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [playingVoiceId]);
 
   // Delete a single message
-  const handleDeleteMessage = useCallback(async (messageId: string) => {
-    if (!confirm('Delete this message? It will also be deleted from WhatsApp.')) return;
+  const handleDeleteMessage = useCallback(async (messageId: string, mode: 'me' | 'everyone') => {
+    setDeleteMenuMsgId(null);
     setDeletingMessage(messageId);
     try {
-      await api.deleteMessage(messageId);
+      await api.deleteMessage(messageId, mode);
       setMessages(prev => prev.filter(m => m.id !== messageId));
-      toast.success('Message deleted');
+      toast.success(mode === 'everyone' ? 'Deleted for everyone' : 'Deleted for you');
       refreshConversations();
     } catch (err: any) { toast.error(err.message || 'Failed to delete'); }
     finally { setDeletingMessage(null); }
@@ -916,14 +917,34 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
                                 <span className={`text-[10px] ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
                                 {msg.direction === 'sent' && <StatusLabel status={msg.status} />}
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handleDeleteMessage(msg.id); }}
-                                  disabled={deletingMessage === msg.id}
-                                  className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive text-muted-foreground/50 transition-all"
-                                  title="Delete message"
-                                >
-                                  {deletingMessage === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                                </button>
+                                <div className="relative ml-1">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setDeleteMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
+                                    disabled={deletingMessage === msg.id}
+                                    className="opacity-0 group-hover:opacity-100 hover:text-destructive text-muted-foreground/50 transition-all"
+                                    title="Delete message"
+                                  >
+                                    {deletingMessage === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                                  </button>
+                                  {deleteMenuMsgId === msg.id && (
+                                    <div className={`absolute z-20 bottom-full mb-1 ${msg.direction === 'sent' ? 'right-0' : 'left-0'} bg-popover border border-border rounded-lg shadow-xl py-1 min-w-[160px]`}>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleDeleteMessage(msg.id, 'me'); }}
+                                        className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-secondary transition-colors"
+                                      >
+                                        Delete for me
+                                      </button>
+                                      {msg.direction === 'sent' && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); handleDeleteMessage(msg.id, 'everyone'); }}
+                                          className="w-full text-left px-3 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                                        >
+                                          Delete for everyone
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </div>
