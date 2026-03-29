@@ -273,20 +273,20 @@ export const api = {
     });
   },
 
-  sendVoiceRecording(contactId: string, audioBase64: string) {
+  sendVoiceRecording(contactId: string, audioBase64: string, mimeType?: string) {
     return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/voice-recording', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contactId, data: audioBase64 }),
+      body: JSON.stringify({ contactId, data: audioBase64, mimeType }),
     });
   },
 
-  sendVoiceRecordingToPhone(phone: string, audioBase64: string) {
+  sendVoiceRecordingToPhone(phone: string, audioBase64: string, mimeType?: string) {
     const jid = toPhoneJid(phone);
     return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/voice-recording', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jid, data: audioBase64 }),
+      body: JSON.stringify({ jid, data: audioBase64, mimeType }),
     });
   },
 

@@ -477,17 +477,28 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
   const startRecording = useCallback(async () => {
     try {
+      if (!window.isSecureContext) {
+        throw new Error('HTTPS_REQUIRED');
+      }
+
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+        throw new Error('UNSUPPORTED_RECORDING');
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       recordingStreamRef.current = stream;
       recordingChunksRef.current = [];
 
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
-          ? 'audio/ogg;codecs=opus'
-          : 'audio/webm';
+      const mimeType = [
+        'audio/webm;codecs=opus',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/webm',
+      ].find((candidate) => MediaRecorder.isTypeSupported(candidate));
 
-      const recorder = new MediaRecorder(stream, { mimeType });
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
 
       recorder.ondataavailable = (e) => {
@@ -503,7 +514,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
           recordingTimerRef.current = null;
         }
 
-        const blob = new Blob(recordingChunksRef.current, { type: mimeType });
+        const resolvedMimeType = recorder.mimeType || mimeType || 'audio/webm';
+        const blob = new Blob(recordingChunksRef.current, { type: resolvedMimeType });
         recordingChunksRef.current = [];
 
         if (blob.size < 1000) {
@@ -534,8 +546,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
           const isTemp = activeContact.id.startsWith('temp-');
           const res = isTemp
-            ? await api.sendVoiceRecordingToPhone(activeContact.phone || '', base64)
-            : await api.sendVoiceRecording(activeContact.id, base64);
+            ? await api.sendVoiceRecordingToPhone(activeContact.phone || '', base64, resolvedMimeType)
+            : await api.sendVoiceRecording(activeContact.id, base64, resolvedMimeType);
 
           if (res.error) throw new Error(res.error);
           toast.success('Voice note sent');
@@ -569,7 +581,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         setRecordingDuration(prev => prev + 1);
       }, 1000);
     } catch (err: any) {
-      toast.error('Microphone access denied');
+      if (err?.message === 'HTTPS_REQUIRED') toast.error('Microphone needs HTTPS — open your secure domain, not the raw IP address.');
+      else if (err?.message === 'UNSUPPORTED_RECORDING') toast.error('This browser does not support live voice recording.');
+      else if (err?.name === 'NotAllowedError') toast.error('Microphone access denied — allow mic permission in your browser settings.');
+      else if (err?.name === 'NotFoundError') toast.error('No microphone was found on this device.');
+      else if (err?.name === 'NotReadableError') toast.error('Your microphone is busy in another app.');
+      else toast.error('Failed to start voice recording.');
       setIsRecording(false);
     }
   }, [refreshMessages]);

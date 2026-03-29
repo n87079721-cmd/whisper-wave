@@ -1,4 +1,5 @@
 import express from 'express';
+import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
@@ -209,6 +210,53 @@ export function createApiRouter(db) {
   function toMp3DownloadName(filename) {
     const base = sanitizeDownloadName(filename, 'voice-note');
     return `${base.replace(/\.[^.]+$/, '')}.mp3`;
+  }
+
+  function getIncomingAudioExtension(mimeType) {
+    const normalized = String(mimeType || '').toLowerCase();
+    if (normalized.includes('ogg')) return 'ogg';
+    if (normalized.includes('mpeg')) return 'mp3';
+    if (normalized.includes('wav')) return 'wav';
+    if (normalized.includes('mp4') || normalized.includes('aac') || normalized.includes('m4a')) return 'm4a';
+    return 'webm';
+  }
+
+  function normalizeRecordedVoiceAudio(audioBuffer, mimeType) {
+    const normalizedMime = String(mimeType || '').toLowerCase();
+    if (normalizedMime.includes('ogg') && normalizedMime.includes('opus')) return audioBuffer;
+
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-vn-'));
+    const inputPath = path.join(tempDir, `input.${getIncomingAudioExtension(normalizedMime)}`);
+    const outputPath = path.join(tempDir, 'output.ogg');
+
+    try {
+      fs.writeFileSync(inputPath, audioBuffer);
+      execFileSync('ffmpeg', [
+        '-y',
+        '-i', inputPath,
+        '-vn',
+        '-c:a', 'libopus',
+        '-b:a', '64k',
+        '-ar', '48000',
+        '-ac', '1',
+        '-application', 'voip',
+        '-vbr', 'constrained',
+        '-frame_duration', '60',
+        outputPath,
+      ], { stdio: 'ignore' });
+
+      if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+        throw new Error('Converted audio was empty');
+      }
+
+      return fs.readFileSync(outputPath);
+    } catch (err) {
+      throw new Error(`Failed to convert recorded audio: ${err.message || err}`);
+    } finally {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {}
+    }
   }
 
   function mergeContactRows(userId, sourceContactId, targetContactId, targetJid) {
@@ -753,7 +801,7 @@ export function createApiRouter(db) {
   // ── Send Live Voice Recording ────────────────────────────
   router.post('/send/voice-recording', async (req, res) => {
     try {
-      const { contactId, jid, data: audioData } = req.body;
+      const { contactId, jid, data: audioData, mimeType } = req.body;
       if (!audioData || (!contactId && !jid)) return res.status(400).json({ error: 'Missing target or audio data' });
 
       const wa = getWA(req);
@@ -761,7 +809,8 @@ export function createApiRouter(db) {
 
       // Convert base64 audio to buffer
       const normalizedBase64 = String(audioData).replace(/^data:[^;]+;base64,/, '');
-      const audioBuffer = Buffer.from(normalizedBase64, 'base64');
+      const rawAudioBuffer = Buffer.from(normalizedBase64, 'base64');
+      const audioBuffer = normalizeRecordedVoiceAudio(rawAudioBuffer, mimeType || 'audio/webm');
 
       const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
       const msgId = getSentMessageId(sendResult);
