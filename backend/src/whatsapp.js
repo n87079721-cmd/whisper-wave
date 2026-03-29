@@ -1220,7 +1220,7 @@ async function sendTextMessage(userId, jid, text) {
 }
 
 async function sendMediaMessage(userId, jid, payload) {
-  const { mimeType, data, fileName, caption, sendAsDocument = false } = payload || {};
+  const { mimeType, data, fileName, caption, sendAsDocument = false, isViewOnce = false } = payload || {};
   if (!data) throw new Error('Missing media data');
 
   return sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
@@ -1228,6 +1228,7 @@ async function sendMediaMessage(userId, jid, payload) {
     const options = {};
     if (caption) options.caption = caption;
     if (sendAsDocument) options.sendMediaAsDocument = true;
+    if (isViewOnce) options.isViewOnce = true;
 
     if (chat) return await chat.sendMessage(media, options);
     return await client.sendMessage(target, media, options);
@@ -1503,7 +1504,8 @@ export async function deleteMessageForEveryone(userId, db, messageId) {
     }
   }
 
-  db.prepare('DELETE FROM messages WHERE id = ? AND user_id = ?').run(messageId, userId);
+  // Mark as deleted instead of removing — show "This message was deleted" placeholder
+  db.prepare("UPDATE messages SET is_deleted = 1, content = '🚫 You deleted this message', media_path = NULL WHERE id = ? AND user_id = ?").run(messageId, userId);
   return { success: true, mode: 'everyone' };
 }
 
