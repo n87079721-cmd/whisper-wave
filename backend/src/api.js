@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
-import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics } from './whatsapp.js';
+import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteConversation } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio } from './elevenlabs.js';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
 import QRCode from 'qrcode';
@@ -577,6 +577,38 @@ RULES:
       const wa = getOrInitWhatsApp(req.userId, db);
       await wa.clearSession();
       res.json({ success: true, message: 'Session and data wiped. Scan QR to re-pair for a full history sync.' });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Voice media playback ───────────────────────────────
+  router.get('/voice-media/:filename', (req, res) => {
+    try {
+      const filePath = path.join(__dirname, '..', 'data', 'voice-media', req.params.filename);
+      if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Voice note not found' });
+      res.set('Content-Type', 'audio/ogg');
+      res.sendFile(filePath);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Delete message ─────────────────────────────────────
+  router.delete('/messages/:messageId', async (req, res) => {
+    try {
+      const result = await deleteMessage(req.userId, db, req.params.messageId);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Delete conversation ────────────────────────────────
+  router.delete('/conversations/:contactId', async (req, res) => {
+    try {
+      const result = await deleteConversation(req.userId, db, req.params.contactId);
+      res.json(result);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

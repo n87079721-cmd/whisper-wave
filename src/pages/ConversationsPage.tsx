@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, Mic, Check, CheckCheck, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Pause } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
@@ -47,6 +47,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchIndex, setChatSearchIndex] = useState(0);
   const chatSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [deletingMessage, setDeletingMessage] = useState<string | null>(null);
+  const [deletingConversation, setDeletingConversation] = useState(false);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -419,6 +423,52 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const chatSearchMatchSet = useMemo(() => new Set(chatSearchMatches), [chatSearchMatches]);
   const activeChatSearchIdx = chatSearchMatches[chatSearchIndex] ?? -1;
 
+  // Voice note playback
+  const handlePlayVoice = useCallback((msg: Message) => {
+    if (!msg.media_path) { toast.error('Voice note not available for playback'); return; }
+    if (playingVoiceId === msg.id) {
+      voiceAudioRef.current?.pause();
+      setPlayingVoiceId(null);
+      return;
+    }
+    if (voiceAudioRef.current) { voiceAudioRef.current.pause(); }
+    const url = api.getVoiceMediaUrl(msg.media_path);
+    const audio = new Audio(url);
+    voiceAudioRef.current = audio;
+    setPlayingVoiceId(msg.id);
+    audio.play().catch(() => toast.error('Could not play voice note'));
+    audio.onended = () => setPlayingVoiceId(null);
+    audio.onerror = () => { setPlayingVoiceId(null); toast.error('Voice note playback failed'); };
+  }, [playingVoiceId]);
+
+  // Delete a single message
+  const handleDeleteMessage = useCallback(async (messageId: string) => {
+    if (!confirm('Delete this message? It will also be deleted from WhatsApp.')) return;
+    setDeletingMessage(messageId);
+    try {
+      await api.deleteMessage(messageId);
+      setMessages(prev => prev.filter(m => m.id !== messageId));
+      toast.success('Message deleted');
+      refreshConversations();
+    } catch (err: any) { toast.error(err.message || 'Failed to delete'); }
+    finally { setDeletingMessage(null); }
+  }, [refreshConversations]);
+
+  // Delete entire conversation
+  const handleDeleteConversation = useCallback(async () => {
+    if (!selectedContact) return;
+    if (!confirm(`Delete entire conversation with ${getContactDisplayName(selectedContact)}? This will also clear it from WhatsApp.`)) return;
+    setDeletingConversation(true);
+    try {
+      await api.deleteConversation(selectedContact.id);
+      setSelectedContact(null);
+      setMessages([]);
+      toast.success('Conversation deleted');
+      refreshConversations();
+    } catch (err: any) { toast.error(err.message || 'Failed to delete'); }
+    finally { setDeletingConversation(false); }
+  }, [selectedContact, refreshConversations]);
+
   // Group messages by date
   const groupedMessages = useMemo(() => {
     const groups: { date: string; messages: (Message & { _idx: number })[] }[] = [];
@@ -535,6 +585,14 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 >
                   <Search className="w-4 h-4" />
                 </button>
+                <button
+                  onClick={handleDeleteConversation}
+                  disabled={deletingConversation}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-destructive/15 hover:text-destructive transition-colors"
+                  title="Delete conversation"
+                >
+                  {deletingConversation ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                </button>
               </div>
 
               {/* In-chat search bar */}
@@ -649,7 +707,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                             className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                           >
                             <div
-                              className={`max-w-[85%] md:max-w-[65%] px-3 py-2 rounded-2xl text-[14px] ${
+                              className={`group max-w-[85%] md:max-w-[65%] px-3 py-2 rounded-2xl text-[14px] ${
                                 msg.direction === 'sent'
                                   ? 'bg-bubble-out text-bubble-out-foreground rounded-br-md'
                                   : 'bg-bubble-in text-bubble-in-foreground rounded-bl-md'
@@ -657,15 +715,25 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                             >
                               {msg.type === 'voice' ? (
                                 <div className="flex items-center gap-2">
-                                  <Mic className="w-4 h-4 text-primary" />
-                                  <div className="flex gap-0.5">
+                                  <button
+                                    onClick={() => handlePlayVoice(msg)}
+                                    className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 hover:bg-primary/30 transition-colors"
+                                  >
+                                    {playingVoiceId === msg.id ? (
+                                      <Pause className="w-3.5 h-3.5 text-primary" />
+                                    ) : (
+                                      <Play className="w-3.5 h-3.5 text-primary ml-0.5" />
+                                    )}
+                                  </button>
+                                  <div className="flex gap-0.5 items-center">
                                     {Array.from({ length: 20 }).map((_, j) => (
-                                      <div key={j} className="w-0.5 bg-primary/60 rounded-full" style={{ height: `${Math.random() * 16 + 4}px` }} />
+                                      <div key={j} className={`w-0.5 rounded-full transition-colors ${playingVoiceId === msg.id ? 'bg-primary' : 'bg-primary/60'}`} style={{ height: `${Math.random() * 16 + 4}px` }} />
                                     ))}
                                   </div>
                                   <span className="text-xs text-muted-foreground ml-1">
                                     {msg.duration ? `0:${String(msg.duration).padStart(2, '0')}` : ''}
                                   </span>
+                                  {!msg.media_path && <span className="text-[9px] text-muted-foreground/60">no audio</span>}
                                 </div>
                               ) : (
                                 <span className="whitespace-pre-wrap break-words">{msg.content}</span>
@@ -673,6 +741,14 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
                                 <span className={`text-[10px] ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
                                 {msg.direction === 'sent' && <StatusLabel status={msg.status} />}
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteMessage(msg.id); }}
+                                  disabled={deletingMessage === msg.id}
+                                  className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive text-muted-foreground/50 transition-all"
+                                  title="Delete message"
+                                >
+                                  {deletingMessage === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                                </button>
                               </div>
                             </div>
                           </div>

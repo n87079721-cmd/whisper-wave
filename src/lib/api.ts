@@ -253,6 +253,22 @@ export const api = {
     return requestJson<{ success: boolean }>('/api/clear-session', { method: 'POST' });
   },
 
+  // Voice media playback URL
+  getVoiceMediaUrl(filename: string) {
+    const token = getAuthToken();
+    const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
+    return toUrl(`/api/voice-media/${encodeURIComponent(filename)}`) + suffix;
+  },
+
+  // Delete
+  deleteMessage(messageId: string) {
+    return requestJson<{ success: boolean }>(`/api/messages/${messageId}`, { method: 'DELETE' });
+  },
+
+  deleteConversation(contactId: string) {
+    return requestJson<{ success: boolean; deletedMessages?: number }>(`/api/conversations/${contactId}`, { method: 'DELETE' });
+  },
+
   triggerSync() {
     return requestJson<{ success: boolean; syncState?: any }>('/api/trigger-sync', { method: 'POST' });
   },
@@ -315,11 +331,12 @@ export interface Message {
   contact_id: string;
   jid: string;
   content: string | null;
-  type: 'text' | 'voice';
+  type: 'text' | 'voice' | 'image' | 'video' | 'document';
   direction: 'sent' | 'received';
   timestamp: string;
   status: string;
   duration: number | null;
+  media_path: string | null;
 }
 
 export interface Stats {
