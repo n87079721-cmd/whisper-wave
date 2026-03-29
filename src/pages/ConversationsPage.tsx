@@ -662,6 +662,16 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       );
     }
 
+    if (msg.type === 'call') {
+      const isVideo = msg.content?.toLowerCase().includes('video');
+      return (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground py-1">
+          <PhoneMissed className="w-4 h-4 text-destructive" />
+          <span className="text-destructive font-medium">Missed {isVideo ? 'video' : 'voice'} call</span>
+        </div>
+      );
+    }
+
     if (msg.type === 'voice') {
       const voiceUrl = msg.media_path ? api.getVoiceMediaUrl(msg.media_path) : null;
       return (
