@@ -626,6 +626,42 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     }
   }, [editingText]);
 
+  const handleStarMessage = useCallback(async (messageId: string, currentlyStarred: boolean) => {
+    try {
+      await api.starMessage(messageId, !currentlyStarred);
+      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, is_starred: currentlyStarred ? 0 : 1 } : m));
+      toast.success(currentlyStarred ? 'Unstarred' : 'Starred');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed');
+    }
+  }, []);
+
+  const handleOpenProfile = useCallback(async () => {
+    if (!selectedContact) return;
+    setShowProfile(true);
+    setProfileMediaLoading(true);
+    try {
+      const media = await api.getContactMedia(selectedContact.id);
+      setProfileMedia(media);
+    } catch {}
+    setProfileMediaLoading(false);
+  }, [selectedContact]);
+
+  const handleSwipeStart = useCallback((e: React.TouchEvent, msg: Message) => {
+    if (msg.type === 'call') return;
+    swipeRef.current = { startX: e.touches[0].clientX, msgId: msg.id };
+  }, []);
+
+  const handleSwipeEnd = useCallback((e: React.TouchEvent, msg: Message) => {
+    if (!swipeRef.current || swipeRef.current.msgId !== msg.id) return;
+    const deltaX = e.changedTouches[0].clientX - swipeRef.current.startX;
+    const threshold = 60;
+    if ((msg.direction === 'received' && deltaX > threshold) || (msg.direction === 'sent' && deltaX < -threshold)) {
+      setQuotedMessage(msg);
+    }
+    swipeRef.current = null;
+  }, []);
+
   const renderMessageContent = (msg: Message) => {
     // Deleted message placeholder
     if (msg.is_deleted) {
