@@ -127,6 +127,21 @@ export function createApiRouter(db) {
     return cleaned || fallback;
   }
 
+  function persistOutgoingVoiceNote(messageId, audioBuffer) {
+    const mediaDir = path.join(__dirname, '..', 'data', 'message-media');
+    if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+
+    const filename = `${messageId}.ogg`;
+    const filePath = path.join(mediaDir, filename);
+    fs.writeFileSync(filePath, audioBuffer);
+
+    return {
+      mediaPath: filename,
+      mediaName: 'voice-note.ogg',
+      mediaMime: 'audio/ogg; codecs=opus',
+    };
+  }
+
   function mergeContactRows(userId, sourceContactId, targetContactId, targetJid) {
     if (!sourceContactId || !targetContactId || sourceContactId === targetContactId) return;
 
@@ -479,12 +494,20 @@ export function createApiRouter(db) {
       const sendResult = await wa.sendVoiceNote(contact.jid, audioBuffer);
       const waKeyId = sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id;
       const msgId = waKeyId || uuid();
+      const savedVoice = persistOutgoingVoiceNote(msgId, audioBuffer);
 
       // Only insert to DB after confirmed send
       db.prepare(`
-        INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
-        VALUES (?, ?, ?, ?, ?, 'voice', 'sent', ?, 'sent')
-      `).run(msgId, req.userId, contactId, contact.jid, text, new Date().toISOString());
+        INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
+        VALUES (?, ?, ?, ?, ?, 'voice', 'sent', ?, 'sent', ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          content = excluded.content,
+          timestamp = excluded.timestamp,
+          status = excluded.status,
+          media_path = COALESCE(excluded.media_path, messages.media_path),
+          media_name = COALESCE(excluded.media_name, messages.media_name),
+          media_mime = COALESCE(excluded.media_mime, messages.media_mime)
+      `).run(msgId, req.userId, contactId, contact.jid, text, new Date().toISOString(), savedVoice.mediaPath, savedVoice.mediaName, savedVoice.mediaMime);
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(req.userId);
 
       res.json({ success: true, messageId: msgId });
