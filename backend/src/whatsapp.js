@@ -174,6 +174,26 @@ async function sendToResolvedTarget(userId, jid, executor) {
   }
 
   const targets = await resolveSendTargets(inst.client, jid);
+
+  // If jid is @lid, also try the phone number from contacts DB
+  if (jid.endsWith('@lid')) {
+    try {
+      const { db } = await import('./db.js');
+      const contact = db.prepare('SELECT phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+      if (contact?.phone) {
+        const digits = contact.phone.replace(/[^0-9]/g, '');
+        if (digits.length >= 7) {
+          targets.push(`${digits}@c.us`);
+          try {
+            const numberId = await inst.client.getNumberId(digits);
+            const serialized = numberId?._serialized || numberId?.id?._serialized || (typeof numberId === 'string' ? numberId : null);
+            if (serialized) targets.push(serialized);
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+
   if (targets.length === 0) {
     throw new Error('No valid WhatsApp target found');
   }
@@ -540,7 +560,13 @@ async function startConnection(userId, db, options = {}) {
         let mediaPath = null;
         let resolvedMediaName = mediaName;
         let resolvedMediaMime = mimetype;
-        if (msg.hasMedia && ['voice', 'image', 'video', 'document'].includes(msgType)) {
+        let resolvedContent = content;
+
+        if (isViewOnce && msg.hasMedia) {
+          // View-once media: don't try to download, show placeholder
+          const typeLabel = msgType === 'video' ? '🎥 Video' : msgType === 'voice' ? '🎤 Voice note' : '📷 Photo';
+          resolvedContent = `${typeLabel} (view once) — open WhatsApp on your phone to view`;
+        } else if (msg.hasMedia && ['voice', 'image', 'video', 'document'].includes(msgType)) {
           const savedMedia = await saveMessageMedia(userId, msg, msgId, {
             msgType,
             mimetype,
@@ -556,8 +582,8 @@ async function startConnection(userId, db, options = {}) {
           userId,
           contactId,
           jid: resolvedJid,
-          content,
-          type: msgType,
+          content: resolvedContent,
+          type: isViewOnce ? 'text' : msgType,
           direction,
           timestamp: new Date(msg.timestamp * 1000).toISOString(),
           status: isFromMe ? 'sent' : 'delivered',

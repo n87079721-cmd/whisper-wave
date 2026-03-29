@@ -274,6 +274,18 @@ export function createApiRouter(db) {
 
     if (!targetJid) throw new Error('Invalid WhatsApp number');
 
+    // If we have a @lid JID but the contact has a phone, prefer phone-based JID for sending
+    if (targetJid.endsWith('@lid')) {
+      const phoneRow = contactRow || db.prepare('SELECT id, jid, phone FROM contacts WHERE jid = ? AND user_id = ?').get(targetJid, userId);
+      if (phoneRow?.phone) {
+        const digits = normalizePhoneDigits(phoneRow.phone);
+        if (digits.length >= 7) {
+          targetJid = `${digits}@s.whatsapp.net`;
+          if (!contactRow) contactRow = phoneRow;
+        }
+      }
+    }
+
     if (!contactRow) {
       contactRow = db.prepare('SELECT id, jid, phone FROM contacts WHERE jid = ? AND user_id = ?').get(targetJid, userId);
     }
