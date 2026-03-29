@@ -564,23 +564,25 @@ const VoiceStudioPage = () => {
                 const files = Array.from(e.target.files || []);
                 if (!files.length) return;
                 setIsUploadingSound(true);
-                let lastSoundId = '';
+                const previousSelection = backgroundSound;
                 for (const file of files) {
                   try {
                     const name = file.name.replace(/\.[^.]+$/, '');
                     const result = await api.uploadCustomSound(file, name);
-                    lastSoundId = result.soundId;
                     toast.success(`"${result.name}" added`);
                   } catch (err: any) {
                     toast.error(`${file.name}: ${err.message || 'Upload failed'}`);
                   }
                 }
-                // Refresh full list to get dbIds
+                // Refresh full list and preserve previous selection
                 try {
                   const { custom } = await api.getSounds();
                   setCustomSounds(custom);
+                  // Only auto-select if nothing was selected before
+                  if (previousSelection === 'none' && custom.length > 0) {
+                    setBackgroundSound(custom[0].id);
+                  }
                 } catch {}
-                if (lastSoundId) setBackgroundSound(lastSoundId);
                 setIsUploadingSound(false);
                 e.target.value = '';
               }}
