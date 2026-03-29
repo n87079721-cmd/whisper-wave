@@ -1888,6 +1888,9 @@ async function clearSession(userId, db) {
     try { inst.sock.ev.removeAllListeners('call'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('chats.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('chats.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('lid-mapping.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('messaging-history.set'); } catch {}
     try { inst.sock.ev.removeAllListeners('creds.update'); } catch {}
     try { await inst.sock.logout(); } catch {}
