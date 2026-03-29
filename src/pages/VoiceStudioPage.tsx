@@ -515,7 +515,22 @@ const VoiceStudioPage = () => {
                     <span className="flex-1 text-foreground truncate">🎵 {s.name} {s.duration ? <span className="text-muted-foreground">({s.duration}s)</span> : null}</span>
                   )}
                   
-                  {/* Edit name */}
+                  {/* Trim/Crop */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setTrimSound(s);
+                      setTrimStart(0);
+                      setTrimEnd(s.duration || 30);
+                    }}
+                    className="text-muted-foreground hover:text-foreground"
+                    title="Trim / Crop"
+                  >
+                    <Scissors className="w-3 h-3" />
+                  </button>
+                  
+                  {/* Rename */}
                   <button
                     type="button"
                     onClick={(e) => {
@@ -524,6 +539,7 @@ const VoiceStudioPage = () => {
                       setEditingSoundName(s.name);
                     }}
                     className="text-muted-foreground hover:text-foreground"
+                    title="Rename"
                   >
                     <Pencil className="w-3 h-3" />
                   </button>
