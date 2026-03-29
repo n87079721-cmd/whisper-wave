@@ -1,5 +1,6 @@
-import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth, MessageMedia } = pkg;
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
