@@ -424,7 +424,7 @@ export interface Message {
   contact_id: string;
   jid: string;
   content: string | null;
-  type: 'text' | 'voice' | 'image' | 'video' | 'document' | 'sticker';
+  type: 'text' | 'voice' | 'image' | 'video' | 'document' | 'sticker' | 'call';
   direction: 'sent' | 'received';
   timestamp: string;
   status: string;

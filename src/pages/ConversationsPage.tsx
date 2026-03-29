@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Mic, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film, Eye, EyeOff, Pencil, Check } from 'lucide-react';
+import { Search, Mic, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film, Eye, EyeOff, Pencil, Check, PhoneMissed } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
@@ -662,6 +662,16 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       );
     }
 
+    if (msg.type === 'call') {
+      const isVideo = msg.content?.toLowerCase().includes('video');
+      return (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground py-1">
+          <PhoneMissed className="w-4 h-4 text-destructive" />
+          <span className="text-destructive font-medium">Missed {isVideo ? 'video' : 'voice'} call</span>
+        </div>
+      );
+    }
+
     if (msg.type === 'voice') {
       const voiceUrl = msg.media_path ? api.getVoiceMediaUrl(msg.media_path) : null;
       return (
@@ -1071,11 +1081,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                           <div
                             key={msg.id}
                             data-msg-idx={msg._idx}
-                            className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
+                            className={`flex ${msg.type === 'call' ? 'justify-center' : msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
                           >
                             <div
                               className={`group max-w-[85%] md:max-w-[65%] ${
-                                msg.type === 'sticker'
+                                msg.type === 'call'
+                                  ? 'bg-muted/50 px-4 py-2 rounded-xl text-[13px]'
+                                  : msg.type === 'sticker'
                                   ? 'bg-transparent'
                                   : `px-3 py-2 rounded-2xl text-[14px] ${
                                       msg.direction === 'sent'
