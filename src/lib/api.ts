@@ -257,6 +257,10 @@ export const api = {
     return requestJson<{ success: boolean; syncState?: any }>('/api/trigger-sync', { method: 'POST' });
   },
 
+  recoverChat(contactId: string) {
+    return requestJson<{ success: boolean; message: string }>(`/api/recover-chat/${contactId}`, { method: 'POST' });
+  },
+
   // Statuses (Stories)
   getStatuses() {
     return requestJson<StatusGroup[]>('/api/statuses');

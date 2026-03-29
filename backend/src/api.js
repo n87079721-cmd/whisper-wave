@@ -551,6 +551,15 @@ RULES:
     }
   });
 
+  // ── Recover single chat history ─────────────────────────
+  router.post('/recover-chat/:contactId', async (req, res) => {
+    try {
+      const result = await recoverSingleChat(req.userId, db, req.params.contactId);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
   // ── Statuses (Stories) ──────────────────────────────────
   router.get('/statuses', (req, res) => {
     try {
