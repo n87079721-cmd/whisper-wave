@@ -1,60 +1,62 @@
 
 
-# Fix Chat Sync + Contact Names + Add Diagnostics
+## Plan: Custom Background Sounds from Video + Volume Control + Sound Library
 
-## Real Problems Found
+### What we're building
+Add a **Background Sound** section to Voice Studio with three capabilities:
+1. Select from preset AI-generated sounds (cafe, rain, etc.) — already supported in backend, just needs UI
+2. **Upload a video/audio file**, extract its audio, and save it as a reusable custom background sound
+3. **Volume slider** to control how loud the background sound is (0%–100%)
+4. All custom sounds are **persisted** and appear in a personal library for reuse
 
-1. **`fetchMessageHistory` is called with invalid arguments** — the code passes `{ remoteJid, fromMe: false, id: '' }` with `undefined` timestamp. The Baileys API requires a valid `IMessageKey` and a numeric timestamp. An empty `id` and undefined timestamp likely cause silent failures or no-ops.
+### Changes
 
-2. **`onWhatsApp()` does NOT return names** — the enrichment function calls `sock.onWhatsApp(phone)` hoping to get pushName, but Baileys only returns `{ exists: boolean, jid: string }`. The subsequent store lookup still finds nothing because the store was never populated for that contact. This whole enrichment path is broken.
+**1. Backend: Custom sound upload + extraction** (`backend/src/api.js`)
+- New `POST /api/sounds/upload` endpoint — accepts video/audio file via multer
+- Uses ffmpeg to extract audio → saves as `custom-{uuid}.mp3` in `backend/data/sounds/`
+- Stores metadata (name, duration, userId) in a `custom_sounds` SQLite table
+- New `GET /api/sounds` — returns preset list + user's custom sounds
+- New `DELETE /api/sounds/:id` — removes a custom sound
 
-3. **`chats.upsert` event is not listened to** — Baileys fires `chats.upsert` when new chats appear (including from on-demand sync results). The code only listens to `contacts.upsert`, `contacts.update`, and `messaging-history.set`. Missing `chats.upsert` means chat metadata from on-demand fetches may be silently dropped.
+**2. Backend: Volume-aware mixing** (`backend/src/elevenlabs.js`)
+- `getBackgroundSound()` — also resolve `custom-xxx` IDs by checking the sounds directory
+- `mixAudioWithBackground()` — accept `bgVolume` param (0.0–1.0) instead of hardcoded `0.15`
+- `generateVoiceNote()` and `generatePreviewAudio()` — pass through `bgVolume`
 
-4. **No `syncType` handling in `messaging-history.set`** — On-demand history results arrive via the same event but with `syncType === ON_DEMAND`. The handler doesn't differentiate, which is fine for storage, but it also doesn't log or track on-demand results separately, making debugging impossible.
+**3. Backend: Routes update** (`backend/src/api.js`)
+- `/api/voice/preview` and `/api/send/voice` — accept `bgVolume` in request body, pass to elevenlabs
 
-5. **No diagnostics visible to the user** — The user cannot see: how many contacts are unnamed, how many chats have 0 messages, whether on-demand fetch actually ran, or what the recovery sync did. There's no way to tell what's working vs broken.
+**4. Backend: DB table** (`backend/src/db.js`)
+- Add `custom_sounds` table: `id, user_id, sound_id, name, filename, duration, created_at`
 
-6. **Contact store pre-population is one-directional** — It loads `@s.whatsapp.net` contacts from DB into store on reconnect, but never writes newly discovered names back to the store, so the store diverges from DB over time.
+**5. Frontend: API helpers** (`src/lib/api.ts`)
+- `uploadCustomSound(file: File, name: string)` — POST multipart to `/api/sounds/upload`
+- `getSounds()` — GET `/api/sounds`
+- `deleteSound(id)` — DELETE `/api/sounds/:id`
+- Update `previewVoice` and `sendVoice` to pass `bgVolume`
 
-## Plan
+**6. Frontend: Background Sound UI** (`src/pages/VoiceStudioPage.tsx`)
+- New "Background Sound" section between text input and Generate button
+- Row of preset sound chips (None, Cafe, Rain, Street, etc.)
+- "Upload Custom" button — file picker for video/audio → calls upload endpoint → adds to library
+- Custom sounds listed as chips with an X to delete
+- Volume slider (0%–100%, default 15%) below the sound selector
+- State: `backgroundSound`, `bgVolume`, `customSounds[]`
+- Pass `backgroundSound` and `bgVolume` to `previewVoice()` and `sendVoice()`
 
-### 1. Fix `fetchMessageHistory` call signature (`backend/src/whatsapp.js`)
-- For chats with existing messages in DB, use the oldest message's key (remoteJid + id) and timestamp
-- For chats with 0 messages, use `chatModify` to mark unread (triggers server-side sync) instead of `fetchMessageHistory` with invalid args
-- Add proper error logging for each attempt
+### UI Layout
+```text
+Background Sound
+[None] [☕ Cafe] [🌧 Rain] [🏙 Street] [🌳 Nature] ...
+[🎵 My Recording 1 ✕] [🎵 Meeting Audio ✕] [+ Upload]
 
-### 2. Replace broken `enrichUnnamedContacts` with profile-based lookup (`backend/src/whatsapp.js`)
-- Remove the `onWhatsApp` path since it doesn't return names
-- Instead, use `sock.fetchStatus(jid)` or check if `contacts.update` events arrive after the socket reconnects
-- For contacts where the store has a name but DB doesn't, write store name to DB (this already partially works but only on events)
-- Run a targeted DB scan matching store contacts to unnamed DB entries after every `contacts.upsert` batch
+Volume: ─────●──────── 15%
+```
 
-### 3. Listen to `chats.upsert` event (`backend/src/whatsapp.js`)
-- Add handler for `chats.upsert` — create/update contact entries from chat metadata
-- This captures chats that arrive from on-demand history or delayed sync
-
-### 4. Add sync diagnostics endpoint + UI (`backend/src/api.js`, `src/pages/SettingsPage.tsx`)
-- New `GET /api/sync-diagnostics` endpoint returning:
-  - Total contacts, unnamed contacts count, contacts with 0 messages
-  - LID map size, store contacts count vs DB contacts count
-  - Last recovery sync time, last history event time
-  - List of top 10 unnamed contacts (so user can see what's unresolved)
-- Add a "Sync Diagnostics" card in Settings showing this data
-- Add a "Full Re-sync" button that does: clear session + reconnect (since user approved one-time reset)
-
-### 5. Improve recovery sync logging (`backend/src/whatsapp.js`)
-- Log each step with counts: "Found X store contacts, Y missing from DB, Z with 0 messages"
-- Log fetchMessageHistory results (success/fail per JID)
-- Emit SSE events with recovery progress details
-
-### 6. Add a "Reset & Re-pair" option in Settings (`src/pages/SettingsPage.tsx`)
-- Clear button that wipes session + DB and starts fresh QR pairing
-- Explain this is needed when history sync was permanently partial
-- Since user confirmed they're willing to re-pair, this gives them a clean baseline
-
-## Files to Change
-1. `backend/src/whatsapp.js` — Fix fetchMessageHistory args, add chats.upsert handler, fix enrichment, improve logging
-2. `backend/src/api.js` — New sync-diagnostics endpoint
-3. `src/pages/SettingsPage.tsx` — Diagnostics card + Reset & Re-pair button
-4. `src/lib/api.ts` — New API method for diagnostics
+### Files to modify
+1. `backend/src/db.js` — add `custom_sounds` table
+2. `backend/src/elevenlabs.js` — resolve custom sounds, accept bgVolume
+3. `backend/src/api.js` — upload/list/delete sound endpoints, pass bgVolume to voice routes
+4. `src/lib/api.ts` — new API methods + bgVolume param
+5. `src/pages/VoiceStudioPage.tsx` — background sound selector, upload, volume slider
 
