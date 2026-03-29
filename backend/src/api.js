@@ -548,6 +548,48 @@ export function createApiRouter(db) {
     }
   });
 
+  // ── Star / Unstar Message ─────────────────────────────────
+  router.post('/messages/:messageId/star', (req, res) => {
+    try {
+      const { starred } = req.body;
+      db.prepare('UPDATE messages SET is_starred = ? WHERE id = ? AND user_id = ?')
+        .run(starred ? 1 : 0, req.params.messageId, req.userId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Get Starred Messages ──────────────────────────────────
+  router.get('/starred-messages', (req, res) => {
+    try {
+      const messages = db.prepare(`
+        SELECT m.*, c.name as contact_name, c.phone as contact_phone, c.jid as contact_jid
+        FROM messages m
+        LEFT JOIN contacts c ON c.id = m.contact_id
+        WHERE m.user_id = ? AND m.is_starred = 1
+        ORDER BY m.timestamp DESC
+      `).all(req.userId);
+      res.json(messages);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Get Media for Contact ─────────────────────────────────
+  router.get('/contacts/:contactId/media', (req, res) => {
+    try {
+      const media = db.prepare(`
+        SELECT * FROM messages
+        WHERE contact_id = ? AND user_id = ? AND type IN ('image', 'video', 'document', 'sticker') AND media_path IS NOT NULL
+        ORDER BY timestamp DESC
+      `).all(req.params.contactId, req.userId);
+      res.json(media);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Send Text ─────────────────────────────────────────────
   router.post('/send/text', async (req, res) => {
     try {
