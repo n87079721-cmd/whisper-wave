@@ -1,50 +1,27 @@
 
 
-## Plan: Fix Sound Library + Add Audio Trimming Editor
+## Plan: Audio Upload Support + Auto-Delete After Send
 
-### Issues identified
-1. **Uploading a second sound breaks the first** — after upload, `setBackgroundSound(lastSoundId)` auto-selects the new one, but the real bug is the sound stream endpoint doesn't require auth, so it works. The actual issue: when uploading multiple sounds, the `custom-` prefix in `soundId` combined with `getSoundStreamUrl` works fine, but the **first sound stops working** because the file list refresh replaces state and the selected `backgroundSound` ID may not match. Need to verify IDs are stable across refreshes.
+### What's changing
+1. **Audio files sent as audio, not documents** — currently uploaded audio files (mp3, m4a, ogg, etc.) get classified as "document" because `detectOutgoingMessageType` only checks for image/video. Fix this so audio attachments send as proper audio messages.
 
-2. **Can't edit/crop/adjust sounds** — the pencil icon only renames. Need a real audio trimmer UI with waveform visualization and start/end handles.
+2. **Auto-delete audio file from server after sending** — once the audio is successfully sent to WhatsApp, delete the saved file from disk so it doesn't persist on the VPS.
 
-3. **3-second delay on play** — the stream endpoint works but the browser needs to download the full file before playing. Fix: add `Content-Length` header and support range requests for instant streaming.
+3. **Frontend audio preview** — when an audio file is attached via the + button, show an audio player preview (instead of a document icon) so the user can listen before sending.
 
-4. **Background sound not actually mixed into VN** — the mixing logic in `elevenlabs.js` looks correct (ffmpeg amix filter). Need to verify the `backgroundSound` param is passed through the API chain correctly.
+### Technical details
 
-5. **"Adjust" button does nothing** — there's no adjust button in the current code, only Pencil (rename) and X (delete). The user expects an editing interface.
+**File 1: `backend/src/api.js`**
+- In `detectOutgoingMessageType`: add `if (normalized.startsWith('audio/')) return 'audio';`
+- In the `/send/media` route: after successful send, if the mimeType is `audio/*`, schedule deletion of the persisted file from `data/message-media/` using `fs.unlinkSync` (or set the media_path to null in the DB so it doesn't try to serve it later)
+- The DB record stays (so the message shows in chat history) but the local file is removed
 
-### Changes
-
-**1. Fix sound streaming for instant playback** (`backend/src/api.js`)
-- Add `Content-Length` and `Accept-Ranges` headers to `/sounds/:soundId/stream`
-- Support HTTP Range requests so the browser can start playing immediately without downloading the full file
-
-**2. Fix multiple upload stability** (`src/pages/VoiceStudioPage.tsx`)
-- After uploading multiple files, refresh the sound list and preserve previously selected sound if it still exists
-- Don't auto-select the last uploaded sound — keep current selection unless user had "none" selected
-
-**3. Add audio trim/crop editor** (`src/pages/VoiceStudioPage.tsx` + `backend/src/api.js`)
-- Frontend: When user taps a sound's edit icon, open a trim modal with:
-  - A simple waveform or time bar showing the sound duration
-  - Two draggable handles (start time, end time) to select a portion
-  - Play button to preview the trimmed section
-  - "Save Trim" button that sends the trim range to the backend
-- Backend: New endpoint `POST /api/sounds/:id/trim` accepting `{ start: number, end: number }` in seconds
-  - Uses ffmpeg to trim: `ffmpeg -i input.mp3 -ss {start} -to {end} -c:a libmp3lame -b:a 128k output.mp3`
-  - Overwrites the existing file and updates the duration in the DB
-  - Returns updated duration
-
-**4. Verify background sound is passed through API** (`backend/src/api.js`)
-- Check `/send/voice` and `/voice/preview` routes pass `backgroundSound` and `bgVolume` to `generateVoiceNote` / `generatePreviewAudio`
-- The code already does this — the issue may be that preset sounds haven't been generated yet (first use triggers ElevenLabs Sound Effects API). Add better error logging.
-
-**5. Add preset sound preview** (`src/pages/VoiceStudioPage.tsx` + `backend/src/api.js`)
-- Allow playing preset sounds too (not just custom)
-- Backend: extend stream endpoint to also serve preset sounds from the sounds directory
-- Frontend: add play button to preset sound chips
+**File 2: `src/pages/ConversationsPage.tsx`**
+- In `handleSelectAttachment`: add `audio` as a recognized kind alongside image/video/document
+- In the attachment preview area: render an `<audio controls>` element for audio attachments instead of the document preview
+- The pending attachment type already includes `kind` — just extend the union type to include `'audio'`
 
 ### Files to modify
-1. `backend/src/api.js` — fix stream endpoint (range requests, Content-Length), add trim endpoint, extend preset streaming
-2. `src/pages/VoiceStudioPage.tsx` — add trim modal UI, fix upload behavior, add preset preview buttons
-3. `src/lib/api.ts` — add `trimSound(id, start, end)` API method
+1. `backend/src/api.js` — detect audio type + delete file after send
+2. `src/pages/ConversationsPage.tsx` — audio attachment kind + audio preview player
 
