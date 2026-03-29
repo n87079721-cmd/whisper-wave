@@ -145,6 +145,9 @@ function ensureCurrentTables(db) {
     if (!messageCols.has('is_deleted')) {
       db.exec("ALTER TABLE messages ADD COLUMN is_deleted INTEGER DEFAULT 0");
     }
+    if (!messageCols.has('is_edited')) {
+      db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
+    }
   } catch {}
 }
 
