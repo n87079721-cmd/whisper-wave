@@ -475,6 +475,135 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     else { audioRef.current.play(); setIsPlaying(true); }
   };
 
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      recordingChunksRef.current = [];
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+          ? 'audio/ogg;codecs=opus'
+          : 'audio/webm';
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordingChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        recordingStreamRef.current = null;
+
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+
+        const blob = new Blob(recordingChunksRef.current, { type: mimeType });
+        recordingChunksRef.current = [];
+
+        if (blob.size < 1000) {
+          setIsRecording(false);
+          setRecordingDuration(0);
+          return;
+        }
+
+        // Send the recording
+        const activeContact = selectedContactRef.current;
+        if (!activeContact) {
+          setIsRecording(false);
+          setRecordingDuration(0);
+          return;
+        }
+
+        setSending(true);
+        try {
+          const reader = new FileReader();
+          const base64 = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => {
+              const result = String(reader.result || '');
+              resolve(result.includes(',') ? result.split(',').pop() || '' : result);
+            };
+            reader.onerror = () => reject(new Error('Failed to read recording'));
+            reader.readAsDataURL(blob);
+          });
+
+          const isTemp = activeContact.id.startsWith('temp-');
+          const res = isTemp
+            ? await api.sendVoiceRecordingToPhone(activeContact.phone || '', base64)
+            : await api.sendVoiceRecording(activeContact.id, base64);
+
+          if (res.error) throw new Error(res.error);
+          toast.success('Voice note sent');
+
+          const refreshedConversations = await api.getConversations();
+          setConversations(refreshedConversations);
+
+          const nextContact = (res.contactId && refreshedConversations.find(c => c.id === res.contactId))
+            || refreshedConversations.find(c => c.id === activeContact.id)
+            || null;
+
+          if (selectedContactRef.current?.id === activeContact.id && nextContact) {
+            setSelectedContact(nextContact);
+            await refreshMessages(nextContact.id, { forceScroll: true });
+          }
+        } catch (err: any) {
+          toast.error(err.message || 'Failed to send voice note');
+        } finally {
+          setSending(false);
+        }
+
+        setIsRecording(false);
+        setRecordingDuration(0);
+      };
+
+      recorder.start(250);
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      toast.error('Microphone access denied');
+      setIsRecording(false);
+    }
+  }, [refreshMessages]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+  }, []);
+
+  const cancelRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.ondataavailable = null;
+      mediaRecorderRef.current.onstop = () => {
+        recordingStreamRef.current?.getTracks().forEach(t => t.stop());
+        recordingStreamRef.current = null;
+      };
+      mediaRecorderRef.current.stop();
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setIsRecording(false);
+    setRecordingDuration(0);
+    recordingChunksRef.current = [];
+  }, []);
+
+  const formatRecordingTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   const handleStartNewChat = async (contact?: Contact) => {
     if (contact) {
       setSelectedContact(contact);
