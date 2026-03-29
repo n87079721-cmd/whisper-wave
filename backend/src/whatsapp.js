@@ -497,6 +497,74 @@ export function getOrInitWhatsApp(userId, db) {
   };
 }
 
+// ── Reconnect & Heartbeat helpers ────────────────────────
+
+function scheduleReconnect(userId, db, generation) {
+  const inst = getInstance(userId);
+  if (inst.reconnectTimer) clearTimeout(inst.reconnectTimer);
+  const delays = [3000, 5000, 10000, 15000, 30000, 60000];
+  const delay = delays[Math.min(inst.reconnectAttempt, delays.length - 1)];
+  inst.reconnectAttempt++;
+  console.log(`🔁 [${userId}] Reconnect attempt #${inst.reconnectAttempt} in ${delay / 1000}s`);
+  inst.reconnectTimer = setTimeout(() => {
+    if (generation !== inst.connectionGeneration) return;
+    inst.reconnectTimer = null;
+    startConnection(userId, db, { force: true });
+  }, delay);
+}
+
+function startHeartbeat(userId, db) {
+  const inst = getInstance(userId);
+  stopHeartbeat(userId);
+  inst.heartbeatTimer = setInterval(async () => {
+    if (inst.connectionStatus !== 'connected' || !inst.client) {
+      stopHeartbeat(userId);
+      return;
+    }
+    try {
+      const state = await inst.client.getState();
+      if (state !== 'CONNECTED') {
+        console.warn(`💔 [${userId}] Heartbeat detected state: ${state}, triggering reconnect`);
+        inst.connectionStatus = 'reconnecting';
+        emit(userId, 'status', { status: 'reconnecting' });
+        stopHeartbeat(userId);
+        scheduleReconnect(userId, db, inst.connectionGeneration);
+      }
+    } catch (err) {
+      console.warn(`💔 [${userId}] Heartbeat failed: ${err?.message}, triggering reconnect`);
+      inst.connectionStatus = 'reconnecting';
+      emit(userId, 'status', { status: 'reconnecting' });
+      stopHeartbeat(userId);
+      scheduleReconnect(userId, db, inst.connectionGeneration);
+    }
+  }, 30000); // Check every 30s
+}
+
+function stopHeartbeat(userId) {
+  const inst = userInstances.get(userId);
+  if (inst?.heartbeatTimer) {
+    clearInterval(inst.heartbeatTimer);
+    inst.heartbeatTimer = null;
+  }
+}
+
+// ── Auto-reconnect all users on server start ─────────────
+
+export function autoReconnectAll(db) {
+  try {
+    const users = db.prepare('SELECT id, username FROM users').all();
+    for (const user of users) {
+      const sessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${user.id}`);
+      if (fs.existsSync(sessionDir)) {
+        console.log(`🔄 Auto-reconnecting user: ${user.username} (${user.id})`);
+        startConnection(user.id, db);
+      }
+    }
+  } catch (err) {
+    console.error('Auto-reconnect error:', err?.message);
+  }
+}
+
 // ── Connection ──────────────────────────────────────────
 
 async function startConnection(userId, db, options = {}) {
