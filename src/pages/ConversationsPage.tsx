@@ -43,6 +43,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const contactsRefreshTimerRef = useRef<number | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [chatSearch, setChatSearch] = useState('');
+  const [recoveringChat, setRecoveringChat] = useState(false);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchIndex, setChatSearchIndex] = useState(0);
   const chatSearchInputRef = useRef<HTMLInputElement | null>(null);
@@ -597,6 +598,37 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       </button>
                     </div>
                   )}
+
+                  {/* Fetch history button for empty chats */}
+                  {messages.length === 0 && selectedContact && !selectedContact.id.startsWith('temp-') && (
+                    <div className="flex flex-col items-center justify-center py-16 gap-3">
+                      <MessageSquare className="w-10 h-10 text-muted-foreground/40" />
+                      <p className="text-sm text-muted-foreground">No messages yet</p>
+                      <button
+                        onClick={async () => {
+                          setRecoveringChat(true);
+                          try {
+                            const res = await api.recoverChat(selectedContact.id);
+                            toast.success(res.message || 'History request sent');
+                            // Wait a bit then refresh
+                            setTimeout(() => {
+                              refreshMessages(selectedContact.id, { forceScroll: true });
+                            }, 3000);
+                          } catch (err: any) {
+                            toast.error(err.message || 'Failed to recover chat');
+                          } finally {
+                            setRecoveringChat(false);
+                          }
+                        }}
+                        disabled={recoveringChat}
+                        className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {recoveringChat && <Loader2 className="w-4 h-4 animate-spin" />}
+                        {recoveringChat ? 'Fetching...' : 'Fetch chat history'}
+                      </button>
+                    </div>
+                  )}
+
                   {groupedMessages.map((group) => (
                     <div key={group.date}>
                       {/* Date separator */}
