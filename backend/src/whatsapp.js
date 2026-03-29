@@ -676,6 +676,9 @@ async function startConnection(userId, db, options = {}) {
     try { inst.sock.ev.removeAllListeners('call'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('contacts.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('chats.upsert'); } catch {}
+    try { inst.sock.ev.removeAllListeners('chats.update'); } catch {}
+    try { inst.sock.ev.removeAllListeners('lid-mapping.update'); } catch {}
     try { inst.sock.ev.removeAllListeners('messaging-history.set'); } catch {}
     try { inst.sock.ev.removeAllListeners('creds.update'); } catch {}
     try { inst.sock.end?.(undefined); } catch {}
@@ -713,7 +716,7 @@ async function startConnection(userId, db, options = {}) {
 
     // Local contact cache (replaces removed makeInMemoryStore)
     if (!inst.store) {
-      inst.store = { contacts: {} };
+      inst.store = { contacts: {}, chats: {} };
     }
 
     // Pre-populate contact store from DB on reconnect to prevent empty name lookups
@@ -852,7 +855,7 @@ async function startConnection(userId, db, options = {}) {
             console.log(`🔄 [${userId}] Auto recovery starting (phase: ${inst.syncState.phase}, ${inst.syncState.historyMessages} msgs so far)`);
             recoverSync(userId, db).catch(err => console.error('Auto recovery sync error:', err?.message));
           }
-        }, 150000); // 2.5 minutes after connect
+        }, 45000); // start active recovery soon enough to surface recent chats
       }
 
       if (connection === 'close') {
