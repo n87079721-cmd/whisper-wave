@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, type StatusGroup } from '@/lib/api';
 import { formatDistanceToNow } from 'date-fns';
-import { RefreshCw, X, ChevronRight, Eye, Download } from 'lucide-react';
+import { RefreshCw, X, ChevronRight, Eye, Download, Send } from 'lucide-react';
+import { toast } from 'sonner';
 
 const STORY_DURATION_MS = 5000;
 const HOLD_THRESHOLD_MS = 220;
@@ -33,9 +34,12 @@ const StatusPage = () => {
   const [progress, setProgress] = useState(0);
   const [mediaReady, setMediaReady] = useState(true);
   const [mediaError, setMediaError] = useState(false);
+  const [replyText, setReplyText] = useState('');
+  const [sendingReply, setSendingReply] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const holdStartedAtRef = useRef<number | null>(null);
   const blockTapRef = useRef(false);
+  const replyInputRef = useRef<HTMLInputElement | null>(null);
 
   const fetchStatuses = useCallback(async () => {
     try {
@@ -73,6 +77,7 @@ const StatusPage = () => {
     setProgress(0);
     setMediaReady(true);
     setMediaError(false);
+    setReplyText('');
     blockTapRef.current = false;
     holdStartedAtRef.current = null;
     videoRef.current = null;
@@ -118,13 +123,16 @@ const StatusPage = () => {
     setMediaReady(currentStatus.mediaType === 'text');
   }, [currentStatus?.id]);
 
+  // Pause timer when reply input is focused or has text
+  const isReplyActive = replyText.length > 0;
+
   useEffect(() => {
-    if (!currentStatus || currentStatus.mediaType === 'video' || !mediaReady || mediaError || isPaused) return;
+    if (!currentStatus || currentStatus.mediaType === 'video' || !mediaReady || mediaError || isPaused || isReplyActive) return;
     const timer = window.setInterval(() => {
       setProgress((prev) => Math.min(prev + 1, 100));
     }, STORY_DURATION_MS / 100);
     return () => window.clearInterval(timer);
-  }, [currentStatus?.id, mediaError, mediaReady, isPaused, currentStatus?.mediaType]);
+  }, [currentStatus?.id, mediaError, mediaReady, isPaused, currentStatus?.mediaType, isReplyActive]);
 
   useEffect(() => {
     if (progress < 100) return;
@@ -157,10 +165,44 @@ const StatusPage = () => {
   const openViewer = (group: StatusGroup) => {
     setViewerGroup(group);
     setViewerIdx(0);
+    setReplyText('');
+  };
+
+  const handleSendReply = async () => {
+    if (!replyText.trim() || !viewerGroup || !currentStatus || sendingReply) return;
+    setSendingReply(true);
+    try {
+      await api.replyToStatus(viewerGroup.senderJid, currentStatus.id, replyText.trim());
+      toast.success('Reply sent');
+      setReplyText('');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to send reply');
+    } finally {
+      setSendingReply(false);
+    }
+  };
+
+  const handleDownload = async (e: React.MouseEvent, mediaPath: string, mediaType: string) => {
+    e.stopPropagation();
+    try {
+      const url = api.getStatusMediaUrl(mediaPath);
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `status-${Date.now()}.${mediaType === 'image' ? 'jpg' : 'mp4'}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+      toast.success('Saved to device');
+    } catch {
+      toast.error('Download failed');
+    }
   };
 
   if (viewerGroup && currentStatus) {
-    const total = viewerGroup.statuses.length;
     const variant = getStatusVariant(viewerGroup.senderJid);
 
     return (
@@ -189,17 +231,15 @@ const StatusPage = () => {
             </p>
           </div>
           {currentStatus.mediaPath && (currentStatus.mediaType === 'image' || currentStatus.mediaType === 'video') && (
-            <a
-              href={api.getStatusMediaUrl(currentStatus.mediaPath)}
-              download={`status-${currentStatus.id}.${currentStatus.mediaType === 'image' ? 'jpg' : 'mp4'}`}
+            <button
+              onClick={(e) => handleDownload(e, currentStatus.mediaPath!, currentStatus.mediaType)}
               className="flex h-9 w-9 items-center justify-center rounded-full bg-background/20 text-background hover:bg-background/30 transition-colors"
               title="Save to device"
-              onClick={(e) => e.stopPropagation()}
             >
               <Download className="h-4 w-4" />
-            </a>
+            </button>
           )}
-          <span className="text-xs text-background/70">{viewerIdx + 1}/{total}</span>
+          <span className="text-xs text-background/70">{viewerIdx + 1}/{viewerGroup.statuses.length}</span>
         </div>
 
         <div className="relative flex flex-1 items-center justify-center overflow-hidden">
@@ -249,7 +289,7 @@ const StatusPage = () => {
               )}
               {mediaError ? (
                 <div className="flex flex-col items-center gap-2 text-center text-background/80">
-                  <p className="text-sm">This status couldn’t load.</p>
+                  <p className="text-sm">This status couldn't load.</p>
                   <button className="rounded-md border border-background/30 px-3 py-1 text-sm" onClick={() => { setMediaError(false); setMediaReady(false); }}>
                     Retry
                   </button>
@@ -282,7 +322,7 @@ const StatusPage = () => {
               )}
               {mediaError ? (
                 <div className="flex flex-col items-center gap-2 text-center text-background/80">
-                  <p className="text-sm">This status couldn’t load.</p>
+                  <p className="text-sm">This status couldn't load.</p>
                   <button className="rounded-md border border-background/30 px-3 py-1 text-sm" onClick={() => { setMediaError(false); setMediaReady(false); }}>
                     Retry
                   </button>
@@ -307,6 +347,28 @@ const StatusPage = () => {
               )}
             </div>
           )}
+        </div>
+
+        {/* Reply bar */}
+        <div className="flex items-center gap-2 px-4 py-3 bg-foreground/90 border-t border-background/10">
+          <input
+            ref={replyInputRef}
+            type="text"
+            value={replyText}
+            onChange={(e) => setReplyText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
+            onFocus={() => setIsPaused(true)}
+            onBlur={() => { if (!replyText) setIsPaused(false); }}
+            placeholder="Reply to status..."
+            className="flex-1 rounded-full bg-background/20 px-4 py-2.5 text-sm text-background placeholder:text-background/50 focus:outline-none focus:bg-background/30"
+          />
+          <button
+            onClick={handleSendReply}
+            disabled={!replyText.trim() || sendingReply}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors"
+          >
+            <Send className="h-4 w-4" />
+          </button>
         </div>
       </div>
     );
