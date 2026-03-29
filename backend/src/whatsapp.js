@@ -923,7 +923,7 @@ async function startConnection(userId, db, options = {}) {
     console.error(`startConnection error [${userId}]:`, err?.message || err);
     inst.connectionStatus = 'reconnecting';
     emit(userId, 'status', { status: 'reconnecting' });
-    inst.reconnectTimer = setTimeout(() => startConnection(userId, db), 3000);
+    scheduleReconnect(userId, db, inst.connectionGeneration);
   } finally {
     inst.isConnecting = false;
   }
