@@ -360,9 +360,6 @@ export function initWhatsApp(userId, db) {
 
 export function getOrInitWhatsApp(userId, db) {
   const inst = getInstance(userId);
-  if (!inst.client && inst.connectionStatus === 'disconnected') {
-    return initWhatsApp(userId, db);
-  }
   return {
     getState: () => getWhatsAppState(userId),
     sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
@@ -1264,6 +1261,7 @@ async function sendVoiceNote(userId, jid, audioBuffer) {
 
 async function clearSession(userId, db) {
   const inst = getInstance(userId);
+  inst.connectionGeneration++;
   inst.connectionStatus = 'disconnected';
   inst.qrCode = null;
   inst.pairingCode = null;
@@ -1289,9 +1287,10 @@ async function clearSession(userId, db) {
   };
 
   if (inst.client) {
-    try { await inst.client.logout(); } catch {}
-    try { await inst.client.destroy(); } catch {}
+    const clientRef = inst.client;
     inst.client = null;
+    try { await clientRef.logout(); } catch {}
+    try { await clientRef.destroy(); } catch {}
   }
 
   // Wipe user data
