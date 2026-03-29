@@ -1217,7 +1217,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 <div
                   ref={messagesViewportRef}
                   onScroll={syncAutoScrollState}
-                  className="absolute inset-0 overflow-y-auto overscroll-contain p-3 md:p-4 bg-chat-bg"
+                  className="absolute inset-0 overflow-y-auto overscroll-contain p-3 md:p-4 bg-chat-bg chat-wallpaper"
                 >
                   {/* Load older messages button */}
                   {hasMoreMessages && (
