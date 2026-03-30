@@ -1882,7 +1882,7 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
     } catch (err) {
       console.error('Typing indicator error:', err?.message || err);
     }
-  }, delay - 3000);
+  }, Math.max(delay - typingDuration, 1000));
 }
 
 // ── Send messages ──
