@@ -64,6 +64,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [forwardingMsg, setForwardingMsg] = useState<Message | null>(null);
   const [forwardSearch, setForwardSearch] = useState('');
   const [forwardSending, setForwardSending] = useState(false);
+  const [typingJids, setTypingJids] = useState<Record<string, boolean>>({});
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -220,6 +221,18 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       es.addEventListener('history_sync', handleHistoryEvent);
       es.addEventListener('contacts_sync', handleContactsEvent);
       es.addEventListener('message_edited', handleEditedEvent);
+      es.addEventListener('typing', (event: Event) => {
+        try {
+          const data = event instanceof MessageEvent ? JSON.parse(event.data) : null;
+          if (data?.jid != null) {
+            setTypingJids(prev => ({ ...prev, [data.jid]: !!data.isTyping }));
+            // Auto-clear typing after 10s in case we miss the stop event
+            if (data.isTyping) {
+              setTimeout(() => setTypingJids(prev => ({ ...prev, [data.jid]: false })), 10000);
+            }
+          }
+        } catch {}
+      });
       es.onerror = () => {};
     } catch {}
 
@@ -979,7 +992,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   <Avatar contact={selectedContact} size="lg" />
                   <div className="min-w-0 flex-1 text-left">
                     <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
-                    <p className="text-xs text-muted-foreground truncate">tap for info</p>
+                    {selectedContact.jid && typingJids[selectedContact.jid] ? (
+                      <p className="text-xs text-primary font-medium italic">typing...</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground truncate">tap for info</p>
+                    )}
                   </div>
                 </button>
                 <button

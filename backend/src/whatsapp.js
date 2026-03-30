@@ -1160,6 +1160,16 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
+    // ── Typing detection ──
+    client.on('chat_state_changed', (chat, state) => {
+      try {
+        const chatJid = toJid(chat?.id?._serialized || '');
+        if (!chatJid || chatJid === 'status@broadcast') return;
+        const isTyping = state === 'typing' || state === 'composing';
+        emit(userId, 'typing', { jid: chatJid, isTyping });
+      } catch {}
+    });
+
     // ── Message edit events ──
     client.on('message_edit', async (msg, newBody, prevBody) => {
       try {
@@ -1830,7 +1840,7 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   const inst = getInstance(userId);
   const now = Date.now();
   const lastReply = inst.autoReplyCooldowns.get(jid) || 0;
-  if (now - lastReply < 30000) return;
+  if (now - lastReply < 300000) return; // 5 minute cooldown to prevent duplicates
 
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
   if (!keyRow?.value) return;
@@ -1838,11 +1848,21 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   const promptRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
   const systemPrompt = promptRow?.value || '';
 
-  const messages = db.prepare(`
+  const rawMessages = db.prepare(`
     SELECT content, direction, type FROM messages 
-    WHERE contact_id = ? AND user_id = ? AND type = 'text' AND content IS NOT NULL AND content != ''
+    WHERE contact_id = ? AND user_id = ? AND (content IS NOT NULL OR type IN ('image','video','voice','sticker','document'))
     ORDER BY timestamp DESC LIMIT 50
   `).all(contactId, userId).reverse();
+
+  // Map non-text messages to descriptive placeholders so AI understands full context
+  const mediaLabels = { image: 'an image', video: 'a video', voice: 'a voice note', sticker: 'a sticker', document: 'a document' };
+  const messages = rawMessages.map(m => {
+    if (m.type === 'text' && m.content) return m;
+    if (m.type !== 'text') {
+      return { ...m, content: `[Sent ${mediaLabels[m.type] || 'media'}]`, type: 'text' };
+    }
+    return m;
+  }).filter(m => m.content);
 
   if (messages.length === 0) return;
 
@@ -1861,6 +1881,28 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
 
   let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+
+  // Duplicate check: compare against last 3 AI-sent messages
+  const recentSent = db.prepare(`
+    SELECT content FROM messages 
+    WHERE contact_id = ? AND user_id = ? AND direction = 'sent' AND type = 'text' AND content IS NOT NULL
+    ORDER BY timestamp DESC LIMIT 3
+  `).all(contactId, userId);
+
+  const isTooSimilar = recentSent.some(prev => {
+    if (!prev.content) return false;
+    const prevWords = new Set(prev.content.toLowerCase().split(/\s+/));
+    const newWords = replyText.toLowerCase().split(/\s+/);
+    if (newWords.length === 0) return false;
+    const overlap = newWords.filter(w => prevWords.has(w)).length / newWords.length;
+    return overlap > 0.7;
+  });
+
+  if (isTooSimilar) {
+    // Regenerate with anti-repetition instruction
+    replyText = await generateReply(keyRow.value, messages, systemPrompt + '\n\nIMPORTANT: Your last few replies were very similar. Say something completely different this time. Don\'t repeat yourself.', contactName || phone);
+    replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+  }
   // Use REPLY length for delay (not incoming message length)
   const delay = calculateDelay(replyText.length, speed);
   // Typing duration scales with reply length: ~1s per 10 chars, min 2s, max 12s
