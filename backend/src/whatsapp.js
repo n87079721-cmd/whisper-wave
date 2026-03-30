@@ -1871,6 +1871,28 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
 
   let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+
+  // Duplicate check: compare against last 3 AI-sent messages
+  const recentSent = db.prepare(`
+    SELECT content FROM messages 
+    WHERE contact_id = ? AND user_id = ? AND direction = 'sent' AND type = 'text' AND content IS NOT NULL
+    ORDER BY timestamp DESC LIMIT 3
+  `).all(contactId, userId);
+
+  const isTooSimilar = recentSent.some(prev => {
+    if (!prev.content) return false;
+    const prevWords = new Set(prev.content.toLowerCase().split(/\s+/));
+    const newWords = replyText.toLowerCase().split(/\s+/);
+    if (newWords.length === 0) return false;
+    const overlap = newWords.filter(w => prevWords.has(w)).length / newWords.length;
+    return overlap > 0.7;
+  });
+
+  if (isTooSimilar) {
+    // Regenerate with anti-repetition instruction
+    replyText = await generateReply(keyRow.value, messages, systemPrompt + '\n\nIMPORTANT: Your last few replies were very similar. Say something completely different this time. Don\'t repeat yourself.', contactName || phone);
+    replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+  }
   // Use REPLY length for delay (not incoming message length)
   const delay = calculateDelay(replyText.length, speed);
   // Typing duration scales with reply length: ~1s per 10 chars, min 2s, max 12s
