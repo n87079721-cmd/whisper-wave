@@ -1830,7 +1830,7 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
 
   if (messages.length === 0) return;
 
-  const lastMsgContent = messages[messages.length - 1]?.content || '';
+  // lastMsgContent no longer needed — delay is based on reply length
   const speed = getConfigValue(db, userId, 'ai_response_speed', 'normal');
 
   const reactionEmoji = shouldReact();
