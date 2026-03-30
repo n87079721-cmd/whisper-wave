@@ -1851,10 +1851,17 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   const inst = getInstance(userId);
   const now = Date.now();
   const lastReply = inst.autoReplyCooldowns.get(jid) || 0;
-  if (now - lastReply < 300000) return; // 5 minute cooldown to prevent duplicates
+  const cooldownMs = 120000; // 2 minute cooldown
+  if (now - lastReply < cooldownMs) {
+    console.log(`[${userId}] Skipping auto-reply to ${jid} — cooldown (${Math.round((cooldownMs - (now - lastReply)) / 1000)}s left)`);
+    return;
+  }
 
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
-  if (!keyRow?.value) return;
+  if (!keyRow?.value) {
+    console.log(`[${userId}] No OpenAI API key configured — skipping auto-reply`);
+    return;
+  }
 
   const promptRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
   const systemPrompt = promptRow?.value || '';
@@ -1875,7 +1882,10 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
     return m;
   }).filter(m => m.content);
 
-  if (messages.length === 0) return;
+  if (messages.length === 0) {
+    console.log(`[${userId}] No messages in context for ${jid} — skipping`);
+    return;
+  }
 
   // Dead conversation detection: if last incoming message is a low-effort reply, sometimes just don't respond (40% chance to skip)
   const lastIncoming = [...messages].reverse().find(m => m.direction === 'received');
@@ -1898,10 +1908,12 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
     setTimeout(() => sendReaction(userId, jid, originalMsg, reactionEmoji), reactDelay);
     if (!shouldAlsoReplyAfterReaction()) {
       inst.autoReplyCooldowns.set(jid, Date.now());
+      console.log(`[${userId}] Reacted only (no text reply) to ${jid}`);
       return;
     }
   }
 
+  console.log(`[${userId}] Generating AI reply for ${contactName || phone} (${jid})...`);
   let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
@@ -1922,7 +1934,7 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   });
 
   if (isTooSimilar) {
-    // Regenerate with anti-repetition instruction
+    console.log(`[${userId}] Reply too similar to recent — regenerating`);
     replyText = await generateReply(keyRow.value, messages, systemPrompt + '\n\nIMPORTANT: Your last few replies were very similar. Say something completely different this time. Don\'t repeat yourself.', contactName || phone);
     replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
   }
@@ -1930,6 +1942,8 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   const delay = calculateDelay(replyText.length, speed);
   // Typing duration scales with reply length: ~1s per 10 chars, min 2s, max 12s
   const typingDuration = Math.min(Math.max(Math.floor(replyText.length / 10) * 1000, 2000), 12000) + Math.floor(Math.random() * 2000);
+
+  console.log(`[${userId}] Will send reply to ${jid} in ${Math.round(delay / 1000)}s (speed=${speed}, typing=${Math.round(typingDuration / 1000)}s): "${replyText.substring(0, 60)}..."`);
 
   setTimeout(async () => {
     try {
@@ -1956,8 +1970,9 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
           `).run(replyId, userId, contactId, jid, replyText);
           db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'auto_reply_sent', ?)`).run(userId, JSON.stringify({ contactId }));
           inst.autoReplyCooldowns.set(jid, Date.now());
+          console.log(`[${userId}] ✓ Auto-reply sent to ${jid}: "${replyText.substring(0, 60)}..."`);
         } catch (err) {
-          console.error('Failed to send auto-reply:', err?.message || err);
+          console.error(`[${userId}] Failed to send auto-reply to ${jid}:`, err?.message || err);
         }
       }, typingDuration);
     } catch (err) {
