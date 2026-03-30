@@ -528,18 +528,42 @@ export function createApiRouter(db) {
 
   // ── Contacts ──────────────────────────────────────────────
   router.get('/contacts', (req, res) => {
-    const contacts = db.prepare(`
-      SELECT c.*, COALESCE(mc.message_count, 0) as message_count
-      FROM contacts c
-      LEFT JOIN (
-        SELECT contact_id, COUNT(*) as message_count
-        FROM messages
-        WHERE user_id = ?
-        GROUP BY contact_id
-      ) mc ON mc.contact_id = c.id
-      WHERE c.user_id = ? AND c.is_group = 0
-      ORDER BY c.updated_at DESC
-    `).all(req.userId, req.userId);
+    const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
+    const offset = parseInt(req.query.offset) || 0;
+    const search = req.query.search || '';
+
+    let contacts;
+    if (search) {
+      const q = `%${search}%`;
+      contacts = db.prepare(`
+        SELECT c.*, COALESCE(mc.message_count, 0) as message_count
+        FROM contacts c
+        LEFT JOIN (
+          SELECT contact_id, COUNT(*) as message_count
+          FROM messages
+          WHERE user_id = ?
+          GROUP BY contact_id
+        ) mc ON mc.contact_id = c.id
+        WHERE c.user_id = ? AND c.is_group = 0
+          AND (c.name LIKE ? OR c.phone LIKE ?)
+        ORDER BY c.updated_at DESC
+        LIMIT ? OFFSET ?
+      `).all(req.userId, req.userId, q, q, limit, offset);
+    } else {
+      contacts = db.prepare(`
+        SELECT c.*, COALESCE(mc.message_count, 0) as message_count
+        FROM contacts c
+        LEFT JOIN (
+          SELECT contact_id, COUNT(*) as message_count
+          FROM messages
+          WHERE user_id = ?
+          GROUP BY contact_id
+        ) mc ON mc.contact_id = c.id
+        WHERE c.user_id = ? AND c.is_group = 0
+        ORDER BY c.updated_at DESC
+        LIMIT ? OFFSET ?
+      `).all(req.userId, req.userId, limit, offset);
+    }
     res.json(contacts);
   });
 
