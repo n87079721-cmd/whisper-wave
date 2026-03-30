@@ -1321,78 +1321,35 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   </div>
                 )}
 
-                {/* Voice preview removed */}
-
-                {/* Recording UI */}
-                {isRecording ? (
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={cancelRecording}
-                      className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center text-destructive hover:bg-destructive/20 transition-colors flex-shrink-0"
-                      title="Cancel recording"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                    <div className="flex-1 flex items-center gap-2 px-4 py-2.5 rounded-full bg-destructive/5 border border-destructive/20">
-                      <div className="w-2.5 h-2.5 rounded-full bg-destructive animate-pulse" />
-                      <span className="text-sm font-medium text-destructive">{formatRecordingTime(recordingDuration)}</span>
-                      <span className="text-xs text-muted-foreground">Recording...</span>
-                    </div>
-                    <button
-                      onClick={stopRecording}
-                      disabled={sending}
-                      className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
-                      title="Send voice note"
-                    >
-                      {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex gap-2">
-                      {/* Attach photo/file */}
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors flex-shrink-0"
-                        title="Attach photo or file"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
-                      <input
-                        value={replyText}
-                        onChange={(e) => {
-                          const nextValue = e.target.value;
-                          setReplyText(nextValue);
-                          if (selectedContact?.id) replyDraftsRef.current[selectedContact.id] = nextValue;
-                          // preview removed
-                        }}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
-                        placeholder={pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
-                        className="flex-1 px-4 py-2.5 rounded-full bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
-                      />
-                      {/* Mic button for live recording (only when no text typed) */}
-                      {!replyText.trim() && !pendingAttachment ? (
-                        <button
-                          onMouseDown={startRecording}
-                          onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
-                          className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 active:bg-primary active:text-primary-foreground transition-colors flex-shrink-0"
-                          title="Hold to record voice note"
-                        >
-                          <Mic className="w-4 h-4" />
-                        </button>
-                      ) : (
-                        <button
-                          onClick={handleSendReply}
-                          disabled={(!replyText.trim() && !pendingAttachment) || sending}
-                          className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
-                        >
-                          {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                        </button>
-                      )}
-                    </div>
-                  </>
-                )}
+                {/* Composer */}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors flex-shrink-0"
+                    title="Attach photo or file"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                  <input
+                    value={replyText}
+                    onChange={(e) => {
+                      const nextValue = e.target.value;
+                      setReplyText(nextValue);
+                      if (selectedContact?.id) replyDraftsRef.current[selectedContact.id] = nextValue;
+                    }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
+                    placeholder={pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
+                    className="flex-1 px-4 py-2.5 rounded-full bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
+                  />
+                  <button
+                    onClick={handleSendReply}
+                    disabled={(!replyText.trim() && !pendingAttachment) || sending}
+                    className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
+                  >
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
             </>
           ) : null}
