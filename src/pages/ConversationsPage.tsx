@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Mic, Send, Loader2, Volume2, Play, Square, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film, Eye, EyeOff, Pencil, Check, PhoneMissed, Star, Reply, User } from 'lucide-react';
+import { Search, Send, Loader2, Volume2, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film, Eye, EyeOff, Pencil, Check, PhoneMissed, Star, Reply, User, Copy, Forward } from 'lucide-react';
 import { api, type Contact, type Message, type Voice } from '@/lib/api';
 import { toast } from 'sonner';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
@@ -61,12 +61,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [profileMedia, setProfileMedia] = useState<Message[]>([]);
   const [profileMediaLoading, setProfileMediaLoading] = useState(false);
   const swipeRef = useRef<{ startX: number; msgId: string } | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingDuration, setRecordingDuration] = useState(0);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordingChunksRef = useRef<Blob[]>([]);
-  const recordingTimerRef = useRef<number | null>(null);
-  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const [forwardingMsg, setForwardingMsg] = useState<Message | null>(null);
+  const [forwardSearch, setForwardSearch] = useState('');
+  const [forwardSending, setForwardSending] = useState(false);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -125,8 +122,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     setLoadingOlder(false);
   }, [selectedContact, loadingOlder, hasMoreMessages, messages]);
 
-  const refreshAllContacts = useCallback(async () => {
-    try { setAllContacts(await api.getContacts()); } catch {}
+  const refreshAllContacts = useCallback(async (search?: string) => {
+    try { setAllContacts(await api.getContacts({ search, limit: 50 })); } catch {}
   }, []);
 
   const refreshConversations = useCallback(async () => {
@@ -165,9 +162,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [refreshConversations]);
 
   useEffect(() => {
-    if (!showNewChat || allContacts.length > 0) return;
-    refreshAllContacts();
-  }, [allContacts.length, refreshAllContacts, showNewChat]);
+    if (!showNewChat) return;
+    const timer = setTimeout(() => refreshAllContacts(contactSearch || undefined), contactSearch ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [showNewChat, contactSearch, refreshAllContacts]);
 
   useEffect(() => {
     if (!initialContact) return;
@@ -198,12 +196,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     const handleHistoryEvent = () => {
       scheduleConversationRefresh();
       refreshSelectedConversation();
-      if (showNewChat) scheduleContactsRefresh();
+      if (showNewChat) refreshAllContacts(contactSearch || undefined);
     };
 
     const handleContactsEvent = () => {
       scheduleConversationRefresh();
-      if (showNewChat) scheduleContactsRefresh();
+      if (showNewChat) refreshAllContacts(contactSearch || undefined);
     };
 
     const handleEditedEvent = (event: Event) => {
@@ -228,7 +226,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     const interval = window.setInterval(() => {
       refreshConversations();
       refreshSelectedConversation();
-      if (showNewChat) refreshAllContacts();
+      if (showNewChat) refreshAllContacts(contactSearch || undefined);
     }, 30000);
 
     return () => {
@@ -428,153 +426,39 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     }
   };
 
-  // Voice preview removed — AI voice is in Voice Studio page
+  // Copy message text to clipboard
+  const handleCopyMessage = useCallback((msg: Message) => {
+    const text = msg.content || '';
+    if (!text) { toast.error('Nothing to copy'); return; }
+    navigator.clipboard.writeText(text).then(() => toast.success('Copied')).catch(() => toast.error('Failed to copy'));
+  }, []);
 
-  const startRecording = useCallback(async () => {
+  // Forward message
+  const handleForwardMessage = useCallback(async (msg: Message, targetContact: Contact) => {
+    setForwardSending(true);
     try {
-      if (!window.isSecureContext) {
-        throw new Error('HTTPS_REQUIRED');
-      }
-
-      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-        throw new Error('UNSUPPORTED_RECORDING');
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      recordingStreamRef.current = stream;
-      recordingChunksRef.current = [];
-
-      const mimeType = [
-        'audio/webm;codecs=opus',
-        'audio/ogg;codecs=opus',
-        'audio/mp4',
-        'audio/webm',
-      ].find((candidate) => MediaRecorder.isTypeSupported(candidate));
-
-      const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordingChunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        recordingStreamRef.current = null;
-
-        if (recordingTimerRef.current) {
-          clearInterval(recordingTimerRef.current);
-          recordingTimerRef.current = null;
-        }
-
-        const resolvedMimeType = recorder.mimeType || mimeType || 'audio/webm';
-        const blob = new Blob(recordingChunksRef.current, { type: resolvedMimeType });
-        recordingChunksRef.current = [];
-
-        if (blob.size < 1000) {
-          setIsRecording(false);
-          setRecordingDuration(0);
-          return;
-        }
-
-        // Send the recording
-        const activeContact = selectedContactRef.current;
-        if (!activeContact) {
-          setIsRecording(false);
-          setRecordingDuration(0);
-          return;
-        }
-
-        setSending(true);
-        try {
-          const reader = new FileReader();
-          const base64 = await new Promise<string>((resolve, reject) => {
-            reader.onload = () => {
-              const result = String(reader.result || '');
-              resolve(result.includes(',') ? result.split(',').pop() || '' : result);
-            };
-            reader.onerror = () => reject(new Error('Failed to read recording'));
-            reader.readAsDataURL(blob);
-          });
-
-          const isTemp = activeContact.id.startsWith('temp-');
-          const res = isTemp
-            ? await api.sendVoiceRecordingToPhone(activeContact.phone || '', base64, resolvedMimeType)
-            : await api.sendVoiceRecording(activeContact.id, base64, resolvedMimeType);
-
-          if (res.error) throw new Error(res.error);
-          toast.success('Voice note sent');
-
-          const refreshedConversations = await api.getConversations();
-          setConversations(refreshedConversations);
-
-          const nextContact = (res.contactId && refreshedConversations.find(c => c.id === res.contactId))
-            || refreshedConversations.find(c => c.id === activeContact.id)
-            || null;
-
-          if (selectedContactRef.current?.id === activeContact.id && nextContact) {
-            setSelectedContact(nextContact);
-            await refreshMessages(nextContact.id, { forceScroll: true });
-          }
-        } catch (err: any) {
-          toast.error(err.message || 'Failed to send voice note');
-        } finally {
-          setSending(false);
-        }
-
-        setIsRecording(false);
-        setRecordingDuration(0);
-      };
-
-      recorder.start(250);
-      setIsRecording(true);
-      setRecordingDuration(0);
-
-      recordingTimerRef.current = window.setInterval(() => {
-        setRecordingDuration(prev => prev + 1);
-      }, 1000);
+      const res = await api.forwardMessage(msg.id, targetContact.id);
+      if (res.error) throw new Error(res.error);
+      toast.success('Message forwarded');
+      setForwardingMsg(null);
+      setForwardSearch('');
     } catch (err: any) {
-      if (err?.message === 'HTTPS_REQUIRED') toast.error('Microphone needs HTTPS — open your secure domain, not the raw IP address.');
-      else if (err?.message === 'UNSUPPORTED_RECORDING') toast.error('This browser does not support live voice recording.');
-      else if (err?.name === 'NotAllowedError') toast.error('Microphone access denied — allow mic permission in your browser settings.');
-      else if (err?.name === 'NotFoundError') toast.error('No microphone was found on this device.');
-      else if (err?.name === 'NotReadableError') toast.error('Your microphone is busy in another app.');
-      else toast.error('Failed to start voice recording.');
-      setIsRecording(false);
-    }
-  }, [refreshMessages]);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+      toast.error(err.message || 'Failed to forward');
+    } finally {
+      setForwardSending(false);
     }
   }, []);
 
-  const cancelRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.ondataavailable = null;
-      mediaRecorderRef.current.onstop = () => {
-        recordingStreamRef.current?.getTracks().forEach(t => t.stop());
-        recordingStreamRef.current = null;
-      };
-      mediaRecorderRef.current.stop();
-    }
-    if (recordingTimerRef.current) {
-      clearInterval(recordingTimerRef.current);
-      recordingTimerRef.current = null;
-    }
-    setIsRecording(false);
-    setRecordingDuration(0);
-    recordingChunksRef.current = [];
-  }, []);
-
-  const formatRecordingTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
+  const forwardFilteredContacts = useMemo(() => {
+    const all = [...conversations, ...allContacts];
+    const seen = new Set<string>();
+    const unique = all.filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
+    if (!forwardSearch.trim()) return unique.slice(0, 30);
+    const q = forwardSearch.toLowerCase();
+    return unique.filter(c =>
+      getContactDisplayName(c).toLowerCase().includes(q) || cleanContactPhone(c.phone || '').includes(q)
+    ).slice(0, 30);
+  }, [conversations, allContacts, forwardSearch]);
 
   const handleStartNewChat = async (contact?: Contact) => {
     if (contact) {
@@ -618,12 +502,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   };
 
   const filteredNewChatContacts = useMemo(() => {
-    if (!contactSearch.trim()) return allContacts.slice(0, 30);
-    const q = contactSearch.toLowerCase();
-    return allContacts.filter(c =>
-      getContactDisplayName(c).toLowerCase().includes(q) || cleanContactPhone(c.phone || '').includes(q)
-    ).slice(0, 30);
-  }, [allContacts, contactSearch]);
+    return allContacts.slice(0, 50);
+  }, [allContacts]);
 
   const showChatOnMobile = !!selectedContact;
 
@@ -1298,6 +1178,22 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                     >
                                       <Reply className="w-3 h-3" />
                                     </button>
+                                    {msg.content && (
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleCopyMessage(msg); }}
+                                        className="inline-btn p-0.5 hover:text-primary text-muted-foreground/50 md:text-muted-foreground"
+                                        title="Copy"
+                                      >
+                                        <Copy className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setForwardingMsg(msg); if (allContacts.length === 0) refreshAllContacts(); }}
+                                      className="inline-btn p-0.5 hover:text-primary text-muted-foreground/50 md:text-muted-foreground"
+                                      title="Forward"
+                                    >
+                                      <Forward className="w-3 h-3" />
+                                    </button>
                                     <button
                                       onClick={(e) => { e.stopPropagation(); handleStarMessage(msg.id, !!msg.is_starred); }}
                                       className="inline-btn p-0.5 hover:text-yellow-500 text-muted-foreground/50 md:text-muted-foreground"
@@ -1438,78 +1334,35 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   </div>
                 )}
 
-                {/* Voice preview removed */}
-
-                {/* Recording UI */}
-                {isRecording ? (
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={cancelRecording}
-                      className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center text-destructive hover:bg-destructive/20 transition-colors flex-shrink-0"
-                      title="Cancel recording"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                    <div className="flex-1 flex items-center gap-2 px-4 py-2.5 rounded-full bg-destructive/5 border border-destructive/20">
-                      <div className="w-2.5 h-2.5 rounded-full bg-destructive animate-pulse" />
-                      <span className="text-sm font-medium text-destructive">{formatRecordingTime(recordingDuration)}</span>
-                      <span className="text-xs text-muted-foreground">Recording...</span>
-                    </div>
-                    <button
-                      onClick={stopRecording}
-                      disabled={sending}
-                      className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
-                      title="Send voice note"
-                    >
-                      {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex gap-2">
-                      {/* Attach photo/file */}
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors flex-shrink-0"
-                        title="Attach photo or file"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
-                      <input
-                        value={replyText}
-                        onChange={(e) => {
-                          const nextValue = e.target.value;
-                          setReplyText(nextValue);
-                          if (selectedContact?.id) replyDraftsRef.current[selectedContact.id] = nextValue;
-                          // preview removed
-                        }}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
-                        placeholder={pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
-                        className="flex-1 px-4 py-2.5 rounded-full bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
-                      />
-                      {/* Mic button for live recording (only when no text typed) */}
-                      {!replyText.trim() && !pendingAttachment ? (
-                        <button
-                          onMouseDown={startRecording}
-                          onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
-                          className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 active:bg-primary active:text-primary-foreground transition-colors flex-shrink-0"
-                          title="Hold to record voice note"
-                        >
-                          <Mic className="w-4 h-4" />
-                        </button>
-                      ) : (
-                        <button
-                          onClick={handleSendReply}
-                          disabled={(!replyText.trim() && !pendingAttachment) || sending}
-                          className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
-                        >
-                          {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                        </button>
-                      )}
-                    </div>
-                  </>
-                )}
+                {/* Composer */}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors flex-shrink-0"
+                    title="Attach photo or file"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                  <input
+                    value={replyText}
+                    onChange={(e) => {
+                      const nextValue = e.target.value;
+                      setReplyText(nextValue);
+                      if (selectedContact?.id) replyDraftsRef.current[selectedContact.id] = nextValue;
+                    }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
+                    placeholder={pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
+                    className="flex-1 px-4 py-2.5 rounded-full bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
+                  />
+                  <button
+                    onClick={handleSendReply}
+                    disabled={(!replyText.trim() && !pendingAttachment) || sending}
+                    className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-40 flex-shrink-0"
+                  >
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
             </>
           ) : null}
@@ -1652,6 +1505,52 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   </button>
                 ))}
                 {filteredNewChatContacts.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-6">No contacts found</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== Forward message overlay ===== */}
+        {forwardingMsg && (
+          <div className="fixed inset-0 z-[75] flex items-end bg-background/80 backdrop-blur-sm md:items-center md:justify-center" onClick={() => { setForwardingMsg(null); setForwardSearch(''); }}>
+            <div className="w-full overflow-hidden rounded-t-2xl border border-border bg-card shadow-2xl md:w-[24rem] md:max-h-[70vh] md:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground">Forward to...</h3>
+                <button onClick={() => { setForwardingMsg(null); setForwardSearch(''); }} className="p-1 text-muted-foreground hover:text-foreground">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-3 border-b border-border">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    value={forwardSearch}
+                    onChange={(e) => setForwardSearch(e.target.value)}
+                    placeholder="Search contacts..."
+                    className="w-full pl-9 pr-3 py-2 rounded-lg bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                    autoFocus
+                  />
+                </div>
+              </div>
+              <div className="overflow-y-auto max-h-[50vh]">
+                {forwardFilteredContacts.map(contact => (
+                  <button
+                    key={contact.id}
+                    onClick={() => handleForwardMessage(forwardingMsg, contact)}
+                    disabled={forwardSending}
+                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-secondary/50 transition-colors disabled:opacity-50"
+                  >
+                    <Avatar contact={contact} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground truncate">{getContactDisplayName(contact)}</p>
+                      <p className="text-xs text-muted-foreground">{getContactDisplayMeta(contact)}</p>
+                    </div>
+                    {forwardSending && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground flex-shrink-0" />}
+                  </button>
+                ))}
+                {forwardFilteredContacts.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center py-6">No contacts found</p>
                 )}
               </div>

@@ -193,8 +193,13 @@ export const api = {
   },
 
   // Contacts
-  getContacts() {
-    return requestJson<Contact[]>('/api/contacts');
+  getContacts(options?: { search?: string; limit?: number; offset?: number }) {
+    const params = new URLSearchParams();
+    if (options?.search) params.set('search', options.search);
+    if (options?.limit) params.set('limit', String(options.limit));
+    if (options?.offset) params.set('offset', String(options.offset));
+    const qs = params.toString();
+    return requestJson<Contact[]>(`/api/contacts${qs ? '?' + qs : ''}`);
   },
 
   // Conversations
@@ -356,6 +361,14 @@ export const api = {
 
   deleteConversation(contactId: string) {
     return requestJson<{ success: boolean; deletedMessages?: number }>(`/api/conversations/${contactId}`, { method: 'DELETE' });
+  },
+
+  forwardMessage(messageId: string, targetContactId: string) {
+    return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/forward/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId, targetContactId }),
+    });
   },
 
   archiveChat(contactId: string, archive: boolean) {
