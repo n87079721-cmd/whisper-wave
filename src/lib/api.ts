@@ -363,6 +363,14 @@ export const api = {
     return requestJson<{ success: boolean; deletedMessages?: number }>(`/api/conversations/${contactId}`, { method: 'DELETE' });
   },
 
+  forwardMessage(messageId: string, targetContactId: string) {
+    return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/forward/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId, targetContactId }),
+    });
+  },
+
   archiveChat(contactId: string, archive: boolean) {
     return requestJson<{ success: boolean; archived: boolean }>(`/api/archive/${contactId}`, {
       method: 'POST',
