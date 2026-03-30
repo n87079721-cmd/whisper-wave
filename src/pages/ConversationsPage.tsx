@@ -201,7 +201,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
     const handleContactsEvent = () => {
       scheduleConversationRefresh();
-      if (showNewChat) scheduleContactsRefresh();
+      if (showNewChat) refreshAllContacts(contactSearch || undefined);
     };
 
     const handleEditedEvent = (event: Event) => {
