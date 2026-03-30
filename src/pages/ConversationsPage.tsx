@@ -502,12 +502,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   };
 
   const filteredNewChatContacts = useMemo(() => {
-    if (!contactSearch.trim()) return allContacts.slice(0, 30);
-    const q = contactSearch.toLowerCase();
-    return allContacts.filter(c =>
-      getContactDisplayName(c).toLowerCase().includes(q) || cleanContactPhone(c.phone || '').includes(q)
-    ).slice(0, 30);
-  }, [allContacts, contactSearch]);
+    return allContacts.slice(0, 50);
+  }, [allContacts]);
 
   const showChatOnMobile = !!selectedContact;
 
