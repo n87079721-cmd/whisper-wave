@@ -992,7 +992,11 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   <Avatar contact={selectedContact} size="lg" />
                   <div className="min-w-0 flex-1 text-left">
                     <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
-                    <p className="text-xs text-muted-foreground truncate">tap for info</p>
+                    {selectedContact.jid && typingJids[selectedContact.jid] ? (
+                      <p className="text-xs text-primary font-medium italic">typing...</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground truncate">tap for info</p>
+                    )}
                   </div>
                 </button>
                 <button
