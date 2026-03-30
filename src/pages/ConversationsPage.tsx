@@ -64,6 +64,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [forwardingMsg, setForwardingMsg] = useState<Message | null>(null);
   const [forwardSearch, setForwardSearch] = useState('');
   const [forwardSending, setForwardSending] = useState(false);
+  const [typingJids, setTypingJids] = useState<Record<string, boolean>>({});
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
