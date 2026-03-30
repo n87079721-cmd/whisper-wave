@@ -1830,7 +1830,7 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   const inst = getInstance(userId);
   const now = Date.now();
   const lastReply = inst.autoReplyCooldowns.get(jid) || 0;
-  if (now - lastReply < 30000) return;
+  if (now - lastReply < 300000) return; // 5 minute cooldown to prevent duplicates
 
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
   if (!keyRow?.value) return;
