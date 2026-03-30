@@ -1866,6 +1866,18 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
 
   if (messages.length === 0) return;
 
+  // Dead conversation detection: if last incoming message is a low-effort reply, sometimes just don't respond (40% chance to skip)
+  const lastIncoming = [...messages].reverse().find(m => m.direction === 'received');
+  if (lastIncoming?.content) {
+    const lowEffort = ['lol', 'ok', 'okay', 'k', 'yeah', 'yea', 'ya', 'mhm', 'hmm', 'hm', 'cool', 'nice', 'true', 'facts', 'bet', 'word', 'yep', 'yup', 'aight', 'ight', 'lmao', 'haha', '😂', '💀', '👍', '😭'];
+    if (lowEffort.includes(lastIncoming.content.toLowerCase().trim())) {
+      if (Math.random() < 0.4) {
+        console.log(`[${userId}] Skipping reply — dead convo detected ("${lastIncoming.content}")`);
+        return;
+      }
+    }
+  }
+
   // lastMsgContent no longer needed — delay is based on reply length
   const speed = getConfigValue(db, userId, 'ai_response_speed', 'normal');
 
