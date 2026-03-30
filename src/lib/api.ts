@@ -509,6 +509,16 @@ export const api = {
   adminDeleteUser(userId: string) {
     return requestJson<{ success: boolean }>(`/api/admin/users/${userId}`, { method: 'DELETE' });
   },
+
+  getAutoReplyDebug() {
+    return requestJson<Array<{
+      timestamp: string;
+      jid: string;
+      contact: string;
+      decision: string;
+      detail: string;
+    }>>('/api/auto-reply-debug');
+  },
 };
 
 // Types
