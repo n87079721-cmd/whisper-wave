@@ -629,6 +629,20 @@ function scheduleReconnect(userId, db, generation) {
   }, delay);
 }
 
+function normalizeConnectionReason(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function requiresFreshPairing(reason) {
+  const normalized = normalizeConnectionReason(reason);
+  return normalized === 'LOGOUT' || normalized === 'UNPAIRED' || normalized === 'UNPAIRED_IDLE';
+}
+
+function isRecoverableConnectionIssue(reason) {
+  const normalized = normalizeConnectionReason(reason);
+  return normalized === 'CONFLICT' || normalized === 'TIMEOUT' || normalized === 'UNLAUNCHED';
+}
+
 function startHeartbeat(userId, db) {
   const inst = getInstance(userId);
   stopHeartbeat(userId);
@@ -788,6 +802,8 @@ async function startConnection(userId, db, options = {}) {
         clientId: userId,
         dataPath: path.join(DATA_DIR, 'wwebjs_auth'),
       }),
+      takeoverOnConflict: true,
+      takeoverTimeoutMs: 0,
       puppeteer: {
         headless: true,
         args: [
@@ -897,15 +913,30 @@ async function startConnection(userId, db, options = {}) {
       if (generation !== inst.connectionGeneration) return;
       noteConnectionActivity(userId, `state:${state}`);
       console.log(`🔄 [${userId}] Connection state changed: ${state}`);
-      if (state === 'CONFLICT' || state === 'UNLAUNCHED' || state === 'UNPAIRED') {
-        // Don't auto-reconnect for these — user action needed
-      } else if (state === 'TIMEOUT' || state === 'PAIRING') {
+      if (requiresFreshPairing(state)) {
+        inst.connectionStatus = 'disconnected';
+        inst.reconnectAttempt = 0;
+        emit(userId, 'status', { status: 'disconnected' });
+      } else if (isRecoverableConnectionIssue(state)) {
+        inst.connectionStatus = 'reconnecting';
+        emit(userId, 'status', { status: 'reconnecting' });
+        stopHeartbeat(userId);
+        scheduleReconnect(userId, db, generation);
+      } else if (state === 'PAIRING') {
         if (inst.connectionStatus === 'connected') {
           inst.connectionStatus = 'reconnecting';
           emit(userId, 'status', { status: 'reconnecting' });
           scheduleReconnect(userId, db, generation);
         } else {
-          armConnectionWatchdog(userId, db, generation, state === 'PAIRING' ? 'pairing' : 'restoring session');
+          armConnectionWatchdog(userId, db, generation, 'pairing');
+        }
+      } else if (state === 'TIMEOUT') {
+        if (inst.connectionStatus === 'connected') {
+          inst.connectionStatus = 'reconnecting';
+          emit(userId, 'status', { status: 'reconnecting' });
+          scheduleReconnect(userId, db, generation);
+        } else {
+          armConnectionWatchdog(userId, db, generation, 'restoring session');
         }
       } else if (inst.connectionStatus !== 'connected' && inst.connectionStatus !== 'qr_waiting') {
         armConnectionWatchdog(userId, db, generation, state === 'OPENING' ? 'opening transport' : 'restoring session');
@@ -933,7 +964,7 @@ async function startConnection(userId, db, options = {}) {
       inst.contactSyncInProgress = false;
       if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
 
-      if (reason === 'LOGOUT' || reason === 'CONFLICT') {
+      if (requiresFreshPairing(reason)) {
         inst.connectionStatus = 'disconnected';
         inst.reconnectAttempt = 0;
         emit(userId, 'status', { status: 'disconnected' });
