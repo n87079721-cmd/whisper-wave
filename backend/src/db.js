@@ -26,6 +26,39 @@ export function initDatabase() {
   ensureCurrentTables(db);
   ensureIndexes(db);
 
+  // Double-check config table has user_id after migration (defensive)
+  try {
+    if (!hasColumn(db, 'config', 'user_id')) {
+      console.log('⚠️ Config table still missing user_id after migration — forcing fix');
+      db.pragma('foreign_keys = OFF');
+      try {
+        const rows = db.prepare('SELECT key, value FROM config').all();
+        db.exec('DROP TABLE config');
+        db.exec(`
+          CREATE TABLE config (
+            user_id TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT,
+            PRIMARY KEY (user_id, key)
+          );
+        `);
+        // Re-insert with first user's ID
+        const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
+        if (firstUser && rows.length > 0) {
+          const insert = db.prepare('INSERT OR REPLACE INTO config (user_id, key, value) VALUES (?, ?, ?)');
+          for (const row of rows) {
+            insert.run(firstUser.id, row.key, row.value);
+          }
+          console.log(`✅ Migrated ${rows.length} config rows for user ${firstUser.id}`);
+        }
+      } finally {
+        db.pragma('foreign_keys = ON');
+      }
+    }
+  } catch (err) {
+    console.error('Config migration fallback error:', err?.message);
+  }
+
   return db;
 }
 

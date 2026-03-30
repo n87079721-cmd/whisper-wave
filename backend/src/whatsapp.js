@@ -1776,8 +1776,16 @@ export function getAutoReplyDebugLogs(userId) {
 }
 
 function getConfigValue(db, userId, key, fallback) {
-  const row = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = ?").get(userId, key);
-  return row?.value ?? fallback;
+  try {
+    const row = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = ?").get(userId, key);
+    if (row) return row.value ?? fallback;
+  } catch {}
+  // Fallback: query without user_id (legacy schema)
+  try {
+    const row = db.prepare("SELECT value FROM config WHERE key = ?").get(key);
+    return row?.value ?? fallback;
+  } catch {}
+  return fallback;
 }
 
 function isWithinActiveHours(db, userId) {
@@ -1835,9 +1843,9 @@ async function sendReaction(userId, jid, msg, emoji) {
 }
 
 async function handleAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg) {
-  const autoConfig = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'automation_enabled'").get(userId);
-  if (!autoConfig || autoConfig.value !== 'true') {
-    logAutoReplyDebug(userId, jid, contactName, 'SKIP:AUTOMATION_OFF', `automation_enabled=${autoConfig?.value || 'not set'}`);
+  const autoValue = getConfigValue(db, userId, 'automation_enabled', 'true');
+  if (autoValue !== 'true') {
+    logAutoReplyDebug(userId, jid, contactName, 'SKIP:AUTOMATION_OFF', `automation_enabled=${autoValue}`);
     return;
   }
 
@@ -1891,13 +1899,20 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   }
 
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
-  if (!keyRow?.value) {
+  // Fallback: try without user_id too
+  let apiKey = keyRow?.value;
+  if (!apiKey) {
+    try {
+      const fallbackRow = db.prepare("SELECT value FROM config WHERE key = 'openai_api_key'").get();
+      apiKey = fallbackRow?.value;
+    } catch {}
+  }
+  if (!apiKey) {
     logAutoReplyDebug(userId, jid, contactName, 'SKIP:NO_API_KEY', 'OpenAI API key not configured');
     return;
   }
 
-  const promptRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
-  const systemPrompt = promptRow?.value || '';
+  const systemPrompt = getConfigValue(db, userId, 'ai_system_prompt', '');
 
   const rawMessages = db.prepare(`
     SELECT content, direction, type FROM messages 
@@ -1947,7 +1962,7 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   }
 
   logAutoReplyDebug(userId, jid, contactName, 'GENERATING', 'Calling OpenAI...');
-  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
+  let replyText = await generateReply(apiKey, messages, systemPrompt, contactName || phone);
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
   // Duplicate check: compare against last 3 AI-sent messages
@@ -1968,7 +1983,7 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
 
   if (isTooSimilar) {
     logAutoReplyDebug(userId, jid, contactName, 'REGENERATING', 'Reply too similar to recent, retrying');
-    replyText = await generateReply(keyRow.value, messages, systemPrompt + '\n\nIMPORTANT: Your last few replies were very similar. Say something completely different this time. Don\'t repeat yourself.', contactName || phone);
+    replyText = await generateReply(apiKey, messages, systemPrompt + '\n\nIMPORTANT: Your last few replies were very similar. Say something completely different this time. Don\'t repeat yourself.', contactName || phone);
     replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
   }
   // Use REPLY length for delay (not incoming message length)

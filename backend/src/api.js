@@ -1698,12 +1698,29 @@ RULES:
 }
 
 function getConfig(db, userId, key) {
-  const row = db.prepare('SELECT value FROM config WHERE user_id = ? AND key = ?').get(userId, key);
-  return row?.value || null;
+  try {
+    const row = db.prepare('SELECT value FROM config WHERE user_id = ? AND key = ?').get(userId, key);
+    if (row) return row.value || null;
+  } catch {}
+  // Fallback: query without user_id (legacy schema)
+  try {
+    const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key);
+    return row?.value || null;
+  } catch {}
+  return null;
 }
 
 function setConfig(db, userId, key, value) {
-  db.prepare('INSERT OR REPLACE INTO config (user_id, key, value) VALUES (?, ?, ?)').run(userId, key, value);
+  try {
+    db.prepare('INSERT OR REPLACE INTO config (user_id, key, value) VALUES (?, ?, ?)').run(userId, key, value);
+  } catch {
+    // Fallback: legacy schema without user_id
+    try {
+      db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, value);
+    } catch (err) {
+      console.error('setConfig fallback error:', err?.message);
+    }
+  }
 }
 
 function getStats(db, userId) {
