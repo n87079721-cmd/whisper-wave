@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -15,12 +15,35 @@ interface UserAccount {
   is_current: boolean;
 }
 
+interface DebugLogEntry {
+  timestamp: string;
+  jid: string;
+  contact: string;
+  decision: string;
+  detail: string;
+}
+
 const AdminPage = () => {
   const { user } = useAuth();
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [debugLogs, setDebugLogs] = useState<DebugLogEntry[]>([]);
+  const [debugLoading, setDebugLoading] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
+
+  const fetchDebugLogs = useCallback(async () => {
+    setDebugLoading(true);
+    try {
+      const data = await api.getAutoReplyDebug();
+      setDebugLogs(data.reverse());
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load debug logs');
+    } finally {
+      setDebugLoading(false);
+    }
+  }, []);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -156,6 +179,61 @@ const AdminPage = () => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </motion.div>
+
+      {/* Auto-Reply Debug Logs */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.08 }}
+        className="rounded-xl border border-border bg-card overflow-hidden"
+      >
+        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+          <Bug className="w-4 h-4 text-muted-foreground" />
+          <span className="text-sm font-medium text-foreground">AI Auto-Reply Debug Log</span>
+          <button
+            onClick={() => { setShowDebug(!showDebug); if (!showDebug) fetchDebugLogs(); }}
+            className="ml-auto px-3 py-1 rounded-lg bg-secondary text-foreground text-xs font-medium hover:bg-secondary/80 transition-colors"
+          >
+            {showDebug ? 'Hide' : 'Show'}
+          </button>
+          {showDebug && (
+            <button
+              onClick={fetchDebugLogs}
+              disabled={debugLoading}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${debugLoading ? 'animate-spin' : ''}`} />
+            </button>
+          )}
+        </div>
+        {showDebug && (
+          <div className="max-h-96 overflow-y-auto">
+            {debugLoading && debugLogs.length === 0 ? (
+              <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+            ) : debugLogs.length === 0 ? (
+              <div className="text-center py-8 text-sm text-muted-foreground">No auto-reply events yet. Send a message to trigger one.</div>
+            ) : (
+              <div className="divide-y divide-border">
+                {debugLogs.map((log, i) => {
+                  const isSent = log.decision === 'SENT';
+                  const isFailed = log.decision.startsWith('FAIL');
+                  const isSkip = log.decision.startsWith('SKIP');
+                  const isQueue = log.decision === 'QUEUED' || log.decision === 'SCHEDULED';
+                  const isGen = log.decision === 'GENERATING' || log.decision === 'REGENERATING';
+                  return (
+                    <div key={i} className="px-4 py-2 text-xs flex items-start gap-2">
+                      <span className={`font-mono font-bold flex-shrink-0 w-28 ${isSent ? 'text-primary' : isFailed ? 'text-destructive' : isSkip ? 'text-amber-500' : isQueue ? 'text-blue-400' : isGen ? 'text-purple-400' : 'text-muted-foreground'}`}>{log.decision}</span>
+                      <span className="text-muted-foreground flex-shrink-0 w-28 truncate" title={log.contact || log.jid}>{log.contact || log.jid?.split('@')[0] || '?'}</span>
+                      <span className="text-foreground/70 flex-1 break-all">{log.detail}</span>
+                      <span className="text-muted-foreground/50 flex-shrink-0 text-[10px]">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </motion.div>

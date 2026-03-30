@@ -6,7 +6,7 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation, streamMediaForMessage } from './whatsapp.js';
-import { initWhatsApp } from './whatsapp.js';
+import { initWhatsApp, getAutoReplyDebugLogs } from './whatsapp.js';
 import { archiveChat, markChatRead, syncArchiveStates } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio, BG_SOUND_PROMPTS } from './elevenlabs.js';
 import multer from 'multer';
@@ -1632,6 +1632,16 @@ RULES:
   });
 
   // ── Admin: Delete a user ───────────────────────────────
+  // ── Auto-reply debug logs ─────────────────────────────
+  router.get('/auto-reply-debug', (req, res) => {
+    try {
+      const logs = getAutoReplyDebugLogs(req.userId);
+      res.json(logs);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.delete('/admin/users/:userId', async (req, res) => {
     try {
       const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
