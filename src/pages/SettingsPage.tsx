@@ -6,6 +6,12 @@ import { toast } from 'sonner';
 import { Slider } from '@/components/ui/slider';
 import { useWhatsAppStatus, type SyncState } from '@/hooks/useWhatsAppStatus';
 
+const SPEED_OPTIONS = [
+  { id: 'fast', label: 'Quick', desc: '3–10 mins', emoji: '⚡' },
+  { id: 'normal', label: 'Normal', desc: '6–15 mins', emoji: '🕐' },
+  { id: 'slow', label: 'Celebrity', desc: '30 mins–2 days', emoji: '👑' },
+] as const;
+
 const SettingsPage = () => {
   const { status: waStatus, syncState } = useWhatsAppStatus();
   const isConnected = waStatus === 'connected';
@@ -26,6 +32,8 @@ const SettingsPage = () => {
   // Availability settings
   const [replyChance, setReplyChance] = useState(70);
   const [responseSpeed, setResponseSpeed] = useState('normal');
+
+  const activeSpeed = SPEED_OPTIONS.find((option) => option.id === responseSpeed) ?? SPEED_OPTIONS[1];
 
   useEffect(() => {
     api.getConfig('elevenlabs_api_key').then(data => {
@@ -292,7 +300,7 @@ const SettingsPage = () => {
                 <div className="flex items-start gap-2">
                   <Shield className="w-4 h-4 text-warning mt-0.5 flex-shrink-0" />
                   <p className="text-xs text-warning">
-                    Automation is ON. The bot will auto-reply with human-like timing — random delays, emoji reactions, and selective responses.
+                    Automation is ON. Active timing is <span className="font-semibold">{activeSpeed.label}</span> ({activeSpeed.desc}) with <span className="font-semibold">{replyChance}%</span> reply chance.
                   </p>
                 </div>
               </div>
@@ -323,13 +331,9 @@ const SettingsPage = () => {
                   <Gauge className="w-4 h-4 text-primary" />
                   <label className="text-sm font-medium text-foreground">Response Speed</label>
                 </div>
-                <p className="text-xs text-muted-foreground">How fast should replies come? Slower = more realistic.</p>
+                <p className="text-xs text-muted-foreground">Saved mode: {activeSpeed.label} — replies wait {activeSpeed.desc} before sending, then typing time scales with the reply length.</p>
                 <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'fast', label: 'Quick', desc: '3–25s', emoji: '⚡' },
-                    { id: 'normal', label: 'Normal', desc: '15–60s', emoji: '🕐' },
-                    { id: 'slow', label: 'Celebrity', desc: '30–180s', emoji: '👑' },
-                  ].map((option) => (
+                  {SPEED_OPTIONS.map((option) => (
                     <button key={option.id}
                       onClick={() => { setResponseSpeed(option.id); saveAvailabilitySetting('ai_response_speed', option.id); }}
                       className={`p-3 rounded-lg border text-center transition-all ${

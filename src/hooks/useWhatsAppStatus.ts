@@ -63,6 +63,16 @@ export function useWhatsAppStatus() {
   }, []);
 
   useEffect(() => {
+    if (status !== 'reconnecting') return;
+
+    const stuckTimer = window.setTimeout(() => {
+      refresh();
+    }, 12000);
+
+    return () => window.clearTimeout(stuckTimer);
+  }, [status, refresh]);
+
+  useEffect(() => {
     if (!isBackendConfigured()) {
       setStatus('disconnected');
       setQr(null);

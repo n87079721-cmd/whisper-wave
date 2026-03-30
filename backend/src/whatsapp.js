@@ -512,6 +512,15 @@ export function getWhatsAppState(userId) {
   };
 }
 
+function hasSavedSession(userId) {
+  try {
+    const sessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
+    return fs.existsSync(sessionDir);
+  } catch {
+    return false;
+  }
+}
+
 function updateSyncState(userId, db, updates) {
   const inst = getInstance(userId);
   Object.assign(inst.syncState, updates);
@@ -597,6 +606,13 @@ export function initWhatsApp(userId, db) {
 
 export function getOrInitWhatsApp(userId, db) {
   const inst = getInstance(userId);
+
+  if (!inst.client && !inst.isConnecting && hasSavedSession(userId)) {
+    startConnection(userId, db).catch((err) => {
+      console.error(`Auto-resume failed [${userId}]:`, err?.message || err);
+    });
+  }
+
   return {
     getState: () => getWhatsAppState(userId),
     sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
