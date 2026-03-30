@@ -716,6 +716,76 @@ export function createApiRouter(db) {
     }
   });
 
+  // ── Forward Message ─────────────────────────────────────────
+  router.post('/forward/message', async (req, res) => {
+    try {
+      const { messageId, targetContactId, targetJid: targetJidRaw } = req.body;
+      if (!messageId || (!targetContactId && !targetJidRaw)) {
+        return res.status(400).json({ error: 'Missing messageId or target' });
+      }
+
+      const wa = getWA(req);
+      const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId: targetContactId, jid: targetJidRaw });
+
+      // Get original message
+      const original = db.prepare('SELECT * FROM messages WHERE id = ? AND user_id = ?').get(messageId, req.userId);
+      if (!original) return res.status(404).json({ error: 'Message not found' });
+
+      let sendResult;
+      if (original.type === 'text') {
+        sendResult = await wa.sendTextMessage(targetJid, original.content || '');
+      } else if (original.media_path && !original.media_path.startsWith('wa:')) {
+        // Forward media from disk
+        const filePath = resolveMessageMediaPath(original.media_path);
+        if (filePath && fs.existsSync(filePath)) {
+          const base64Data = fs.readFileSync(filePath).toString('base64');
+          sendResult = await wa.sendMediaMessage(targetJid, {
+            mimeType: original.media_mime || 'application/octet-stream',
+            data: base64Data,
+            fileName: original.media_name || 'forwarded',
+            caption: original.content || '',
+            sendAsDocument: original.type === 'document',
+          });
+        } else {
+          // Try forwarding via WA
+          try {
+            const msg = await wa.getMessageById(messageId);
+            if (msg) {
+              const chat = await wa.client.getChatById(fromJid(targetJid));
+              sendResult = await msg.forward(chat);
+            }
+          } catch {}
+          if (!sendResult) return res.status(400).json({ error: 'Media file not available for forwarding' });
+        }
+      } else {
+        // Try native forward
+        try {
+          const msg = await wa.getMessageById(messageId);
+          if (msg) {
+            const chat = await wa.client.getChatById(fromJid(targetJid));
+            sendResult = await msg.forward(chat);
+          }
+        } catch {}
+        if (!sendResult) {
+          // Fallback: send as text
+          sendResult = await wa.sendTextMessage(targetJid, original.content || '[Forwarded message]');
+        }
+      }
+
+      const msgId = getSentMessageId(sendResult);
+      db.prepare(`
+        INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
+        VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, 'sent', ?, ?, ?)
+        ON CONFLICT(id) DO NOTHING
+      `).run(msgId, req.userId, contactRow.id, targetJid, original.content, original.type, new Date().toISOString(), null, original.media_name, original.media_mime);
+      db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
+
+      res.json({ success: true, messageId: msgId, contactId: contactRow.id });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Edit Message ──────────────────────────────────────────
   router.post('/edit/message', async (req, res) => {
     try {
