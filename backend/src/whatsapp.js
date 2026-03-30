@@ -1749,16 +1749,18 @@ function isWithinActiveHours(db, userId) {
   return now >= startMin || now <= endMin;
 }
 
-function calculateDelay(messageLength, speed) {
+function calculateDelay(replyLength, speed) {
+  // Ranges: [min, max] in milliseconds
+  // fast = 3-10 mins, normal = 6-15 mins, slow/celebrity = 30 mins - 2 days
   const ranges = {
-    fast:   { short: [3000, 12000],  medium: [8000, 25000],  long: [12000, 40000] },
-    normal: { short: [5000, 25000],  medium: [15000, 60000], long: [30000, 90000] },
-    slow:   { short: [15000, 45000], medium: [30000, 120000], long: [60000, 180000] },
+    fast:   { short: [180000, 420000],   medium: [240000, 540000],   long: [300000, 600000] },
+    normal: { short: [360000, 600000],   medium: [480000, 780000],   long: [540000, 900000] },
+    slow:   { short: [1800000, 14400000], medium: [3600000, 43200000], long: [7200000, 172800000] },
   };
   const r = ranges[speed] || ranges.normal;
   let range;
-  if (messageLength < 20) range = r.short;
-  else if (messageLength < 100) range = r.medium;
+  if (replyLength < 50) range = r.short;
+  else if (replyLength < 200) range = r.medium;
   else range = r.long;
   return Math.floor(Math.random() * (range[1] - range[0])) + range[0];
 }
