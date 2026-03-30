@@ -425,153 +425,39 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     }
   };
 
-  // Voice preview removed — AI voice is in Voice Studio page
+  // Copy message text to clipboard
+  const handleCopyMessage = useCallback((msg: Message) => {
+    const text = msg.content || '';
+    if (!text) { toast.error('Nothing to copy'); return; }
+    navigator.clipboard.writeText(text).then(() => toast.success('Copied')).catch(() => toast.error('Failed to copy'));
+  }, []);
 
-  const startRecording = useCallback(async () => {
+  // Forward message
+  const handleForwardMessage = useCallback(async (msg: Message, targetContact: Contact) => {
+    setForwardSending(true);
     try {
-      if (!window.isSecureContext) {
-        throw new Error('HTTPS_REQUIRED');
-      }
-
-      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-        throw new Error('UNSUPPORTED_RECORDING');
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      recordingStreamRef.current = stream;
-      recordingChunksRef.current = [];
-
-      const mimeType = [
-        'audio/webm;codecs=opus',
-        'audio/ogg;codecs=opus',
-        'audio/mp4',
-        'audio/webm',
-      ].find((candidate) => MediaRecorder.isTypeSupported(candidate));
-
-      const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordingChunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        recordingStreamRef.current = null;
-
-        if (recordingTimerRef.current) {
-          clearInterval(recordingTimerRef.current);
-          recordingTimerRef.current = null;
-        }
-
-        const resolvedMimeType = recorder.mimeType || mimeType || 'audio/webm';
-        const blob = new Blob(recordingChunksRef.current, { type: resolvedMimeType });
-        recordingChunksRef.current = [];
-
-        if (blob.size < 1000) {
-          setIsRecording(false);
-          setRecordingDuration(0);
-          return;
-        }
-
-        // Send the recording
-        const activeContact = selectedContactRef.current;
-        if (!activeContact) {
-          setIsRecording(false);
-          setRecordingDuration(0);
-          return;
-        }
-
-        setSending(true);
-        try {
-          const reader = new FileReader();
-          const base64 = await new Promise<string>((resolve, reject) => {
-            reader.onload = () => {
-              const result = String(reader.result || '');
-              resolve(result.includes(',') ? result.split(',').pop() || '' : result);
-            };
-            reader.onerror = () => reject(new Error('Failed to read recording'));
-            reader.readAsDataURL(blob);
-          });
-
-          const isTemp = activeContact.id.startsWith('temp-');
-          const res = isTemp
-            ? await api.sendVoiceRecordingToPhone(activeContact.phone || '', base64, resolvedMimeType)
-            : await api.sendVoiceRecording(activeContact.id, base64, resolvedMimeType);
-
-          if (res.error) throw new Error(res.error);
-          toast.success('Voice note sent');
-
-          const refreshedConversations = await api.getConversations();
-          setConversations(refreshedConversations);
-
-          const nextContact = (res.contactId && refreshedConversations.find(c => c.id === res.contactId))
-            || refreshedConversations.find(c => c.id === activeContact.id)
-            || null;
-
-          if (selectedContactRef.current?.id === activeContact.id && nextContact) {
-            setSelectedContact(nextContact);
-            await refreshMessages(nextContact.id, { forceScroll: true });
-          }
-        } catch (err: any) {
-          toast.error(err.message || 'Failed to send voice note');
-        } finally {
-          setSending(false);
-        }
-
-        setIsRecording(false);
-        setRecordingDuration(0);
-      };
-
-      recorder.start(250);
-      setIsRecording(true);
-      setRecordingDuration(0);
-
-      recordingTimerRef.current = window.setInterval(() => {
-        setRecordingDuration(prev => prev + 1);
-      }, 1000);
+      const res = await api.forwardMessage(msg.id, targetContact.id);
+      if (res.error) throw new Error(res.error);
+      toast.success('Message forwarded');
+      setForwardingMsg(null);
+      setForwardSearch('');
     } catch (err: any) {
-      if (err?.message === 'HTTPS_REQUIRED') toast.error('Microphone needs HTTPS — open your secure domain, not the raw IP address.');
-      else if (err?.message === 'UNSUPPORTED_RECORDING') toast.error('This browser does not support live voice recording.');
-      else if (err?.name === 'NotAllowedError') toast.error('Microphone access denied — allow mic permission in your browser settings.');
-      else if (err?.name === 'NotFoundError') toast.error('No microphone was found on this device.');
-      else if (err?.name === 'NotReadableError') toast.error('Your microphone is busy in another app.');
-      else toast.error('Failed to start voice recording.');
-      setIsRecording(false);
-    }
-  }, [refreshMessages]);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+      toast.error(err.message || 'Failed to forward');
+    } finally {
+      setForwardSending(false);
     }
   }, []);
 
-  const cancelRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.ondataavailable = null;
-      mediaRecorderRef.current.onstop = () => {
-        recordingStreamRef.current?.getTracks().forEach(t => t.stop());
-        recordingStreamRef.current = null;
-      };
-      mediaRecorderRef.current.stop();
-    }
-    if (recordingTimerRef.current) {
-      clearInterval(recordingTimerRef.current);
-      recordingTimerRef.current = null;
-    }
-    setIsRecording(false);
-    setRecordingDuration(0);
-    recordingChunksRef.current = [];
-  }, []);
-
-  const formatRecordingTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
+  const forwardFilteredContacts = useMemo(() => {
+    const all = [...conversations, ...allContacts];
+    const seen = new Set<string>();
+    const unique = all.filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
+    if (!forwardSearch.trim()) return unique.slice(0, 30);
+    const q = forwardSearch.toLowerCase();
+    return unique.filter(c =>
+      getContactDisplayName(c).toLowerCase().includes(q) || cleanContactPhone(c.phone || '').includes(q)
+    ).slice(0, 30);
+  }, [conversations, allContacts, forwardSearch]);
 
   const handleStartNewChat = async (contact?: Contact) => {
     if (contact) {
