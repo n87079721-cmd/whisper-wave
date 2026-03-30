@@ -1514,6 +1514,52 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             </div>
           </div>
         )}
+
+        {/* ===== Forward message overlay ===== */}
+        {forwardingMsg && (
+          <div className="fixed inset-0 z-[75] flex items-end bg-background/80 backdrop-blur-sm md:items-center md:justify-center" onClick={() => { setForwardingMsg(null); setForwardSearch(''); }}>
+            <div className="w-full overflow-hidden rounded-t-2xl border border-border bg-card shadow-2xl md:w-[24rem] md:max-h-[70vh] md:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground">Forward to...</h3>
+                <button onClick={() => { setForwardingMsg(null); setForwardSearch(''); }} className="p-1 text-muted-foreground hover:text-foreground">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-3 border-b border-border">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    value={forwardSearch}
+                    onChange={(e) => setForwardSearch(e.target.value)}
+                    placeholder="Search contacts..."
+                    className="w-full pl-9 pr-3 py-2 rounded-lg bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                    autoFocus
+                  />
+                </div>
+              </div>
+              <div className="overflow-y-auto max-h-[50vh]">
+                {forwardFilteredContacts.map(contact => (
+                  <button
+                    key={contact.id}
+                    onClick={() => handleForwardMessage(forwardingMsg, contact)}
+                    disabled={forwardSending}
+                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-secondary/50 transition-colors disabled:opacity-50"
+                  >
+                    <Avatar contact={contact} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground truncate">{getContactDisplayName(contact)}</p>
+                      <p className="text-xs text-muted-foreground">{getContactDisplayMeta(contact)}</p>
+                    </div>
+                    {forwardSending && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground flex-shrink-0" />}
+                  </button>
+                ))}
+                {forwardFilteredContacts.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-6">No contacts found</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
