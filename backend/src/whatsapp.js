@@ -1851,7 +1851,7 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   const inst = getInstance(userId);
   const now = Date.now();
   const lastReply = inst.autoReplyCooldowns.get(jid) || 0;
-  const cooldownMs = 120000; // 2 minute cooldown
+  const cooldownMs = 30000; // 30 second cooldown — just enough to prevent true duplicates
   if (now - lastReply < cooldownMs) {
     console.log(`[${userId}] Skipping auto-reply to ${jid} — cooldown (${Math.round((cooldownMs - (now - lastReply)) / 1000)}s left)`);
     return;
