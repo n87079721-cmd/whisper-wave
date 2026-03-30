@@ -1181,6 +1181,22 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                     >
                                       <Reply className="w-3 h-3" />
                                     </button>
+                                    {msg.content && (
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleCopyMessage(msg); }}
+                                        className="inline-btn p-0.5 hover:text-primary text-muted-foreground/50 md:text-muted-foreground"
+                                        title="Copy"
+                                      >
+                                        <Copy className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setForwardingMsg(msg); if (allContacts.length === 0) refreshAllContacts(); }}
+                                      className="inline-btn p-0.5 hover:text-primary text-muted-foreground/50 md:text-muted-foreground"
+                                      title="Forward"
+                                    >
+                                      <Forward className="w-3 h-3" />
+                                    </button>
                                     <button
                                       onClick={(e) => { e.stopPropagation(); handleStarMessage(msg.id, !!msg.is_starred); }}
                                       className="inline-btn p-0.5 hover:text-yellow-500 text-muted-foreground/50 md:text-muted-foreground"
