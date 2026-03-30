@@ -132,7 +132,7 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName)
     messages: [
       {
         role: 'system',
-        content: `${prompt}\n\nYou are chatting with: ${contactName || 'Unknown contact'}\nCurrent time: ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })} (New York time)`,
+        content: `${prompt}\n\nYou are chatting with: ${contactName || 'Unknown contact'}\nCurrent time: ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true })} (New York time)\n\nACT ACCORDING TO THE TIME. If it's late at night, be sleepy and wrap things up. If it's early morning, be groggy. If it's daytime, mention being busy sometimes. Use the time naturally, don't announce it.`,
       },
       ...chatMessages,
     ],
