@@ -196,7 +196,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     const handleHistoryEvent = () => {
       scheduleConversationRefresh();
       refreshSelectedConversation();
-      if (showNewChat) scheduleContactsRefresh();
+      if (showNewChat) refreshAllContacts(contactSearch || undefined);
     };
 
     const handleContactsEvent = () => {
