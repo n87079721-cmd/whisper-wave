@@ -162,9 +162,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [refreshConversations]);
 
   useEffect(() => {
-    if (!showNewChat || allContacts.length > 0) return;
-    refreshAllContacts();
-  }, [allContacts.length, refreshAllContacts, showNewChat]);
+    if (!showNewChat) return;
+    const timer = setTimeout(() => refreshAllContacts(contactSearch || undefined), contactSearch ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [showNewChat, contactSearch, refreshAllContacts]);
 
   useEffect(() => {
     if (!initialContact) return;
