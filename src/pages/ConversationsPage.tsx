@@ -221,6 +221,18 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       es.addEventListener('history_sync', handleHistoryEvent);
       es.addEventListener('contacts_sync', handleContactsEvent);
       es.addEventListener('message_edited', handleEditedEvent);
+      es.addEventListener('typing', (event: Event) => {
+        try {
+          const data = event instanceof MessageEvent ? JSON.parse(event.data) : null;
+          if (data?.jid != null) {
+            setTypingJids(prev => ({ ...prev, [data.jid]: !!data.isTyping }));
+            // Auto-clear typing after 10s in case we miss the stop event
+            if (data.isTyping) {
+              setTimeout(() => setTypingJids(prev => ({ ...prev, [data.jid]: false })), 10000);
+            }
+          }
+        } catch {}
+      });
       es.onerror = () => {};
     } catch {}
 
