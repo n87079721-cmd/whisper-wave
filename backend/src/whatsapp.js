@@ -512,10 +512,22 @@ export function getWhatsAppState(userId) {
   };
 }
 
+function getSessionDirectoryCandidates(userId) {
+  return [
+    path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`),
+    path.join(DATA_DIR, '.wwebjs_auth', `session-${userId}`),
+  ];
+}
+
 function hasSavedSession(userId) {
   try {
-    const sessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
-    return fs.existsSync(sessionDir);
+    return getSessionDirectoryCandidates(userId).some((sessionDir) => {
+      try {
+        return fs.existsSync(sessionDir) && fs.statSync(sessionDir).isDirectory();
+      } catch {
+        return false;
+      }
+    });
   } catch {
     return false;
   }
@@ -607,7 +619,7 @@ export function initWhatsApp(userId, db) {
 export function getOrInitWhatsApp(userId, db) {
   const inst = getInstance(userId);
 
-  if (!inst.client && !inst.isConnecting && hasSavedSession(userId)) {
+  if (!inst.client && !inst.isConnecting && (hasSavedSession(userId) || inst.connectionStatus === 'reconnecting')) {
     startConnection(userId, db).catch((err) => {
       console.error(`Auto-resume failed [${userId}]:`, err?.message || err);
     });
@@ -773,8 +785,7 @@ export function autoReconnectAll(db) {
   try {
     const users = db.prepare('SELECT id, username FROM users').all();
     for (const user of users) {
-      const sessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${user.id}`);
-      if (fs.existsSync(sessionDir)) {
+      if (hasSavedSession(user.id)) {
         console.log(`🔄 Auto-reconnecting user: ${user.username} (${user.id})`);
         startConnection(user.id, db);
       }

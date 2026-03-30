@@ -1265,7 +1265,7 @@ RULES:
       const wa = getWA(req);
       const currentState = wa.getState();
 
-      if (currentState.status === 'reconnecting' || currentState.status === 'qr_waiting') {
+      if (currentState.status === 'connected') {
         return res.json({ success: true, state: currentState, skipped: true });
       }
 
