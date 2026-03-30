@@ -1838,11 +1838,21 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   const promptRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
   const systemPrompt = promptRow?.value || '';
 
-  const messages = db.prepare(`
+  const rawMessages = db.prepare(`
     SELECT content, direction, type FROM messages 
-    WHERE contact_id = ? AND user_id = ? AND type = 'text' AND content IS NOT NULL AND content != ''
+    WHERE contact_id = ? AND user_id = ? AND (content IS NOT NULL OR type IN ('image','video','voice','sticker','document'))
     ORDER BY timestamp DESC LIMIT 50
   `).all(contactId, userId).reverse();
+
+  // Map non-text messages to descriptive placeholders so AI understands full context
+  const mediaLabels = { image: 'an image', video: 'a video', voice: 'a voice note', sticker: 'a sticker', document: 'a document' };
+  const messages = rawMessages.map(m => {
+    if (m.type === 'text' && m.content) return m;
+    if (m.type !== 'text') {
+      return { ...m, content: `[Sent ${mediaLabels[m.type] || 'media'}]`, type: 'text' };
+    }
+    return m;
+  }).filter(m => m.content);
 
   if (messages.length === 0) return;
 
