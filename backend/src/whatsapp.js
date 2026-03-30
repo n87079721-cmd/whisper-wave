@@ -1160,6 +1160,16 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
+    // ── Typing detection ──
+    client.on('chat_state_changed', (chat, state) => {
+      try {
+        const chatJid = toJid(chat?.id?._serialized || '');
+        if (!chatJid || chatJid === 'status@broadcast') return;
+        const isTyping = state === 'typing' || state === 'composing';
+        emit(userId, 'typing', { jid: chatJid, isTyping });
+      } catch {}
+    });
+
     // ── Message edit events ──
     client.on('message_edit', async (msg, newBody, prevBody) => {
       try {
