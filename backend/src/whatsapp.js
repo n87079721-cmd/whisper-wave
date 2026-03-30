@@ -1845,7 +1845,10 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
 
   let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
-  const delay = calculateDelay(lastMsgContent.length, speed);
+  // Use REPLY length for delay (not incoming message length)
+  const delay = calculateDelay(replyText.length, speed);
+  // Typing duration scales with reply length: ~1s per 10 chars, min 2s, max 12s
+  const typingDuration = Math.min(Math.max(Math.floor(replyText.length / 10) * 1000, 2000), 12000) + Math.floor(Math.random() * 2000);
 
   setTimeout(async () => {
     try {
@@ -1855,8 +1858,6 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
         const chat = await inst.client.getChatById(chatId);
         await chat.sendStateTyping();
       } catch {}
-
-      const typingDuration = Math.floor(Math.random() * 2000) + 2000;
       setTimeout(async () => {
         try {
           const sent = await sendTextMessage(userId, jid, replyText);
