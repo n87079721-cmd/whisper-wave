@@ -226,7 +226,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     const interval = window.setInterval(() => {
       refreshConversations();
       refreshSelectedConversation();
-      if (showNewChat) refreshAllContacts();
+      if (showNewChat) refreshAllContacts(contactSearch || undefined);
     }, 30000);
 
     return () => {
