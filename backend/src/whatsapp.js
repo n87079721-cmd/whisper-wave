@@ -2152,8 +2152,19 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     return;
   }
 
-  const promptRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
-  const systemPrompt = promptRow?.value || '';
+  // Per-contact prompt: check if contact has an assigned persona
+  let systemPrompt = '';
+  try {
+    const contactRow = db.prepare("SELECT prompt_id FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    if (contactRow?.prompt_id) {
+      const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
+      systemPrompt = promptRow?.content || '';
+    }
+  } catch {}
+  if (!systemPrompt) {
+    const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
+    systemPrompt = globalRow?.value || '';
+  }
   const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
 
   const roll = Math.random() * 100;

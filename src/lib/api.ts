@@ -536,6 +536,43 @@ export const api = {
       body: JSON.stringify({ contact }),
     });
   },
+
+  // Prompt Library
+  getPrompts() {
+    return requestJson<Prompt[]>('/api/prompts');
+  },
+
+  createPrompt(name: string, content: string) {
+    return requestJson<Prompt>('/api/prompts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, content }),
+    });
+  },
+
+  updatePrompt(id: string, name: string, content: string) {
+    return requestJson<{ success: boolean }>(`/api/prompts/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, content }),
+    });
+  },
+
+  deletePrompt(id: string) {
+    return requestJson<{ success: boolean }>(`/api/prompts/${id}`, { method: 'DELETE' });
+  },
+
+  getContactPrompt(contactId: string) {
+    return requestJson<{ promptId: string | null }>(`/api/contacts/${contactId}/prompt`);
+  },
+
+  setContactPrompt(contactId: string, promptId: string | null) {
+    return requestJson<{ success: boolean }>(`/api/contacts/${contactId}/prompt`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptId }),
+    });
+  },
 };
 
 // Types
@@ -641,4 +678,12 @@ export interface SoundItem {
   type: 'preset' | 'custom';
   duration?: number;
   dbId?: number;
+}
+
+export interface Prompt {
+  id: string;
+  user_id: string;
+  name: string;
+  content: string;
+  created_at: string;
 }
