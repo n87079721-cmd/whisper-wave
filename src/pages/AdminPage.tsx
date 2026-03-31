@@ -44,17 +44,20 @@ const ACTION_CONFIG: Record<string, { icon: typeof Bot; color: string; label: st
 };
 
 // Live countdown component for scheduled replies
-const Countdown = ({ scheduledAt, delayMs, contact, onCancelled }: { scheduledAt: string; delayMs: number; contact?: string; onCancelled?: () => void }) => {
+const Countdown = ({ scheduledAt, delayMs, delaySec, contact, onCancelled }: { scheduledAt: string; delayMs?: number; delaySec?: number; contact?: string; onCancelled?: () => void }) => {
   const [now, setNow] = useState(Date.now());
   const [cancelling, setCancelling] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   
+  // Derive actual delay in ms: prefer delaySec (from backend), fall back to delayMs
+  const actualDelayMs = delaySec ? delaySec * 1000 : (delayMs || 0);
+
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
   }, []);
 
-  const sendAt = new Date(scheduledAt).getTime() + delayMs;
+  const sendAt = new Date(scheduledAt).getTime() + actualDelayMs;
   const remaining = Math.max(0, Math.floor((sendAt - now) / 1000));
 
   const handleCancel = async () => {
@@ -365,12 +368,12 @@ const AdminPage = () => {
                         </span>
                       </div>
                       {renderLogDetails(entry)}
-                      {entry.action === 'reply_scheduled' && entry.delayMs && !debugLogs.some(
+                      {entry.action === 'reply_scheduled' && (entry.delayMs || entry.delaySec) && !debugLogs.some(
                         (other) => other.contact === entry.contact &&
                           (other.action === 'auto_reply_sent' || other.action === 'typing_started') &&
                           other.id > entry.id
                       ) && (
-                        <Countdown scheduledAt={entry.created_at} delayMs={entry.delayMs} contact={entry.contact} onCancelled={fetchDebugLogs} />
+                        <Countdown scheduledAt={entry.created_at} delayMs={entry.delayMs} delaySec={entry.delaySec} contact={entry.contact} onCancelled={fetchDebugLogs} />
                       )}
                     </div>
                   </div>
