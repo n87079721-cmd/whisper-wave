@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2, AlertTriangle, Settings, QrCode, Phone, ArrowRight } from 'lucide-react';
 import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
 import StatusBadge from '@/components/StatusBadge';
@@ -19,10 +19,24 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
   const [phoneNumber, setPhoneNumber] = useState('');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [requestingCode, setRequestingCode] = useState(false);
+  const autoConnectTriggered = useRef(false);
 
   const isConnected = status === 'connected';
   const isWaiting = status === 'qr_waiting';
   const isReconnecting = status === 'reconnecting';
+
+  // Auto-connect on mount so QR code appears immediately
+  useEffect(() => {
+    if (!backendReady || autoConnectTriggered.current) return;
+    if (status === 'disconnected') {
+      autoConnectTriggered.current = true;
+      setConnecting(true);
+      api.reconnect()
+        .then(() => refresh())
+        .catch(() => {})
+        .finally(() => setConnecting(false));
+    }
+  }, [status, backendReady, refresh]);
 
   const statCards = [
     { label: 'Messages Sent', value: stats.messagesSent.toLocaleString(), icon: MessageSquare },
@@ -131,7 +145,7 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
                     <div className="rounded-lg overflow-hidden bg-white p-2"><img src={qr} alt="QR" className="w-48 h-48" /></div>
                   ) : (
                     <div className="w-48 h-48 rounded-lg bg-secondary flex items-center justify-center">
-                      <p className="text-xs text-muted-foreground text-center px-4">{isWaiting ? 'Loading QR...' : 'Click Connect'}</p>
+                      <p className="text-xs text-muted-foreground text-center px-4"><Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-muted-foreground" />Loading QR...</p>
                     </div>
                   )}
                 </div>
