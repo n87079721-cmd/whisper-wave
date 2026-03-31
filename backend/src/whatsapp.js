@@ -1288,16 +1288,29 @@ async function startConnection(userId, db, options = {}) {
     });
 
     // Initialize client with a timeout to prevent infinite hangs
-    const INIT_TIMEOUT_MS = 90_000; // 90 seconds max for Puppeteer to start + QR/session
+    const INIT_TIMEOUT_MS = 60_000; // 60s — if no QR/auth by then, something is stuck
+    let initTimedOut = false;
     const initPromise = client.initialize();
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('initialize() timed out after 90s')), INIT_TIMEOUT_MS)
+      setTimeout(() => { initTimedOut = true; reject(new Error('initialize() timed out after 60s')); }, INIT_TIMEOUT_MS)
     );
     await Promise.race([initPromise, timeoutPromise]);
-    console.log(`🔄 [${userId}] WhatsApp client initializing...`);
+    console.log(`🔄 [${userId}] WhatsApp client initialized successfully`);
   } catch (err) {
     console.error(`startConnection error [${userId}]:`, err?.message || err);
     clearConnectionWatchdog(userId);
+
+    // Force-kill the stale client if it timed out or crashed
+    if (inst.client) {
+      const deadClient = inst.client;
+      inst.client = null;
+      try {
+        const browser = deadClient.pupBrowser;
+        if (browser) await browser.close().catch(() => {});
+      } catch {}
+      try { await deadClient.destroy(); } catch {}
+    }
+
     inst.lastDisconnectReason = String(err?.message || err || 'start_error');
     inst.connectionPhase = 'start_error';
     inst.lastConnectionActivityAtMs = Date.now();
