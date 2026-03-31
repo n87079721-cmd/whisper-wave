@@ -468,6 +468,8 @@ export function createApiRouter(db) {
         send('call', data);
       } else if (event === 'message_edited') {
         send('message_edited', data);
+      } else if (event === 'message_ack') {
+        send('message_ack', data);
       }
     });
 

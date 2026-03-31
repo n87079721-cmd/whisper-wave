@@ -2776,21 +2776,25 @@ export async function syncArchiveStates(userId, db) {
 }
 
 // ── Mark chat as read ──
+// NOTE: We intentionally do NOT call chat.sendSeen() so that
+// the other person never gets blue ticks (read receipts) from us.
+// We only update the local unread counter.
 
 export async function markChatRead(userId, db, contactId) {
-  const inst = getInstance(userId);
   const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (!contact) throw new Error('Contact not found');
 
-  if (inst.client && inst.connectionStatus === 'connected') {
-    try {
-      const chatId = fromJid(contact.jid);
-      const chat = await inst.client.getChatById(chatId);
-      await chat.sendSeen();
-    } catch (err) {
-      console.log(`📖 [${userId}] WhatsApp mark-read failed: ${err?.message}`);
-    }
-  }
+  // Do NOT send read receipts to WhatsApp — stealth mode
+  // const inst = getInstance(userId);
+  // if (inst.client && inst.connectionStatus === 'connected') {
+  //   try {
+  //     const chatId = fromJid(contact.jid);
+  //     const chat = await inst.client.getChatById(chatId);
+  //     await chat.sendSeen();
+  //   } catch (err) {
+  //     console.log(`📖 [${userId}] WhatsApp mark-read failed: ${err?.message}`);
+  //   }
+  // }
 
   db.prepare("UPDATE contacts SET unread_count = 0 WHERE id = ? AND user_id = ?").run(contactId, userId);
   return { success: true };
