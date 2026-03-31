@@ -380,6 +380,91 @@ const SettingsPage = () => {
                   {savingPrompt ? 'Saving...' : 'Save Prompt'}
                 </button>
               </div>
+
+              {/* Prompt Library */}
+              <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-primary" />
+                    <label className="text-sm font-medium text-foreground">Prompt Library</label>
+                  </div>
+                  <button onClick={() => { setShowPromptForm(true); setEditingPrompt(null); setPromptName(''); setPromptContent(''); }}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">
+                    <Plus className="w-3.5 h-3.5" /> New Persona
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">Create character personas and assign them to specific contacts. Contacts without a persona use the global prompt above.</p>
+
+                {/* Prompt form */}
+                {showPromptForm && (
+                  <div className="space-y-2 p-3 rounded-lg bg-background border border-border">
+                    <input value={promptName} onChange={(e) => setPromptName(e.target.value)}
+                      placeholder="Persona name (e.g. Jeff Dunham)"
+                      className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50" />
+                    <textarea value={promptContent} onChange={(e) => setPromptContent(e.target.value)}
+                      placeholder="Enter the full persona prompt..."
+                      rows={5}
+                      className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none" />
+                    <div className="flex items-center gap-2">
+                      <button onClick={async () => {
+                        if (!promptName.trim() || !promptContent.trim()) return;
+                        setSavingNewPrompt(true);
+                        try {
+                          if (editingPrompt) {
+                            await api.updatePrompt(editingPrompt.id, promptName.trim(), promptContent.trim());
+                            setPrompts(prev => prev.map(p => p.id === editingPrompt.id ? { ...p, name: promptName.trim(), content: promptContent.trim() } : p));
+                            toast.success('Persona updated');
+                          } else {
+                            const created = await api.createPrompt(promptName.trim(), promptContent.trim());
+                            setPrompts(prev => [created, ...prev]);
+                            toast.success('Persona created');
+                          }
+                          setShowPromptForm(false); setPromptName(''); setPromptContent(''); setEditingPrompt(null);
+                        } catch { toast.error('Failed to save persona'); }
+                        finally { setSavingNewPrompt(false); }
+                      }} disabled={savingNewPrompt || !promptName.trim() || !promptContent.trim()}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-40">
+                        {savingNewPrompt ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                        {editingPrompt ? 'Update' : 'Save'}
+                      </button>
+                      <button onClick={() => { setShowPromptForm(false); setEditingPrompt(null); }}
+                        className="px-3 py-1.5 rounded-lg bg-secondary text-foreground text-xs font-medium hover:bg-secondary/80 transition-colors">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Prompt list */}
+                {prompts.length > 0 ? (
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {prompts.map(p => (
+                      <div key={p.id} className="flex items-start justify-between gap-2 p-3 rounded-lg bg-background border border-border">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-foreground">{p.name}</p>
+                          <p className="text-xs text-muted-foreground truncate mt-0.5">{p.content.slice(0, 100)}...</p>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <button onClick={() => { setEditingPrompt(p); setPromptName(p.name); setPromptContent(p.content); setShowPromptForm(true); }}
+                            className="w-7 h-7 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={async () => {
+                            if (!confirm(`Delete persona "${p.name}"?`)) return;
+                            try { await api.deletePrompt(p.id); setPrompts(prev => prev.filter(x => x.id !== p.id)); toast.success('Persona deleted'); }
+                            catch { toast.error('Failed to delete'); }
+                          }}
+                            className="w-7 h-7 rounded flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">No personas yet. Create one to assign different AI characters to contacts.</p>
+                )}
+              </div>
             </motion.div>
           </AnimatePresence>
         )}
