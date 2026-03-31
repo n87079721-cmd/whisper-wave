@@ -1870,19 +1870,39 @@ async function sendReaction(userId, jid, msg, emoji) {
   }
 }
 
+function debugLog(db, userId, action, details = {}) {
+  try {
+    db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'debug_log', ?)`).run(
+      userId,
+      JSON.stringify({ action, ...details, ts: new Date().toISOString() })
+    );
+  } catch {}
+}
+
 async function handleAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg) {
   const autoConfig = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'automation_enabled'").get(userId);
-  if (!autoConfig || autoConfig.value !== 'true') return;
+  if (!autoConfig || autoConfig.value !== 'true') {
+    debugLog(db, userId, 'skip_automation_disabled', { contact: contactName || phone });
+    return;
+  }
 
   // Skip archived chats
   const contactRow = db.prepare('SELECT is_archived FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
-  if (contactRow?.is_archived) return;
+  if (contactRow?.is_archived) {
+    debugLog(db, userId, 'skip_archived_chat', { contact: contactName || phone });
+    return;
+  }
+
+  debugLog(db, userId, 'message_received_for_ai', { contact: contactName || phone, body: (originalMsg?.body || '').slice(0, 80) });
 
   const inst = getInstance(userId);
   clearPendingAutoReply(userId, jid);
 
   const existing = inst.messageBatchBuffers.get(jid);
-  if (existing) clearTimeout(existing.timer);
+  if (existing) {
+    clearTimeout(existing.timer);
+    debugLog(db, userId, 'batch_extended', { contact: contactName || phone, batchSize: (existing.messages?.length || 0) + 1 });
+  }
 
   const batchEntry = existing || { messages: [], contactId, phone, contactName, latestOriginalMsg: originalMsg, latestMessageId: null };
   batchEntry.contactId = contactId;
@@ -1899,6 +1919,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
 
   batchEntry.timer = setTimeout(() => {
     inst.messageBatchBuffers.delete(jid);
+    debugLog(db, userId, 'batch_timer_fired', { contact: batchEntry.contactName || batchEntry.phone, batchSize: batchEntry.messages.length });
     executeAutoReply(userId, db, {
       contactId: batchEntry.contactId,
       jid,
@@ -1909,6 +1930,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
       batchedCount: batchEntry.messages.length,
     }).catch(err => {
       console.error('Batched auto-reply error:', err?.message || err);
+      debugLog(db, userId, 'batch_auto_reply_error', { contact: batchEntry.contactName || batchEntry.phone, error: err?.message || String(err) });
     });
   }, 12000);
 
@@ -1919,20 +1941,29 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const inst = getInstance(userId);
   const now = Date.now();
   const lastReply = inst.autoReplyCooldowns.get(jid) || 0;
-  if (now - lastReply < 30000) return;
+  if (now - lastReply < 30000) {
+    debugLog(db, userId, 'skip_cooldown', { contact: contactName || phone, cooldownRemaining: Math.round((30000 - (now - lastReply)) / 1000) + 's' });
+    return;
+  }
 
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
-  if (!keyRow?.value) return;
+  if (!keyRow?.value) {
+    debugLog(db, userId, 'skip_no_api_key', { contact: contactName || phone });
+    return;
+  }
 
   const promptRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
   const systemPrompt = promptRow?.value || '';
   const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
 
-  if (Math.random() * 100 > replyChance) {
+  const roll = Math.random() * 100;
+  if (roll > replyChance) {
+    debugLog(db, userId, 'skip_reply_chance', { contact: contactName || phone, chance: replyChance + '%', rolled: Math.round(roll) });
     const reactionEmoji = shouldReact();
     if (reactionEmoji && latestOriginalMsg) {
       const reactDelay = Math.floor(Math.random() * 5000) + 2000;
       setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
+      debugLog(db, userId, 'reaction_sent_instead', { contact: contactName || phone, emoji: reactionEmoji });
     }
     return;
   }
@@ -1959,10 +1990,12 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     }
   }
 
+  debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, historyLength: messages.length });
   let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
   if (isReplyTooSimilar(replyText, recentOutgoing)) {
+    debugLog(db, userId, 'reply_too_similar_regenerating', { contact: contactName || phone, originalReply: replyText.slice(0, 60) });
     replyText = await generateReply(
       keyRow.value,
       messages,
@@ -1973,6 +2006,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   }
 
   if (!replyText || isReplyTooSimilar(replyText, recentOutgoing)) {
+    debugLog(db, userId, 'skip_still_too_similar', { contact: contactName || phone });
     inst.autoReplyCooldowns.set(jid, Date.now());
     return;
   }
@@ -1981,6 +2015,16 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const delay = calculateDelay(replyText.length, speed);
   // Typing duration scales with reply length: ~1s per 10 chars, min 2s, max 12s
   const typingDuration = Math.min(Math.max(Math.floor(replyText.length / 10) * 1000, 2000), 12000) + Math.floor(Math.random() * 2000);
+
+  debugLog(db, userId, 'reply_scheduled', {
+    contact: contactName || phone,
+    replyPreview: replyText.slice(0, 80),
+    replyLength: replyText.length,
+    delayMs: delay,
+    delaySec: Math.round(delay / 1000),
+    typingMs: typingDuration,
+    speed,
+  });
 
   clearPendingAutoReply(userId, jid);
 
@@ -1994,6 +2038,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     try {
       // Send typing indicator
       const chatId = fromJid(jid);
+      debugLog(db, userId, 'typing_started', { contact: contactName || phone });
       try {
         const chat = await inst.client.getChatById(chatId);
         await chat.sendStateTyping();
@@ -2026,6 +2071,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent', ?, ?, ?)
           `).run(replyId, userId, contactId, jid, replyText, replyToId, replyToContent, replyToSender);
           db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'auto_reply_sent', ?)`).run(userId, JSON.stringify({ contactId }));
+          debugLog(db, userId, 'auto_reply_sent', { contact: contactName || phone, replyPreview: replyText.slice(0, 80), replyLength: replyText.length, quoted: !!latestMessageId });
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
           emit(userId, 'message', { contactId, msgId: replyId });
