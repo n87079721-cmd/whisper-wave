@@ -213,6 +213,15 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       } catch {}
     };
 
+    const handleAckEvent = (event: Event) => {
+      try {
+        const data = event instanceof MessageEvent ? JSON.parse(event.data) : null;
+        if (data?.messageId && data?.status) {
+          setMessages(prev => prev.map(m => m.id === data.messageId ? { ...m, status: data.status } : m));
+        }
+      } catch {}
+    };
+
     let es: EventSource | null = null;
     try {
       es = api.createEventSource();
@@ -220,6 +229,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       es.addEventListener('history_sync', handleHistoryEvent);
       es.addEventListener('contacts_sync', handleContactsEvent);
       es.addEventListener('message_edited', handleEditedEvent);
+      es.addEventListener('message_ack', handleAckEvent);
       es.onerror = () => {};
     } catch {}
 
