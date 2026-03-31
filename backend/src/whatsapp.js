@@ -1313,6 +1313,27 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
+    // ── Message ACK (delivery/read receipts) ──
+    client.on('message_ack', (msg, ack) => {
+      try {
+        if (generation !== inst.connectionGeneration) return;
+        if (!msg.fromMe) return; // Only track acks for messages we sent
+        const msgId = msg.id?._serialized || msg.id?.id;
+        if (!msgId) return;
+
+        // ACK levels: -1=error, 0=pending, 1=sent, 2=delivered, 3=read, 4=played
+        let newStatus = null;
+        if (ack === 2) newStatus = 'delivered';
+        else if (ack >= 3) newStatus = 'read';
+        if (!newStatus) return;
+
+        db.prepare('UPDATE messages SET status = ? WHERE id = ? AND user_id = ?').run(newStatus, msgId, userId);
+        emit(userId, 'message_ack', { messageId: msgId, status: newStatus });
+      } catch (err) {
+        console.error('message_ack handler error:', err?.message || err);
+      }
+    });
+
     // Handle message/status revocations (delete for everyone)
     client.on('message_revoke_everyone', async (after, before) => {
       try {
