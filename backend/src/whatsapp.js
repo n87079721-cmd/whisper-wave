@@ -2099,8 +2099,14 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
           emit(userId, 'message', { contactId, msgId: replyId });
         } catch (err) {
           console.error('Failed to send auto-reply:', err?.message || err);
+          debugLog(db, userId, 'auto_reply_failed', { contact: contactName || phone, error: err?.message || String(err), replyPreview: replyText.slice(0, 80) });
           inst.pendingAutoReplies.delete(jid);
           await clearTypingState(userId, jid);
+          // Queue for retry when connection restores
+          if (inst.failedReplyQueue.length < 20) {
+            inst.failedReplyQueue.push({ jid, contactId, contactName, phone, replyText, latestMessageId, queuedAt: Date.now() });
+            debugLog(db, userId, 'reply_queued_for_retry', { contact: contactName || phone, queueSize: inst.failedReplyQueue.length });
+          }
         }
       }, typingDuration);
     } catch (err) {
