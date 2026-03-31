@@ -2218,7 +2218,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     speed,
   });
 
-  clearPendingAutoReply(userId, jid);
+  clearPendingAutoReply(userId, jid, { db });
 
   const pendingReply = {
     delayTimer: null,
@@ -2227,7 +2227,11 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     // Store metadata so we can rescue this reply if connection drops
     jid, contactId, contactName, phone, replyText,
     scheduledAt: Date.now(),
+    _db: db,
   };
+
+  // Persist to DB so it survives restarts
+  savePendingReplyToDb(db, userId, pendingReply);
 
   pendingReply.delayTimer = setTimeout(async () => {
     try {
@@ -2269,17 +2273,16 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
           debugLog(db, userId, 'auto_reply_sent', { contact: contactName || phone, replyPreview: replyText.slice(0, 80), replyLength: replyText.length, quoted: !!latestMessageId });
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
+          // Remove from DB — successfully sent
+          removePendingReplyFromDb(db, userId, jid);
           emit(userId, 'message', { contactId, msgId: replyId });
         } catch (err) {
           console.error('Failed to send auto-reply:', err?.message || err);
           debugLog(db, userId, 'auto_reply_failed', { contact: contactName || phone, error: err?.message || String(err), replyPreview: replyText.slice(0, 80) });
           inst.pendingAutoReplies.delete(jid);
           await clearTypingState(userId, jid);
-          // Queue for retry when connection restores
-          if (inst.failedReplyQueue.length < 20) {
-            inst.failedReplyQueue.push({ jid, contactId, contactName, phone, replyText, latestMessageId, queuedAt: Date.now() });
-            debugLog(db, userId, 'reply_queued_for_retry', { contact: contactName || phone, queueSize: inst.failedReplyQueue.length });
-          }
+          // Keep in DB for retry on reconnect/restart (already persisted)
+          debugLog(db, userId, 'reply_persisted_for_retry', { contact: contactName || phone });
         }
       }, typingDuration);
     } catch (err) {
