@@ -2100,17 +2100,23 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
   debugLog(db, userId, 'message_received_for_ai', { contact: contactName || phone, body: (originalMsg?.body || '').slice(0, 80) });
 
   const inst = getInstance(userId);
+  const hadPendingReply = inst.pendingAutoReplies.has(jid);
   clearPendingAutoReply(userId, jid);
   // Reset cooldown so follow-up messages are never ignored
   inst.autoReplyCooldowns.delete(jid);
 
   const existing = inst.messageBatchBuffers.get(jid);
+  const hadPriorBatch = !!existing;
   if (existing) {
     clearTimeout(existing.timer);
     debugLog(db, userId, 'batch_extended', { contact: contactName || phone, batchSize: (existing.messages?.length || 0) + 1 });
   }
 
-  const batchEntry = existing || { messages: [], contactId, phone, contactName, latestOriginalMsg: originalMsg, latestMessageId: null };
+  // If we cancelled a pending reply or extended a batch, force the next reply (skip chance roll)
+  const forceReply = hadPendingReply || hadPriorBatch;
+
+  const batchEntry = existing || { messages: [], contactId, phone, contactName, latestOriginalMsg: originalMsg, latestMessageId: null, forceReply: false };
+  if (forceReply) batchEntry.forceReply = true;
   batchEntry.contactId = contactId;
   batchEntry.phone = phone;
   batchEntry.contactName = contactName;
