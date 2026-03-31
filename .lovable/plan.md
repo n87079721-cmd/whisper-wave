@@ -1,96 +1,34 @@
 
 
-## Plan: Per-Contact AI Personas (Custom Prompts per Contact)
+## Investigation: Why the AI Didn't Send the Reply
 
-### What This Adds
+### What Happened (from the debug log)
 
-A "Prompt Library" where you create named character personas (e.g. "Jeff Dunham", "Peanut", "Achmed"), then assign any persona to specific contacts. When the AI replies to that contact, it uses that persona's prompt instead of the global one.
+1. **05:05:37** — Deborah sent "Still hurting but imma be ok"
+2. **05:05:49** — AI generated a reply and scheduled it with a **424-second delay** (~7 minutes)
+3. **05:06:02** — Deborah sent another message "Glad you getting some rest babe"
+4. **05:06:14** — Smart batching kicked in: **cancelled the first reply** (correct) and started a new batch
+5. **After 05:06:14** — The second batch should have generated a new reply... but **nothing happened**
 
-### How It Works
+### Root Cause: `ai_reply_chance` (70%)
 
-1. **New DB table `prompts`** — stores reusable persona templates
-2. **New DB column on `contacts`** — `prompt_id` links a contact to a specific persona
-3. **When generating a reply** — check if the contact has an assigned `prompt_id`, use that prompt instead of the global `ai_system_prompt`
-4. **New UI section in Settings** — "Prompt Library" to create/edit/delete personas
-5. **Contact-level assignment** — in the contact info or conversations view, a dropdown to pick which persona that contact uses
+When the second batch fired `executeAutoReply`, it hit the **reply chance roll** (line 2168-2180 in whatsapp.js). There's a 70% chance to reply, 30% chance to skip. The second attempt likely rolled above 70 and was skipped silently — so the reply was never regenerated or sent.
 
-### Database Changes (`backend/src/db.js`)
+This is a design flaw: when a valid reply has already been generated and gets cancelled due to a new incoming message, the **replacement attempt should always reply** (100% chance), since we already committed to replying.
 
-New table:
-```sql
-CREATE TABLE IF NOT EXISTS prompts (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  name TEXT NOT NULL,
-  content TEXT NOT NULL,
-  created_at TEXT DEFAULT (datetime('now')),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-```
+### Fix
 
-Add column to contacts:
-```sql
-ALTER TABLE contacts ADD COLUMN prompt_id TEXT REFERENCES prompts(id) ON DELETE SET NULL;
-```
+**In `backend/src/whatsapp.js`** — pass a `forceReply` flag from the batch handler when there was a previously cancelled reply, and skip the reply-chance roll when `forceReply` is true.
 
-### Backend API (`backend/src/api.js`)
+Alternatively (simpler): when smart batching cancels an existing pending reply to re-batch, bypass the `replyChance` check on the next `executeAutoReply` call for that contact. This ensures that once the AI "decided" to reply, a follow-up message doesn't randomly cause it to ghost.
 
-New endpoints:
-- `GET /api/prompts` — list all prompts for the user
-- `POST /api/prompts` — create a new prompt `{name, content}`
-- `PUT /api/prompts/:id` — update a prompt
-- `DELETE /api/prompts/:id` — delete a prompt
-- `PUT /api/contacts/:id/prompt` — assign a prompt to a contact `{promptId}` (or `null` to unset)
+### Changes
 
-### Auto-Reply Logic (`backend/src/whatsapp.js`)
+1. **`backend/src/whatsapp.js`** — Track when a pending reply was cancelled due to re-batching. Pass `forceReply: true` to `executeAutoReply` when the batch includes a cancelled prior reply. Skip the `replyChance` roll when `forceReply` is true.
 
-In `executeAutoReply`, after fetching the contact, check if the contact has a `prompt_id`. If so, fetch that prompt's content and use it as `systemPrompt` instead of the global one:
+2. **`src/pages/AdminPage.tsx`** — Fix the "✔ sending now" display to check for `reply_cancelled` entries more reliably (the cancelled entry may arrive after the countdown reaches 0, causing a brief incorrect "sending now" state). Add a small poll/refresh when countdown hits 0 to re-check.
 
-```javascript
-// Replace the current global prompt lookup with:
-const contact = db.prepare("SELECT prompt_id FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
-let systemPrompt = '';
-if (contact?.prompt_id) {
-  const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contact.prompt_id, userId);
-  systemPrompt = promptRow?.content || '';
-}
-if (!systemPrompt) {
-  const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
-  systemPrompt = globalRow?.value || '';
-}
-```
+### Summary
 
-### Frontend Changes
-
-**Settings Page (`src/pages/SettingsPage.tsx`):**
-- New "Prompt Library" section below the existing system prompt
-- List of saved personas with name + preview
-- Create/edit/delete buttons
-- The global prompt remains as the "default fallback"
-
-**Conversations Page (`src/pages/ConversationsPage.tsx`):**
-- In the chat header or contact info area, add a small dropdown/chip showing which persona is assigned
-- Clicking it opens a selector to pick from the prompt library or "Default"
-
-**API client (`src/lib/api.ts`):**
-- Add `getPrompts()`, `createPrompt()`, `updatePrompt()`, `deletePrompt()`, `setContactPrompt()`
-
-### About "Looking Up Info"
-
-The AI cannot currently browse the web. It relies on what's in its training data and the conversation context. For a Jeff Dunham persona, the prompt itself would contain all the character details. The AI model (GPT-4o) already knows about public figures like Jeff Dunham from its training data — the prompt just needs to tell it to act as that character.
-
-### Example Jeff Dunham Prompt
-
-A pre-built "Jeff Dunham" persona would be included as a starter template:
-
-> *"You are Jeff Dunham, the world-famous ventriloquist and comedian. You're known for your characters like Peanut, Walter, Achmed the Dead Terrorist, Bubba J, and José Jalapeño. You're witty, sharp, and love making people laugh. You sometimes slip into your characters mid-conversation..."*
-
-### Files Changed
-
-- **backend/src/db.js** — Add `prompts` table, add `prompt_id` column to contacts
-- **backend/src/api.js** — CRUD endpoints for prompts + contact prompt assignment
-- **backend/src/whatsapp.js** — Per-contact prompt lookup in `executeAutoReply`
-- **src/lib/api.ts** — New API methods
-- **src/pages/SettingsPage.tsx** — Prompt Library UI
-- **src/pages/ConversationsPage.tsx** — Per-contact persona selector in chat
+The AI **did** try to reply, but smart batching cancelled the first reply when a new message came in. The second attempt then randomly rolled a "skip" on the 70% reply chance. The fix ensures that re-batched replies always go through (100% chance) since the AI already committed to replying.
 
