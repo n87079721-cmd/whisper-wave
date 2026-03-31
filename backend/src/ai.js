@@ -242,21 +242,3 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName)
   return reply;
 }
 
-// Lazy fs import helper (since this is an ES module)
-let _fs = null;
-function await_fs() {
-  if (!_fs) {
-    const { createRequire } = await_createRequire();
-    const require = createRequire(import.meta.url);
-    _fs = require('fs');
-  }
-  return _fs;
-}
-
-let _createRequire = null;
-function await_createRequire() {
-  if (!_createRequire) {
-    _createRequire = { createRequire };
-  }
-  return _createRequire;
-}
