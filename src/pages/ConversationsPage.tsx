@@ -247,6 +247,14 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       es.addEventListener('contacts_sync', handleContactsEvent);
       es.addEventListener('message_edited', handleEditedEvent);
       es.addEventListener('message_ack', handleAckEvent);
+      es.addEventListener('message_reaction', (event: Event) => {
+        try {
+          const data = event instanceof MessageEvent ? JSON.parse(event.data) : null;
+          if (data?.messageId && data?.reactions) {
+            setMessages(prev => prev.map(m => m.id === data.messageId ? { ...m, reactions: JSON.stringify(data.reactions) } : m));
+          }
+        } catch {}
+      });
       es.onerror = () => {};
     } catch {}
 
