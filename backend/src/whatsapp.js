@@ -623,7 +623,7 @@ export function initWhatsApp(userId, db) {
   startConnection(userId, db);
   return {
     getState: () => getWhatsAppState(userId),
-    sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
+    sendTextMessage: (jid, text, options) => sendTextMessage(userId, jid, text, options),
     sendMediaMessage: (jid, payload) => sendMediaMessage(userId, jid, payload),
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
     editMessage: (messageId, newContent) => editMessage(userId, db, messageId, newContent),
@@ -648,7 +648,7 @@ export function getOrInitWhatsApp(userId, db) {
 
   return {
     getState: () => getWhatsAppState(userId),
-    sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
+    sendTextMessage: (jid, text, options) => sendTextMessage(userId, jid, text, options),
     sendMediaMessage: (jid, payload) => sendMediaMessage(userId, jid, payload),
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
     editMessage: (messageId, newContent) => editMessage(userId, db, messageId, newContent),
