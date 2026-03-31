@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
+import { execSync } from 'child_process';
 import { generateReply, shouldReact, shouldAlsoReplyAfterReaction } from './ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -870,12 +871,38 @@ async function startConnection(userId, db, options = {}) {
   // Destroy previous client and kill any zombie Chromium browser
   if (inst.client) {
     try {
-      // pupBrowser is a property, not a method
       const browser = inst.client.pupBrowser;
       if (browser) await browser.close().catch(() => {});
     } catch {}
     try { await inst.client.destroy(); } catch {}
     inst.client = null;
+  }
+
+  // Force-kill ALL orphaned Chromium processes that lock the userDataDir
+  // This is the real fix for "browser is already running" errors
+  try {
+    const sessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
+    // Kill any chromium using this specific session directory
+    try {
+      execSync(`pkill -f "userDataDir=${sessionDir}" 2>/dev/null || true`, { timeout: 5000 });
+    } catch {}
+    // Also kill any chromium with this userId in args
+    try {
+      execSync(`pkill -f "session-${userId}" 2>/dev/null || true`, { timeout: 5000 });
+    } catch {}
+    // Remove the SingletonLock file that prevents new browser launch
+    const lockFile = path.join(sessionDir, 'SingletonLock');
+    if (fs.existsSync(lockFile)) {
+      fs.unlinkSync(lockFile);
+      console.log(`🔓 [${userId}] Removed browser SingletonLock`);
+    }
+    // Also check Default profile dir
+    const defaultLock = path.join(sessionDir, 'Default', 'SingletonLock');
+    if (fs.existsSync(defaultLock)) {
+      fs.unlinkSync(defaultLock);
+    }
+  } catch (e) {
+    console.warn(`⚠️ [${userId}] Lock cleanup: ${e?.message}`);
   }
 
   // Clean wwebjs cache (can get corrupted after logout/crash)
