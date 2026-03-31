@@ -153,10 +153,15 @@ export function shouldAlsoReplyAfterReaction() {
  * @param {string} contactName - Name of the contact for context
  * @returns {Promise<string>} The generated reply text
  */
-export async function generateReply(apiKey, messages, systemPrompt, contactName) {
+export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
 
-  const prompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  let prompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
+
+  // Hint the AI to address all unreplied messages when there are multiple
+  if (unrepliedCount && unrepliedCount > 1) {
+    prompt += `\n\nIMPORTANT: The contact sent ${unrepliedCount} messages since your last reply. Make sure your response addresses all of them naturally in one go, don't ignore any.`;
+  }
 
   let hasImages = false;
 

@@ -2033,6 +2033,8 @@ function clearPendingAutoReply(userId, jid, { rescue = false } = {}) {
   const pending = inst.pendingAutoReplies.get(jid);
   if (!pending) return;
 
+  // Mark as aborted so any in-flight timer callbacks won't send
+  pending.aborted = true;
   if (pending.delayTimer) clearTimeout(pending.delayTimer);
   if (pending.typingTimer) clearTimeout(pending.typingTimer);
   inst.pendingAutoReplies.delete(jid);
@@ -2178,8 +2180,15 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     }
   }
 
-  debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, historyLength: messages.length });
-  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
+  // Count unreplied messages (received after last sent)
+  let unrepliedCount = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].direction === 'sent') break;
+    if (messages[i].direction === 'received') unrepliedCount++;
+  }
+
+  debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, historyLength: messages.length, unrepliedCount });
+  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone, { unrepliedCount });
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
   if (isReplyTooSimilar(replyText, recentOutgoing)) {
@@ -2226,6 +2235,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   };
 
   pendingReply.delayTimer = setTimeout(async () => {
+    if (pendingReply.aborted) return;
     try {
       // Send typing indicator
       const chatId = fromJid(jid);
@@ -2236,6 +2246,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       } catch {}
 
       pendingReply.typingTimer = setTimeout(async () => {
+        if (pendingReply.aborted) return;
         try {
           const sent = await sendTextMessage(userId, jid, replyText, { quotedMessageId: latestMessageId });
           const replyId = sent?.id?._serialized || uuid();
