@@ -365,7 +365,11 @@ const AdminPage = () => {
                         </span>
                       </div>
                       {renderLogDetails(entry)}
-                      {entry.action === 'reply_scheduled' && entry.delayMs && (
+                      {entry.action === 'reply_scheduled' && entry.delayMs && !debugLogs.some(
+                        (other) => other.contact === entry.contact &&
+                          (other.action === 'auto_reply_sent' || other.action === 'typing_started') &&
+                          other.id > entry.id
+                      ) && (
                         <Countdown scheduledAt={entry.created_at} delayMs={entry.delayMs} contact={entry.contact} onCancelled={fetchDebugLogs} />
                       )}
                     </div>
