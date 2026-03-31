@@ -1669,6 +1669,51 @@ RULES:
     }
   });
 
+  // ── Admin: Debug logs ─────────────────────────────────
+  router.get('/admin/debug-logs', (req, res) => {
+    try {
+      const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
+      if (!firstUser || firstUser.id !== req.userId) {
+        return res.status(403).json({ error: 'Admin access required' });
+      }
+
+      const limit = Math.min(parseInt(req.query.limit) || 200, 500);
+      const targetUserId = req.query.userId || null;
+
+      let query = `SELECT id, user_id, data, created_at FROM stats WHERE event = 'debug_log'`;
+      const params = [];
+      if (targetUserId) {
+        query += ` AND user_id = ?`;
+        params.push(targetUserId);
+      }
+      query += ` ORDER BY id DESC LIMIT ?`;
+      params.push(limit);
+
+      const rows = db.prepare(query).all(...params);
+      res.json(rows.map(r => {
+        let parsed = {};
+        try { parsed = JSON.parse(r.data || '{}'); } catch {}
+        return { id: r.id, userId: r.user_id, ...parsed, created_at: r.created_at };
+      }));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Admin: Clear debug logs ───────────────────────────
+  router.delete('/admin/debug-logs', (req, res) => {
+    try {
+      const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
+      if (!firstUser || firstUser.id !== req.userId) {
+        return res.status(403).json({ error: 'Admin access required' });
+      }
+      db.prepare(`DELETE FROM stats WHERE event = 'debug_log'`).run();
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
 
