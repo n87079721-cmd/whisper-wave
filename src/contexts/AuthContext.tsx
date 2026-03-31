@@ -39,12 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const stored = localStorage.getItem('wa_api_url');
     if (stored) return stored.replace(/\/$/, '');
     const loc = window.location;
-    if (loc.hostname !== 'localhost' && loc.hostname !== '127.0.0.1') {
-      return loc.origin;
-    }
-    if (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1') {
-      return 'http://localhost:3002';
-    }
+    return loc.origin;
     return '';
   };
 
