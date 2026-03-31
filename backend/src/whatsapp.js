@@ -2572,6 +2572,11 @@ export async function shutdownAllWhatsAppClients() {
     if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
     inst.isConnecting = false;
 
+    // Rescue all pending auto-replies to DB before shutdown
+    inst.pendingAutoReplies.forEach((pending, pendingJid) => {
+      clearPendingAutoReply(userId, pendingJid, { rescue: true, db: pending._db });
+    });
+
     if (inst.client) {
       const clientRef = inst.client;
       inst.client = null;
