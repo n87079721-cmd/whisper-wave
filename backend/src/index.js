@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { initDatabase } from './db.js';
 import { createApiRouter } from './api.js';
-import { autoReconnectAll } from './whatsapp.js';
+import { autoReconnectAll, shutdownAllWhatsAppClients } from './whatsapp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,8 +36,36 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(frontendPath, 'index.html'));
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 WA Controller running on port ${PORT}`);
-  // Auto-reconnect all users who had active sessions
+  // Auto-reconnect saved sessions gradually so multiple restores do not fight each other
   setTimeout(() => autoReconnectAll(db), 3000);
+});
+
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`🛑 Received ${signal}, shutting down gracefully...`);
+
+  try {
+    await shutdownAllWhatsAppClients();
+  } catch (err) {
+    console.error('WhatsApp shutdown error:', err?.message || err);
+  }
+
+  server.close(() => {
+    process.exit(0);
+  });
+
+  setTimeout(() => process.exit(1), 10000).unref();
+}
+
+process.on('SIGINT', () => {
+  gracefulShutdown('SIGINT');
+});
+
+process.on('SIGTERM', () => {
+  gracefulShutdown('SIGTERM');
 });
