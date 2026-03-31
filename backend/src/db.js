@@ -128,7 +128,24 @@ function ensureCurrentTables(db) {
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS prompts (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
+
+  // Add prompt_id column to contacts if missing
+  try {
+    const contactCols = getColumnNames(db, 'contacts');
+    if (!contactCols.has('prompt_id')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN prompt_id TEXT REFERENCES prompts(id) ON DELETE SET NULL");
+    }
+  } catch {}
 
   // Add archive + unread columns if missing
   try {

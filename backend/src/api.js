@@ -1771,6 +1771,61 @@ RULES:
     }
   });
 
+  // ── Prompt Library CRUD ──────────────────────────────
+  router.get('/prompts', (req, res) => {
+    try {
+      const prompts = db.prepare('SELECT * FROM prompts WHERE user_id = ? ORDER BY created_at DESC').all(req.userId);
+      res.json(prompts);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.post('/prompts', (req, res) => {
+    try {
+      const { name, content } = req.body;
+      if (!name || !content) return res.status(400).json({ error: 'Name and content required' });
+      const id = uuid();
+      db.prepare('INSERT INTO prompts (id, user_id, name, content) VALUES (?, ?, ?, ?)').run(id, req.userId, name, content);
+      res.json({ id, name, content, user_id: req.userId, created_at: new Date().toISOString() });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.put('/prompts/:id', (req, res) => {
+    try {
+      const { name, content } = req.body;
+      if (!name || !content) return res.status(400).json({ error: 'Name and content required' });
+      const result = db.prepare('UPDATE prompts SET name = ?, content = ? WHERE id = ? AND user_id = ?').run(name, content, req.params.id, req.userId);
+      if (result.changes === 0) return res.status(404).json({ error: 'Prompt not found' });
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.delete('/prompts/:id', (req, res) => {
+    try {
+      // Unset prompt_id on contacts using this prompt
+      db.prepare('UPDATE contacts SET prompt_id = NULL WHERE prompt_id = ? AND user_id = ?').run(req.params.id, req.userId);
+      const result = db.prepare('DELETE FROM prompts WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
+      if (result.changes === 0) return res.status(404).json({ error: 'Prompt not found' });
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Assign prompt to a contact
+  router.put('/contacts/:id/prompt', (req, res) => {
+    try {
+      const { promptId } = req.body;
+      db.prepare('UPDATE contacts SET prompt_id = ? WHERE id = ? AND user_id = ?').run(promptId || null, req.params.id, req.userId);
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Get contact's assigned prompt
+  router.get('/contacts/:id/prompt', (req, res) => {
+    try {
+      const row = db.prepare('SELECT prompt_id FROM contacts WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
+      res.json({ promptId: row?.prompt_id || null });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // ── Admin: Clear debug logs ───────────────────────────
   router.delete('/admin/debug-logs', (req, res) => {
     try {
