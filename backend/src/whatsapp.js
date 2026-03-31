@@ -2238,7 +2238,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   debugLog(db, userId, 'reply_scheduled', {
     contact: contactName || phone,
-    replyPreview: replyText.slice(0, 80),
+    replyPreview: replyText,
     replyLength: replyText.length,
     delayMs: delay,
     delaySec: Math.round(delay / 1000),
