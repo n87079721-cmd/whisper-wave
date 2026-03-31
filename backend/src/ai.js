@@ -169,7 +169,6 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName)
       // Image message with a local file — build multimodal content
       if (m.type === 'image' && m.media_path) {
         try {
-          const fs = await_fs();
           if (fs.existsSync(m.media_path)) {
             hasImages = true;
             const imageBuffer = fs.readFileSync(m.media_path);
