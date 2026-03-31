@@ -6,7 +6,7 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation, streamMediaForMessage } from './whatsapp.js';
-import { initWhatsApp, getAutoReplyDebugLogs } from './whatsapp.js';
+import { initWhatsApp } from './whatsapp.js';
 import { archiveChat, markChatRead, syncArchiveStates } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio, BG_SOUND_PROMPTS } from './elevenlabs.js';
 import multer from 'multer';
@@ -468,8 +468,6 @@ export function createApiRouter(db) {
         send('call', data);
       } else if (event === 'message_edited') {
         send('message_edited', data);
-      } else if (event === 'typing') {
-        send('typing', data);
       }
     });
 
@@ -1265,7 +1263,7 @@ RULES:
       const wa = getWA(req);
       const currentState = wa.getState();
 
-      if (currentState.status === 'connected') {
+      if (currentState.status === 'reconnecting' || currentState.status === 'qr_waiting') {
         return res.json({ success: true, state: currentState, skipped: true });
       }
 
@@ -1632,16 +1630,6 @@ RULES:
   });
 
   // ── Admin: Delete a user ───────────────────────────────
-  // ── Auto-reply debug logs ─────────────────────────────
-  router.get('/auto-reply-debug', (req, res) => {
-    try {
-      const logs = getAutoReplyDebugLogs(req.userId);
-      res.json(logs);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   router.delete('/admin/users/:userId', async (req, res) => {
     try {
       const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
@@ -1698,29 +1686,12 @@ RULES:
 }
 
 function getConfig(db, userId, key) {
-  try {
-    const row = db.prepare('SELECT value FROM config WHERE user_id = ? AND key = ?').get(userId, key);
-    if (row) return row.value || null;
-  } catch {}
-  // Fallback: query without user_id (legacy schema)
-  try {
-    const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key);
-    return row?.value || null;
-  } catch {}
-  return null;
+  const row = db.prepare('SELECT value FROM config WHERE user_id = ? AND key = ?').get(userId, key);
+  return row?.value || null;
 }
 
 function setConfig(db, userId, key, value) {
-  try {
-    db.prepare('INSERT OR REPLACE INTO config (user_id, key, value) VALUES (?, ?, ?)').run(userId, key, value);
-  } catch {
-    // Fallback: legacy schema without user_id
-    try {
-      db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, value);
-    } catch (err) {
-      console.error('setConfig fallback error:', err?.message);
-    }
-  }
+  db.prepare('INSERT OR REPLACE INTO config (user_id, key, value) VALUES (?, ?, ?)').run(userId, key, value);
 }
 
 function getStats(db, userId) {

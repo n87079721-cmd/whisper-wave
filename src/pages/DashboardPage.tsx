@@ -33,11 +33,7 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
 
   const handleConnect = async () => {
     setConnecting(true);
-    try {
-      await api.reconnect();
-      toast.success(isReconnecting ? 'Retrying connection...' : 'Connecting...');
-      refresh();
-    }
+    try { await api.reconnect(); toast.success('Connecting...'); refresh(); }
     catch (err: any) { toast.error(err?.message || 'Failed'); }
     finally { setConnecting(false); }
   };
@@ -105,10 +101,10 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
             </div>
             <button
               onClick={isConnected ? handleDisconnect : handleConnect}
-              disabled={connecting}
+              disabled={isReconnecting || connecting}
               className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-60 flex items-center gap-1.5"
             >
-              {connecting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting...</> : isConnected ? 'Disconnect' : isReconnecting ? 'Reconnect now' : 'Connect'}
+              {connecting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting...</> : isConnected ? 'Disconnect' : 'Connect'}
             </button>
           </div>
 

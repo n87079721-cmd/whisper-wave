@@ -512,22 +512,10 @@ export function getWhatsAppState(userId) {
   };
 }
 
-function getSessionDirectoryCandidates(userId) {
-  return [
-    path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`),
-    path.join(DATA_DIR, '.wwebjs_auth', `session-${userId}`),
-  ];
-}
-
 function hasSavedSession(userId) {
   try {
-    return getSessionDirectoryCandidates(userId).some((sessionDir) => {
-      try {
-        return fs.existsSync(sessionDir) && fs.statSync(sessionDir).isDirectory();
-      } catch {
-        return false;
-      }
-    });
+    const sessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
+    return fs.existsSync(sessionDir);
   } catch {
     return false;
   }
@@ -619,7 +607,7 @@ export function initWhatsApp(userId, db) {
 export function getOrInitWhatsApp(userId, db) {
   const inst = getInstance(userId);
 
-  if (!inst.client && !inst.isConnecting && (hasSavedSession(userId) || inst.connectionStatus === 'reconnecting')) {
+  if (!inst.client && !inst.isConnecting && hasSavedSession(userId)) {
     startConnection(userId, db).catch((err) => {
       console.error(`Auto-resume failed [${userId}]:`, err?.message || err);
     });
@@ -785,7 +773,8 @@ export function autoReconnectAll(db) {
   try {
     const users = db.prepare('SELECT id, username FROM users').all();
     for (const user of users) {
-      if (hasSavedSession(user.id)) {
+      const sessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${user.id}`);
+      if (fs.existsSync(sessionDir)) {
         console.log(`🔄 Auto-reconnecting user: ${user.username} (${user.id})`);
         startConnection(user.id, db);
       }
@@ -1169,16 +1158,6 @@ async function startConnection(userId, db, options = {}) {
       } catch (err) {
         console.error('Call event error:', err?.message || err);
       }
-    });
-
-    // ── Typing detection ──
-    client.on('chat_state_changed', (chat, state) => {
-      try {
-        const chatJid = toJid(chat?.id?._serialized || '');
-        if (!chatJid || chatJid === 'status@broadcast') return;
-        const isTyping = state === 'typing' || state === 'composing';
-        emit(userId, 'typing', { jid: chatJid, isTyping });
-      } catch {}
     });
 
     // ── Message edit events ──
@@ -1753,39 +1732,9 @@ export async function recoverSingleChat(userId, db, contactId) {
 
 // ── Auto-reply ──
 
-// In-memory ring buffer for auto-reply debug logs (last 200 entries)
-const autoReplyDebugLogs = [];
-const MAX_DEBUG_LOGS = 200;
-
-function logAutoReplyDebug(userId, jid, contactName, decision, detail = '') {
-  const entry = {
-    timestamp: new Date().toISOString(),
-    userId,
-    jid: jid || '',
-    contact: contactName || '',
-    decision,
-    detail,
-  };
-  autoReplyDebugLogs.push(entry);
-  if (autoReplyDebugLogs.length > MAX_DEBUG_LOGS) autoReplyDebugLogs.shift();
-  console.log(`[AR-DEBUG][${userId}] ${decision} | ${contactName || jid} | ${detail}`);
-}
-
-export function getAutoReplyDebugLogs(userId) {
-  return autoReplyDebugLogs.filter(l => l.userId === userId).slice(-100);
-}
-
 function getConfigValue(db, userId, key, fallback) {
-  try {
-    const row = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = ?").get(userId, key);
-    if (row) return row.value ?? fallback;
-  } catch {}
-  // Fallback: query without user_id (legacy schema)
-  try {
-    const row = db.prepare("SELECT value FROM config WHERE key = ?").get(key);
-    return row?.value ?? fallback;
-  } catch {}
-  return fallback;
+  const row = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = ?").get(userId, key);
+  return row?.value ?? fallback;
 }
 
 function isWithinActiveHours(db, userId) {
@@ -1820,7 +1769,7 @@ function calculateDelay(replyLength, speed) {
   // Ranges: [min, max] in milliseconds
   // fast = 3-10 mins, normal = 6-15 mins, slow/celebrity = 30 mins - 2 days
   const ranges = {
-    fast:   { short: [15000, 45000],     medium: [30000, 75000],     long: [45000, 120000] },
+    fast:   { short: [180000, 420000],   medium: [240000, 540000],   long: [300000, 600000] },
     normal: { short: [360000, 600000],   medium: [480000, 780000],   long: [540000, 900000] },
     slow:   { short: [1800000, 14400000], medium: [3600000, 43200000], long: [7200000, 172800000] },
   };
@@ -1843,18 +1792,12 @@ async function sendReaction(userId, jid, msg, emoji) {
 }
 
 async function handleAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg) {
-  const autoValue = getConfigValue(db, userId, 'automation_enabled', 'true');
-  if (autoValue !== 'true') {
-    logAutoReplyDebug(userId, jid, contactName, 'SKIP:AUTOMATION_OFF', `automation_enabled=${autoValue}`);
-    return;
-  }
+  const autoConfig = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'automation_enabled'").get(userId);
+  if (!autoConfig || autoConfig.value !== 'true') return;
 
   // Skip archived chats
   const contactRow = db.prepare('SELECT is_archived FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
-  if (contactRow?.is_archived) {
-    logAutoReplyDebug(userId, jid, contactName, 'SKIP:ARCHIVED', 'Chat is archived');
-    return;
-  }
+  if (contactRow?.is_archived) return;
 
   const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
   if (Math.random() * 100 > replyChance) {
@@ -1862,14 +1805,9 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
     if (reactionEmoji && originalMsg) {
       const reactDelay = Math.floor(Math.random() * 5000) + 2000;
       setTimeout(() => sendReaction(userId, jid, originalMsg, reactionEmoji), reactDelay);
-      logAutoReplyDebug(userId, jid, contactName, 'SKIP:REPLY_CHANCE', `Failed ${replyChance}% roll, reacted with ${reactionEmoji}`);
-    } else {
-      logAutoReplyDebug(userId, jid, contactName, 'SKIP:REPLY_CHANCE', `Failed ${replyChance}% roll, no reaction`);
     }
     return;
   }
-
-  logAutoReplyDebug(userId, jid, contactName, 'QUEUED', `Passed ${replyChance}% chance, batching for 8s`);
 
   const inst = getInstance(userId);
   const existing = inst.messageBatchBuffers.get(jid);
@@ -1892,60 +1830,21 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
   const inst = getInstance(userId);
   const now = Date.now();
   const lastReply = inst.autoReplyCooldowns.get(jid) || 0;
-  const cooldownMs = 30000; // 30 second cooldown — just enough to prevent true duplicates
-  if (now - lastReply < cooldownMs) {
-    logAutoReplyDebug(userId, jid, contactName, 'SKIP:COOLDOWN', `${Math.round((cooldownMs - (now - lastReply)) / 1000)}s left`);
-    return;
-  }
+  if (now - lastReply < 30000) return;
 
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
-  // Fallback: try without user_id too
-  let apiKey = keyRow?.value;
-  if (!apiKey) {
-    try {
-      const fallbackRow = db.prepare("SELECT value FROM config WHERE key = 'openai_api_key'").get();
-      apiKey = fallbackRow?.value;
-    } catch {}
-  }
-  if (!apiKey) {
-    logAutoReplyDebug(userId, jid, contactName, 'SKIP:NO_API_KEY', 'OpenAI API key not configured');
-    return;
-  }
+  if (!keyRow?.value) return;
 
-  const systemPrompt = getConfigValue(db, userId, 'ai_system_prompt', '');
+  const promptRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
+  const systemPrompt = promptRow?.value || '';
 
-  const rawMessages = db.prepare(`
+  const messages = db.prepare(`
     SELECT content, direction, type FROM messages 
-    WHERE contact_id = ? AND user_id = ? AND (content IS NOT NULL OR type IN ('image','video','voice','sticker','document'))
+    WHERE contact_id = ? AND user_id = ? AND type = 'text' AND content IS NOT NULL AND content != ''
     ORDER BY timestamp DESC LIMIT 50
   `).all(contactId, userId).reverse();
 
-  // Map non-text messages to descriptive placeholders so AI understands full context
-  const mediaLabels = { image: 'an image', video: 'a video', voice: 'a voice note', sticker: 'a sticker', document: 'a document' };
-  const messages = rawMessages.map(m => {
-    if (m.type === 'text' && m.content) return m;
-    if (m.type !== 'text') {
-      return { ...m, content: `[Sent ${mediaLabels[m.type] || 'media'}]`, type: 'text' };
-    }
-    return m;
-  }).filter(m => m.content);
-
-  if (messages.length === 0) {
-    logAutoReplyDebug(userId, jid, contactName, 'SKIP:NO_CONTEXT', 'No messages in context');
-    return;
-  }
-
-  // Dead conversation detection: if last incoming message is a low-effort reply, sometimes just don't respond (40% chance to skip)
-  const lastIncoming = [...messages].reverse().find(m => m.direction === 'received');
-  if (lastIncoming?.content) {
-    const lowEffort = ['lol', 'ok', 'okay', 'k', 'yeah', 'yea', 'ya', 'mhm', 'hmm', 'hm', 'cool', 'nice', 'true', 'facts', 'bet', 'word', 'yep', 'yup', 'aight', 'ight', 'lmao', 'haha', '😂', '💀', '👍', '😭'];
-    if (lowEffort.includes(lastIncoming.content.toLowerCase().trim())) {
-      if (Math.random() < 0.4) {
-        logAutoReplyDebug(userId, jid, contactName, 'SKIP:DEAD_CONVO', `Low-effort msg: "${lastIncoming.content}"`);
-        return;
-      }
-    }
-  }
+  if (messages.length === 0) return;
 
   // lastMsgContent no longer needed — delay is based on reply length
   const speed = getConfigValue(db, userId, 'ai_response_speed', 'normal');
@@ -1956,42 +1855,16 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
     setTimeout(() => sendReaction(userId, jid, originalMsg, reactionEmoji), reactDelay);
     if (!shouldAlsoReplyAfterReaction()) {
       inst.autoReplyCooldowns.set(jid, Date.now());
-      logAutoReplyDebug(userId, jid, contactName, 'SKIP:REACT_ONLY', `Reacted with ${reactionEmoji}, no text`);
       return;
     }
   }
 
-  logAutoReplyDebug(userId, jid, contactName, 'GENERATING', 'Calling OpenAI...');
-  let replyText = await generateReply(apiKey, messages, systemPrompt, contactName || phone);
+  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
-
-  // Duplicate check: compare against last 3 AI-sent messages
-  const recentSent = db.prepare(`
-    SELECT content FROM messages 
-    WHERE contact_id = ? AND user_id = ? AND direction = 'sent' AND type = 'text' AND content IS NOT NULL
-    ORDER BY timestamp DESC LIMIT 3
-  `).all(contactId, userId);
-
-  const isTooSimilar = recentSent.some(prev => {
-    if (!prev.content) return false;
-    const prevWords = new Set(prev.content.toLowerCase().split(/\s+/));
-    const newWords = replyText.toLowerCase().split(/\s+/);
-    if (newWords.length === 0) return false;
-    const overlap = newWords.filter(w => prevWords.has(w)).length / newWords.length;
-    return overlap > 0.7;
-  });
-
-  if (isTooSimilar) {
-    logAutoReplyDebug(userId, jid, contactName, 'REGENERATING', 'Reply too similar to recent, retrying');
-    replyText = await generateReply(apiKey, messages, systemPrompt + '\n\nIMPORTANT: Your last few replies were very similar. Say something completely different this time. Don\'t repeat yourself.', contactName || phone);
-    replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
-  }
   // Use REPLY length for delay (not incoming message length)
   const delay = calculateDelay(replyText.length, speed);
   // Typing duration scales with reply length: ~1s per 10 chars, min 2s, max 12s
   const typingDuration = Math.min(Math.max(Math.floor(replyText.length / 10) * 1000, 2000), 12000) + Math.floor(Math.random() * 2000);
-
-  logAutoReplyDebug(userId, jid, contactName, 'SCHEDULED', `Delay=${Math.round(delay / 1000)}s, speed=${speed}, typing=${Math.round(typingDuration / 1000)}s: "${replyText.substring(0, 60)}..."`);
 
   setTimeout(async () => {
     try {
@@ -2018,9 +1891,8 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
           `).run(replyId, userId, contactId, jid, replyText);
           db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'auto_reply_sent', ?)`).run(userId, JSON.stringify({ contactId }));
           inst.autoReplyCooldowns.set(jid, Date.now());
-          logAutoReplyDebug(userId, jid, contactName, 'SENT', `"${replyText.substring(0, 60)}..."`);
         } catch (err) {
-          logAutoReplyDebug(userId, jid, contactName, 'FAILED', err?.message || String(err));
+          console.error('Failed to send auto-reply:', err?.message || err);
         }
       }, typingDuration);
     } catch (err) {
