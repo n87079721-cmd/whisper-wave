@@ -1096,9 +1096,46 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   <Avatar contact={selectedContact} size="lg" />
                   <div className="min-w-0 flex-1 text-left">
                     <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
-                    <p className="text-xs text-muted-foreground truncate">tap for info</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {contactPromptId ? prompts.find(p => p.id === contactPromptId)?.name || 'Custom persona' : 'tap for info'}
+                    </p>
                   </div>
                 </button>
+                {/* Persona picker */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowPersonaPicker(v => !v)}
+                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${contactPromptId ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:bg-secondary'}`}
+                    title="AI Persona"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                  </button>
+                  {showPersonaPicker && (
+                    <div className="absolute right-0 top-full mt-1 w-52 rounded-lg bg-card border border-border shadow-lg z-50 py-1 max-h-60 overflow-y-auto">
+                      <button onClick={async () => {
+                        await api.setContactPrompt(selectedContact.id, null);
+                        setContactPromptId(null);
+                        setShowPersonaPicker(false);
+                        toast.success('Using default prompt');
+                      }} className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors ${!contactPromptId ? 'text-primary font-medium' : 'text-foreground'}`}>
+                        Default (global prompt)
+                      </button>
+                      {prompts.map(p => (
+                        <button key={p.id} onClick={async () => {
+                          await api.setContactPrompt(selectedContact.id, p.id);
+                          setContactPromptId(p.id);
+                          setShowPersonaPicker(false);
+                          toast.success(`Persona set to ${p.name}`);
+                        }} className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors ${contactPromptId === p.id ? 'text-primary font-medium' : 'text-foreground'}`}>
+                          {p.name}
+                        </button>
+                      ))}
+                      {prompts.length === 0 && (
+                        <p className="px-3 py-2 text-xs text-muted-foreground">No personas yet. Create one in Settings.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <button
                   onClick={() => { setChatSearchOpen(o => !o); setChatSearch(''); setTimeout(() => chatSearchInputRef.current?.focus(), 100); }}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
