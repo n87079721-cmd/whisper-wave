@@ -170,6 +170,19 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     return () => clearTimeout(timer);
   }, [showNewChat, contactSearch, refreshAllContacts]);
 
+  // Global search debounce
+  useEffect(() => {
+    if (!globalSearchQuery) { setGlobalSearchResults([]); return; }
+    setGlobalSearching(true);
+    const timer = setTimeout(() => {
+      api.searchMessages(globalSearchQuery, 30)
+        .then(results => setGlobalSearchResults(results))
+        .catch(() => setGlobalSearchResults([]))
+        .finally(() => setGlobalSearching(false));
+    }, 400);
+    return () => { clearTimeout(timer); setGlobalSearching(false); };
+  }, [globalSearchQuery]);
+
   useEffect(() => {
     if (!initialContact) return;
     setSelectedContact(initialContact);
