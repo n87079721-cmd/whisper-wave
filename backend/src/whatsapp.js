@@ -2013,7 +2013,44 @@ function clearPendingAutoReply(userId, jid, { rescue = false, db = null } = {}) 
   }
 }
 
-async function sendReaction(userId, jid, msg, emoji) {
+// ── DB persistence for pending replies (survive restarts) ──
+
+function savePendingReplyToDb(db, userId, pending) {
+  if (!db) return;
+  try {
+    db.prepare(`
+      INSERT OR REPLACE INTO pending_replies (user_id, jid, contact_id, contact_name, phone, reply_text, latest_message_id, scheduled_at, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+    `).run(userId, pending.jid, pending.contactId, pending.contactName || null, pending.phone || null, pending.replyText, pending.latestMessageId || null, new Date(pending.scheduledAt || Date.now()).toISOString());
+  } catch (err) {
+    console.error(`Failed to persist pending reply:`, err?.message);
+  }
+}
+
+function removePendingReplyFromDb(db, userId, jid) {
+  if (!db) return;
+  try {
+    db.prepare("DELETE FROM pending_replies WHERE user_id = ? AND jid = ? AND status = 'pending'").run(userId, jid);
+  } catch {}
+}
+
+function loadPendingRepliesFromDb(db, userId) {
+  if (!db) return [];
+  try {
+    return db.prepare("SELECT * FROM pending_replies WHERE user_id = ? AND status = 'pending' ORDER BY queued_at ASC").all(userId);
+  } catch {
+    return [];
+  }
+}
+
+function clearAllPendingRepliesFromDb(db, userId) {
+  if (!db) return;
+  try {
+    db.prepare("DELETE FROM pending_replies WHERE user_id = ? AND status = 'pending'").run(userId);
+  } catch {}
+}
+
+
   const inst = getInstance(userId);
   if (!inst.client || inst.connectionStatus !== 'connected') return;
   try {
