@@ -43,6 +43,31 @@ const ACTION_CONFIG: Record<string, { icon: typeof Bot; color: string; label: st
   batch_auto_reply_error: { icon: AlertTriangle, color: 'text-red-500', label: 'Error' },
 };
 
+// Live countdown component for scheduled replies
+const Countdown = ({ scheduledAt, delayMs }: { scheduledAt: string; delayMs: number }) => {
+  const [now, setNow] = useState(Date.now());
+  
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const sendAt = new Date(scheduledAt).getTime() + delayMs;
+  const remaining = Math.max(0, Math.floor((sendAt - now) / 1000));
+
+  if (remaining <= 0) {
+    return <span className="text-[10px] font-medium text-green-400">✓ sending now</span>;
+  }
+
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+  return (
+    <span className="text-[10px] font-mono font-medium text-amber-400 tabular-nums">
+      ⏱ {mins}:{secs.toString().padStart(2, '0')}
+    </span>
+  );
+};
+
 const AdminPage = () => {
   const { user } = useAuth();
   const [users, setUsers] = useState<UserAccount[]>([]);
