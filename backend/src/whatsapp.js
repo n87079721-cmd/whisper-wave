@@ -2447,7 +2447,7 @@ async function softDisconnect(userId) {
   inst.autoReplyCooldowns.clear();
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
-  inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid, { rescue: true }));
+  inst.pendingAutoReplies.forEach((pending, pendingJid) => clearPendingAutoReply(userId, pendingJid, { rescue: true, db: pending._db }));
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
   if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
