@@ -470,6 +470,8 @@ export function createApiRouter(db) {
         send('message_edited', data);
       } else if (event === 'message_ack') {
         send('message_ack', data);
+      } else if (event === 'message_reaction') {
+        send('message_reaction', data);
       }
     });
 

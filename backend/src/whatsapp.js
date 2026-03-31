@@ -1334,6 +1334,40 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
+    // ── Reaction events ──
+    client.on('message_reaction', async (reaction) => {
+      try {
+        if (generation !== inst.connectionGeneration) return;
+        const msgId = reaction.msgId?._serialized || reaction.msgId?.id;
+        if (!msgId) return;
+        const senderJid = toJid(reaction.senderId || reaction.id?.participant || '');
+        const emoji = reaction.reaction || '';
+        const ts = Date.now();
+
+        // Update reactions JSON in DB
+        const row = db.prepare('SELECT reactions FROM messages WHERE id = ? AND user_id = ?').get(msgId, userId);
+        if (!row) return;
+
+        let reactions = [];
+        try { reactions = JSON.parse(row.reactions || '[]'); } catch {}
+
+        if (emoji) {
+          // Remove existing reaction from same sender, then add new one
+          reactions = reactions.filter(r => r.sender !== senderJid);
+          reactions.push({ emoji, sender: senderJid, timestamp: ts });
+        } else {
+          // Empty emoji = reaction removed
+          reactions = reactions.filter(r => r.sender !== senderJid);
+        }
+
+        db.prepare('UPDATE messages SET reactions = ? WHERE id = ? AND user_id = ?').run(JSON.stringify(reactions), msgId, userId);
+        emit(userId, 'message_reaction', { messageId: msgId, reactions });
+        console.log(`${emoji || '❌'} [${userId}] Reaction on ${msgId} from ${senderJid}`);
+      } catch (err) {
+        console.error('message_reaction handler error:', err?.message || err);
+      }
+    });
+
     // Handle message/status revocations (delete for everyone)
     client.on('message_revoke_everyone', async (after, before) => {
       try {

@@ -170,6 +170,9 @@ function ensureCurrentTables(db) {
     if (!messageCols.has('reply_to_sender')) {
       db.exec("ALTER TABLE messages ADD COLUMN reply_to_sender TEXT");
     }
+    if (!messageCols.has('reactions')) {
+      db.exec("ALTER TABLE messages ADD COLUMN reactions TEXT");
+    }
   } catch {}
 }
 
