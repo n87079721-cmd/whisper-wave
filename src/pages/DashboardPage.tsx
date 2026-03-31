@@ -19,10 +19,24 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
   const [phoneNumber, setPhoneNumber] = useState('');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [requestingCode, setRequestingCode] = useState(false);
+  const autoConnectTriggered = useRef(false);
 
   const isConnected = status === 'connected';
   const isWaiting = status === 'qr_waiting';
   const isReconnecting = status === 'reconnecting';
+
+  // Auto-connect on mount so QR code appears immediately
+  useEffect(() => {
+    if (!backendReady || autoConnectTriggered.current) return;
+    if (status === 'disconnected') {
+      autoConnectTriggered.current = true;
+      setConnecting(true);
+      api.reconnect()
+        .then(() => refresh())
+        .catch(() => {})
+        .finally(() => setConnecting(false));
+    }
+  }, [status, backendReady, refresh]);
 
   const statCards = [
     { label: 'Messages Sent', value: stats.messagesSent.toLocaleString(), icon: MessageSquare },
