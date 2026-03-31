@@ -2294,30 +2294,55 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   inst.pendingAutoReplies.set(jid, pendingReply);
 }
 
-// ── Drain failed reply queue on reconnect ──
+// ── Drain pending/failed replies from DB on reconnect/restart ──
 
 async function drainFailedReplyQueue(userId, db) {
   const inst = getInstance(userId);
-  const queue = inst.failedReplyQueue.splice(0);
+
+  // Also drain any in-memory leftovers (legacy)
+  const memQueue = inst.failedReplyQueue.splice(0);
+
+  // Load persisted pending replies from DB
+  const dbQueue = loadPendingRepliesFromDb(db, userId);
+
+  // Merge: DB rows + in-memory (deduplicate by jid)
+  const seen = new Set();
+  const queue = [];
+  for (const row of dbQueue) {
+    if (!seen.has(row.jid)) {
+      seen.add(row.jid);
+      queue.push({
+        jid: row.jid, contactId: row.contact_id, contactName: row.contact_name,
+        phone: row.phone, replyText: row.reply_text, latestMessageId: row.latest_message_id,
+        queuedAt: new Date(row.scheduled_at || row.queued_at).getTime(),
+      });
+    }
+  }
+  for (const item of memQueue) {
+    if (!seen.has(item.jid)) {
+      seen.add(item.jid);
+      queue.push(item);
+    }
+  }
+
   if (queue.length === 0) return;
 
-  debugLog(db, userId, 'draining_failed_replies', { count: queue.length });
-  console.log(`📤 [${userId}] Draining ${queue.length} failed auto-replies`);
+  debugLog(db, userId, 'draining_persisted_replies', { count: queue.length });
+  console.log(`📤 [${userId}] Draining ${queue.length} persisted auto-replies after restart/reconnect`);
 
   for (const item of queue) {
     // Skip if queued more than 30 minutes ago
     if (Date.now() - item.queuedAt > 30 * 60 * 1000) {
       debugLog(db, userId, 'reply_expired', { contact: item.contactName || item.phone, age: Math.round((Date.now() - item.queuedAt) / 1000) + 's' });
+      removePendingReplyFromDb(db, userId, item.jid);
       continue;
     }
     try {
       // Small stagger between queued sends
       await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
       if (inst.connectionStatus !== 'connected') {
-        // Re-queue remaining
-        inst.failedReplyQueue.push(...queue.slice(queue.indexOf(item)));
         debugLog(db, userId, 'drain_aborted_disconnected', { remaining: queue.length - queue.indexOf(item) });
-        break;
+        break; // Leave remaining in DB for next reconnect
       }
       const sent = await sendTextMessage(userId, item.jid, item.replyText, { quotedMessageId: item.latestMessageId });
       const replyId = sent?.id?._serialized || require('crypto').randomUUID();
@@ -2326,10 +2351,13 @@ async function drainFailedReplyQueue(userId, db) {
         VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent')
       `).run(replyId, userId, item.contactId, item.jid, item.replyText);
       debugLog(db, userId, 'queued_reply_sent', { contact: item.contactName || item.phone, replyPreview: item.replyText.slice(0, 80) });
+      // Remove from DB after successful send
+      removePendingReplyFromDb(db, userId, item.jid);
       emit(userId, 'message', { contactId: item.contactId, msgId: replyId });
     } catch (err) {
       debugLog(db, userId, 'queued_reply_failed', { contact: item.contactName || item.phone, error: err?.message || String(err) });
       console.error(`❌ [${userId}] Queued reply send failed:`, err?.message);
+      // Leave in DB for next attempt
     }
   }
 }
