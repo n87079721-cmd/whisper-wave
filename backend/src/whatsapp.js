@@ -2180,8 +2180,15 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     }
   }
 
-  debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, historyLength: messages.length });
-  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
+  // Count unreplied messages (received after last sent)
+  let unrepliedCount = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].direction === 'sent') break;
+    if (messages[i].direction === 'received') unrepliedCount++;
+  }
+
+  debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, historyLength: messages.length, unrepliedCount });
+  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone, { unrepliedCount });
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
   if (isReplyTooSimilar(replyText, recentOutgoing)) {
