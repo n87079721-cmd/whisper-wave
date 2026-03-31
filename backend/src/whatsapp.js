@@ -1820,7 +1820,7 @@ function calculateDelay(replyLength, speed) {
   // Ranges: [min, max] in milliseconds
   // fast = 3-10 mins, normal = 6-15 mins, slow/celebrity = 30 mins - 2 days
   const ranges = {
-    fast:   { short: [180000, 420000],   medium: [240000, 540000],   long: [300000, 600000] },
+    fast:   { short: [15000, 45000],     medium: [30000, 75000],     long: [45000, 120000] },
     normal: { short: [360000, 600000],   medium: [480000, 780000],   long: [540000, 900000] },
     slow:   { short: [1800000, 14400000], medium: [3600000, 43200000], long: [7200000, 172800000] },
   };
