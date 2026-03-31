@@ -2094,12 +2094,6 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
 
 async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestMessageId }) {
   const inst = getInstance(userId);
-  const now = Date.now();
-  const lastReply = inst.autoReplyCooldowns.get(jid) || 0;
-  if (now - lastReply < 30000) {
-    debugLog(db, userId, 'skip_cooldown', { contact: contactName || phone, cooldownRemaining: Math.round((30000 - (now - lastReply)) / 1000) + 's' });
-    return;
-  }
 
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
   if (!keyRow?.value) {
