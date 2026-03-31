@@ -70,14 +70,66 @@ const REACTION_EMOJIS = ['😂', '💀', '🔥', '❤️', '👀', '😭', '💯
 
 /**
  * Determine if we should send a reaction emoji instead of (or before) a text reply.
+ * Now context-aware: picks an appropriate emoji based on the message content.
  * Returns the emoji to react with, or null.
  */
-export function shouldReact() {
+export async function shouldReact(apiKey, messageText) {
   // ~30% chance to react with an emoji
-  if (Math.random() < 0.30) {
-    return REACTION_EMOJIS[Math.floor(Math.random() * REACTION_EMOJIS.length)];
+  if (Math.random() >= 0.30) return null;
+  
+  // If no API key or no message text, fall back to safe emojis
+  if (!apiKey || !messageText || !messageText.trim()) {
+    const safeEmojis = ['👍', '❤️', '🔥', '💯'];
+    return safeEmojis[Math.floor(Math.random() * safeEmojis.length)];
   }
-  return null;
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are picking a single emoji reaction for a WhatsApp message. Read the message carefully and pick the MOST appropriate emoji reaction from this list ONLY: 😂 💀 🔥 ❤️ 👀 😭 💯 🙄 😤 👍 🤯
+
+Rules:
+- SAD/upset message → ❤️ or 😭 (NEVER 😂 or 💀)
+- Funny/joke → 😂 or 💀
+- Exciting/hype → 🔥 or 🤯
+- Agree/support → 💯 or 👍
+- Annoying/frustrating → 😤 or 🙄
+- Surprising/shocking → 👀 or 🤯
+- Love/sweet → ❤️
+- Boring/whatever → 👍
+
+Reply with ONLY the single emoji, nothing else.`,
+          },
+          { role: 'user', content: messageText.slice(0, 200) },
+        ],
+        max_tokens: 5,
+        temperature: 0.3,
+      }),
+    });
+
+    if (!response.ok) throw new Error('API error');
+    const data = await response.json();
+    const emoji = data.choices?.[0]?.message?.content?.trim();
+    
+    // Validate it's one of our allowed emojis
+    if (emoji && REACTION_EMOJIS.includes(emoji)) return emoji;
+    
+    // Fallback to safe emoji
+    return '👍';
+  } catch {
+    // On any error, use a safe default
+    const safeEmojis = ['👍', '❤️', '🔥', '💯'];
+    return safeEmojis[Math.floor(Math.random() * safeEmojis.length)];
+  }
 }
 
 /**

@@ -2093,7 +2093,8 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const roll = Math.random() * 100;
   if (roll > replyChance) {
     debugLog(db, userId, 'skip_reply_chance', { contact: contactName || phone, chance: replyChance + '%', rolled: Math.round(roll) });
-    const reactionEmoji = shouldReact();
+    const msgText = latestOriginalMsg?.body || latestOriginalMsg?.caption || '';
+    const reactionEmoji = await shouldReact(keyRow.value, msgText);
     if (reactionEmoji && latestOriginalMsg) {
       const reactDelay = Math.floor(Math.random() * 5000) + 2000;
       setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
@@ -2114,7 +2115,8 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const speed = getConfigValue(db, userId, 'ai_response_speed', 'normal');
   const recentOutgoing = messages.filter((message) => message.direction === 'sent').slice(-6).map((message) => message.content);
 
-  const reactionEmoji = shouldReact();
+  const latestMsgText = latestOriginalMsg?.body || latestOriginalMsg?.caption || '';
+  const reactionEmoji = await shouldReact(keyRow.value, latestMsgText);
   if (reactionEmoji && latestOriginalMsg) {
     const reactDelay = Math.floor(Math.random() * 3000) + 1000;
     setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
