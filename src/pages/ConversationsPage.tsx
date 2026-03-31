@@ -290,6 +290,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     setQuotedMessage(null);
     setShowProfile(false);
     setEditingMsgId(null);
+    setShowPersonaPicker(false);
+    // Load contact's assigned prompt
+    api.getContactPrompt(selectedContact.id).then(data => setContactPromptId(data.promptId)).catch(() => setContactPromptId(null));
     refreshMessages(selectedContact.id, { forceScroll: true });
   }, [selectedContact?.id, refreshMessages]);
 
