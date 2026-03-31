@@ -357,10 +357,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     }
   };
 
-  const StatusLabel = ({ status }: { status: string }) => {
-    if (status === 'read') return <span className="text-[10px] text-primary font-medium">Read</span>;
-    if (status === 'delivered') return <span className="text-[10px] text-muted-foreground">Delivered</span>;
-    return <span className="text-[10px] text-muted-foreground">Sent</span>;
+  const StatusTicks = ({ status }: { status: string }) => {
+    if (status === 'read') return <CheckCheck className="w-3.5 h-3.5 text-blue-500" />;
+    if (status === 'delivered') return <CheckCheck className="w-3.5 h-3.5 text-muted-foreground" />;
+    return <Check className="w-3.5 h-3.5 text-muted-foreground" />;
   };
 
   const Avatar = ({ contact, size = 'md' }: { contact: Contact; size?: 'sm' | 'md' | 'lg' }) => {
