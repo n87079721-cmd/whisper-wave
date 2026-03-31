@@ -447,7 +447,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       document.body.removeChild(ta);
     };
 
-    if (navigator.clipboard?.writeText) {
+    // On non-secure contexts (HTTP), clipboard API silently fails — always use fallback
+    const isSecure = window.isSecureContext;
+    if (isSecure && navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(text).then(() => toast.success('Copied')).catch(() => copyFallback(text));
     } else {
       copyFallback(text);
