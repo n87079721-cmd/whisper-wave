@@ -128,22 +128,6 @@ function ensureCurrentTables(db) {
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
-
-    CREATE TABLE IF NOT EXISTS pending_replies (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      jid TEXT NOT NULL,
-      contact_id TEXT NOT NULL,
-      contact_name TEXT,
-      phone TEXT,
-      reply_text TEXT NOT NULL,
-      latest_message_id TEXT,
-      scheduled_at TEXT NOT NULL,
-      queued_at TEXT DEFAULT (datetime('now')),
-      status TEXT DEFAULT 'pending',
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      UNIQUE(user_id, jid, status)
-    );
   `);
 
   // Add archive + unread columns if missing
@@ -204,7 +188,6 @@ function ensureIndexes(db) {
     CREATE INDEX IF NOT EXISTS idx_statuses_expires ON statuses(expires_at);
     CREATE INDEX IF NOT EXISTS idx_call_logs_user ON call_logs(user_id);
     CREATE INDEX IF NOT EXISTS idx_call_logs_timestamp ON call_logs(user_id, timestamp DESC);
-    CREATE INDEX IF NOT EXISTS idx_pending_replies_user ON pending_replies(user_id, status);
   `);
 }
 

@@ -1993,7 +1993,7 @@ async function clearTypingState(userId, jid) {
   } catch {}
 }
 
-function clearPendingAutoReply(userId, jid, { rescue = false, db = null } = {}) {
+function clearPendingAutoReply(userId, jid, { rescue = false } = {}) {
   const inst = getInstance(userId);
   const pending = inst.pendingAutoReplies.get(jid);
   if (!pending) return;
@@ -2003,54 +2003,19 @@ function clearPendingAutoReply(userId, jid, { rescue = false, db = null } = {}) 
   inst.pendingAutoReplies.delete(jid);
   clearTypingState(userId, jid).catch(() => {});
 
-  // Rescue: persist to DB so it sends after restart/reconnect
-  if (rescue && pending.replyText) {
-    savePendingReplyToDb(db || pending._db, userId, pending);
-    console.log(`🛟 [${userId}] Rescued pending reply for ${pending.contactName || pending.phone} to DB`);
-  } else {
-    // Remove from DB if it was persisted
-    removePendingReplyFromDb(db || pending._db, userId, jid);
+  // Rescue: push to failed reply queue so it sends after reconnect
+  if (rescue && pending.replyText && inst.failedReplyQueue.length < 20) {
+    inst.failedReplyQueue.push({
+      jid: pending.jid, contactId: pending.contactId,
+      contactName: pending.contactName, phone: pending.phone,
+      replyText: pending.replyText, latestMessageId: pending.latestMessageId,
+      queuedAt: pending.scheduledAt || Date.now(),
+    });
+    console.log(`🛟 [${userId}] Rescued pending reply for ${pending.contactName || pending.phone} to failed queue`);
   }
 }
 
-// ── DB persistence for pending replies (survive restarts) ──
-
-function savePendingReplyToDb(db, userId, pending) {
-  if (!db) return;
-  try {
-    db.prepare(`
-      INSERT OR REPLACE INTO pending_replies (user_id, jid, contact_id, contact_name, phone, reply_text, latest_message_id, scheduled_at, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-    `).run(userId, pending.jid, pending.contactId, pending.contactName || null, pending.phone || null, pending.replyText, pending.latestMessageId || null, new Date(pending.scheduledAt || Date.now()).toISOString());
-  } catch (err) {
-    console.error(`Failed to persist pending reply:`, err?.message);
-  }
-}
-
-function removePendingReplyFromDb(db, userId, jid) {
-  if (!db) return;
-  try {
-    db.prepare("DELETE FROM pending_replies WHERE user_id = ? AND jid = ? AND status = 'pending'").run(userId, jid);
-  } catch {}
-}
-
-function loadPendingRepliesFromDb(db, userId) {
-  if (!db) return [];
-  try {
-    return db.prepare("SELECT * FROM pending_replies WHERE user_id = ? AND status = 'pending' ORDER BY queued_at ASC").all(userId);
-  } catch {
-    return [];
-  }
-}
-
-function clearAllPendingRepliesFromDb(db, userId) {
-  if (!db) return;
-  try {
-    db.prepare("DELETE FROM pending_replies WHERE user_id = ? AND status = 'pending'").run(userId);
-  } catch {}
-}
-
-
+async function sendReaction(userId, jid, msg, emoji) {
   const inst = getInstance(userId);
   if (!inst.client || inst.connectionStatus !== 'connected') return;
   try {
@@ -2218,7 +2183,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     speed,
   });
 
-  clearPendingAutoReply(userId, jid, { db });
+  clearPendingAutoReply(userId, jid);
 
   const pendingReply = {
     delayTimer: null,
@@ -2227,11 +2192,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     // Store metadata so we can rescue this reply if connection drops
     jid, contactId, contactName, phone, replyText,
     scheduledAt: Date.now(),
-    _db: db,
   };
-
-  // Persist to DB so it survives restarts
-  savePendingReplyToDb(db, userId, pendingReply);
 
   pendingReply.delayTimer = setTimeout(async () => {
     try {
@@ -2273,16 +2234,17 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
           debugLog(db, userId, 'auto_reply_sent', { contact: contactName || phone, replyPreview: replyText.slice(0, 80), replyLength: replyText.length, quoted: !!latestMessageId });
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
-          // Remove from DB — successfully sent
-          removePendingReplyFromDb(db, userId, jid);
           emit(userId, 'message', { contactId, msgId: replyId });
         } catch (err) {
           console.error('Failed to send auto-reply:', err?.message || err);
           debugLog(db, userId, 'auto_reply_failed', { contact: contactName || phone, error: err?.message || String(err), replyPreview: replyText.slice(0, 80) });
           inst.pendingAutoReplies.delete(jid);
           await clearTypingState(userId, jid);
-          // Keep in DB for retry on reconnect/restart (already persisted)
-          debugLog(db, userId, 'reply_persisted_for_retry', { contact: contactName || phone });
+          // Queue for retry when connection restores
+          if (inst.failedReplyQueue.length < 20) {
+            inst.failedReplyQueue.push({ jid, contactId, contactName, phone, replyText, latestMessageId, queuedAt: Date.now() });
+            debugLog(db, userId, 'reply_queued_for_retry', { contact: contactName || phone, queueSize: inst.failedReplyQueue.length });
+          }
         }
       }, typingDuration);
     } catch (err) {
@@ -2294,55 +2256,30 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   inst.pendingAutoReplies.set(jid, pendingReply);
 }
 
-// ── Drain pending/failed replies from DB on reconnect/restart ──
+// ── Drain failed reply queue on reconnect ──
 
 async function drainFailedReplyQueue(userId, db) {
   const inst = getInstance(userId);
-
-  // Also drain any in-memory leftovers (legacy)
-  const memQueue = inst.failedReplyQueue.splice(0);
-
-  // Load persisted pending replies from DB
-  const dbQueue = loadPendingRepliesFromDb(db, userId);
-
-  // Merge: DB rows + in-memory (deduplicate by jid)
-  const seen = new Set();
-  const queue = [];
-  for (const row of dbQueue) {
-    if (!seen.has(row.jid)) {
-      seen.add(row.jid);
-      queue.push({
-        jid: row.jid, contactId: row.contact_id, contactName: row.contact_name,
-        phone: row.phone, replyText: row.reply_text, latestMessageId: row.latest_message_id,
-        queuedAt: new Date(row.scheduled_at || row.queued_at).getTime(),
-      });
-    }
-  }
-  for (const item of memQueue) {
-    if (!seen.has(item.jid)) {
-      seen.add(item.jid);
-      queue.push(item);
-    }
-  }
-
+  const queue = inst.failedReplyQueue.splice(0);
   if (queue.length === 0) return;
 
-  debugLog(db, userId, 'draining_persisted_replies', { count: queue.length });
-  console.log(`📤 [${userId}] Draining ${queue.length} persisted auto-replies after restart/reconnect`);
+  debugLog(db, userId, 'draining_failed_replies', { count: queue.length });
+  console.log(`📤 [${userId}] Draining ${queue.length} failed auto-replies`);
 
   for (const item of queue) {
     // Skip if queued more than 30 minutes ago
     if (Date.now() - item.queuedAt > 30 * 60 * 1000) {
       debugLog(db, userId, 'reply_expired', { contact: item.contactName || item.phone, age: Math.round((Date.now() - item.queuedAt) / 1000) + 's' });
-      removePendingReplyFromDb(db, userId, item.jid);
       continue;
     }
     try {
       // Small stagger between queued sends
       await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
       if (inst.connectionStatus !== 'connected') {
+        // Re-queue remaining
+        inst.failedReplyQueue.push(...queue.slice(queue.indexOf(item)));
         debugLog(db, userId, 'drain_aborted_disconnected', { remaining: queue.length - queue.indexOf(item) });
-        break; // Leave remaining in DB for next reconnect
+        break;
       }
       const sent = await sendTextMessage(userId, item.jid, item.replyText, { quotedMessageId: item.latestMessageId });
       const replyId = sent?.id?._serialized || require('crypto').randomUUID();
@@ -2351,13 +2288,10 @@ async function drainFailedReplyQueue(userId, db) {
         VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent')
       `).run(replyId, userId, item.contactId, item.jid, item.replyText);
       debugLog(db, userId, 'queued_reply_sent', { contact: item.contactName || item.phone, replyPreview: item.replyText.slice(0, 80) });
-      // Remove from DB after successful send
-      removePendingReplyFromDb(db, userId, item.jid);
       emit(userId, 'message', { contactId: item.contactId, msgId: replyId });
     } catch (err) {
       debugLog(db, userId, 'queued_reply_failed', { contact: item.contactName || item.phone, error: err?.message || String(err) });
       console.error(`❌ [${userId}] Queued reply send failed:`, err?.message);
-      // Leave in DB for next attempt
     }
   }
 }
@@ -2447,7 +2381,7 @@ async function softDisconnect(userId) {
   inst.autoReplyCooldowns.clear();
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
-  inst.pendingAutoReplies.forEach((pending, pendingJid) => clearPendingAutoReply(userId, pendingJid, { rescue: true, db: pending._db }));
+  inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid, { rescue: true }));
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
   if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
@@ -2490,8 +2424,7 @@ async function clearSession(userId, db) {
   inst.autoReplyCooldowns.clear();
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
-  inst.pendingAutoReplies.forEach((pending, pendingJid) => clearPendingAutoReply(userId, pendingJid, { db })); // no rescue on full logout
-  clearAllPendingRepliesFromDb(db, userId);
+  inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid)); // no rescue on full logout
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
   if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
@@ -2526,7 +2459,6 @@ async function clearSession(userId, db) {
     db.prepare('DELETE FROM contacts WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM stats WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM call_logs WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM pending_replies WHERE user_id = ?').run(userId);
   } catch (err) {
     console.error('Failed to clear DB tables:', err?.message || err);
   }
@@ -2572,11 +2504,6 @@ export async function shutdownAllWhatsAppClients() {
     if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
     if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
     inst.isConnecting = false;
-
-    // Rescue all pending auto-replies to DB before shutdown
-    inst.pendingAutoReplies.forEach((pending, pendingJid) => {
-      clearPendingAutoReply(userId, pendingJid, { rescue: true, db: pending._db });
-    });
 
     if (inst.client) {
       const clientRef = inst.client;
