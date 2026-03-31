@@ -145,7 +145,7 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
                     <div className="rounded-lg overflow-hidden bg-white p-2"><img src={qr} alt="QR" className="w-48 h-48" /></div>
                   ) : (
                     <div className="w-48 h-48 rounded-lg bg-secondary flex items-center justify-center">
-                      <p className="text-xs text-muted-foreground text-center px-4">{isWaiting ? 'Loading QR...' : 'Click Connect'}</p>
+                      <p className="text-xs text-muted-foreground text-center px-4"><Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-muted-foreground" />Loading QR...</p>
                     </div>
                   )}
                 </div>
