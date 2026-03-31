@@ -2360,6 +2360,10 @@ async function clearSession(userId, db) {
     const clientRef = inst.client;
     inst.client = null;
     try { await clientRef.logout(); } catch {}
+    try {
+      const browser = clientRef.pupBrowser;
+      if (browser) await browser.close().catch(() => {});
+    } catch {}
     try { await clientRef.destroy(); } catch {}
   }
 
@@ -2390,6 +2394,12 @@ async function clearSession(userId, db) {
   if (fs.existsSync(wwLocalAuthDefault)) {
     fs.rmSync(wwLocalAuthDefault, { recursive: true, force: true });
   }
+
+  // Also clean wwebjs cache to prevent corruption
+  const cacheDir = path.join(DATA_DIR, 'wwebjs_cache');
+  try {
+    if (fs.existsSync(cacheDir)) fs.rmSync(cacheDir, { recursive: true, force: true });
+  } catch {}
 
   inst.isConnecting = false;
   emit(userId, 'status', { status: 'disconnected' });
