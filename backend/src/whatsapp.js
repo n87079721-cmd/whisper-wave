@@ -157,20 +157,27 @@ function getRestoreWatchdogTimeoutMs(userId, db, stage = 'restoring session') {
   const normalizedStage = String(stage || '').toLowerCase();
 
   if (normalizedStage.includes('authenticated') || normalizedStage.includes('loading')) {
-    if (scale === 'huge') return 18 * 60 * 1000;
-    if (scale === 'large') return 10 * 60 * 1000;
-    return 5 * 60 * 1000;
+    if (scale === 'huge') return 12 * 60 * 1000;
+    if (scale === 'large') return 8 * 60 * 1000;
+    return 4 * 60 * 1000;
   }
 
   if (normalizedStage.includes('pairing') || normalizedStage.includes('opening')) {
-    if (scale === 'huge') return 10 * 60 * 1000;
-    if (scale === 'large') return 6 * 60 * 1000;
-    return 3 * 60 * 1000;
+    if (scale === 'huge') return 6 * 60 * 1000;
+    if (scale === 'large') return 4 * 60 * 1000;
+    return 2 * 60 * 1000;
   }
 
-  if (scale === 'huge') return 8 * 60 * 1000;
-  if (scale === 'large') return 5 * 60 * 1000;
-  return 150 * 1000;
+  if (scale === 'huge') return 6 * 60 * 1000;
+  if (scale === 'large') return 4 * 60 * 1000;
+  return 120 * 1000;
+}
+
+function getReconnectStaleThresholdMs(userId, db) {
+  const scale = getAccountScale(userId, db);
+  if (scale === 'huge') return 4 * 60 * 1000;
+  if (scale === 'large') return 2 * 60 * 1000;
+  return 90 * 1000;
 }
 
 function getBackgroundContactSyncDelayMs(userId, db) {
@@ -547,11 +554,12 @@ function hasSavedSession(userId) {
 
 function isReconnectStale(userId, db) {
   const inst = getInstance(userId);
-  if (inst.connectionStatus !== 'reconnecting' || inst.isConnecting) return false;
+  if (inst.connectionStatus !== 'reconnecting') return false;
   const lastActivityAt = inst.lastConnectionActivityAtMs || inst.connectionStartedAtMs || 0;
   if (!lastActivityAt) return false;
-  const timeoutMs = getRestoreWatchdogTimeoutMs(userId, db, inst.connectionPhase || 'restoring session');
-  return Date.now() - lastActivityAt > timeoutMs;
+  const watchdogTimeoutMs = getRestoreWatchdogTimeoutMs(userId, db, inst.connectionPhase || 'restoring session');
+  const staleThresholdMs = Math.min(watchdogTimeoutMs, getReconnectStaleThresholdMs(userId, db));
+  return Date.now() - lastActivityAt > staleThresholdMs;
 }
 
 function updateSyncState(userId, db, updates) {
@@ -640,7 +648,13 @@ export function initWhatsApp(userId, db) {
 export function getOrInitWhatsApp(userId, db) {
   const inst = getInstance(userId);
 
-  if (hasSavedSession(userId) && ((!inst.client && !inst.isConnecting) || isReconnectStale(userId, db))) {
+  const savedSessionExists = hasSavedSession(userId);
+  const reconnectIsStale = isReconnectStale(userId, db);
+
+  if (savedSessionExists && ((!inst.client && !inst.isConnecting) || reconnectIsStale)) {
+    if (reconnectIsStale) {
+      console.warn(`♻️ [${userId}] Reconnect went stale during ${inst.connectionPhase || 'restoring session'}; forcing a fresh restore attempt`);
+    }
     startConnection(userId, db, { force: true }).catch((err) => {
       console.error(`Auto-resume failed [${userId}]:`, err?.message || err);
     });
@@ -804,13 +818,21 @@ function scheduleRecoverySync(userId, db, delayMs = 90000) {
 
 export function autoReconnectAll(db) {
   try {
-    const users = db.prepare('SELECT id, username FROM users').all();
-    for (const user of users) {
-      if (hasSavedSession(user.id)) {
+    const usersWithSessions = db.prepare('SELECT id, username FROM users').all()
+      .filter((user) => hasSavedSession(user.id));
+
+    usersWithSessions.forEach((user, index) => {
+      const delayMs = index * 12000;
+      console.log(`🔄 Queued auto-reconnect for ${user.username} (${user.id}) in ${Math.round(delayMs / 1000)}s`);
+      setTimeout(() => {
+        const inst = getInstance(user.id);
+        if (inst.connectionStatus === 'connected' || inst.isConnecting) return;
         console.log(`🔄 Auto-reconnecting user: ${user.username} (${user.id})`);
-        startConnection(user.id, db, { force: true });
-      }
-    }
+        startConnection(user.id, db, { force: true }).catch((err) => {
+          console.error(`Auto-reconnect failed [${user.id}]:`, err?.message || err);
+        });
+      }, delayMs);
+    });
   } catch (err) {
     console.error('Auto-reconnect error:', err?.message);
   }
@@ -861,7 +883,6 @@ async function startConnection(userId, db, options = {}) {
           '--disable-accelerated-2d-canvas',
           '--no-first-run',
           '--no-zygote',
-          '--single-process',
           '--disable-gpu',
         ],
       },
@@ -2269,6 +2290,26 @@ async function clearSession(userId, db) {
   emit(userId, 'status', { status: 'disconnected' });
   emit(userId, 'sync_state', inst.syncState);
   console.log(`🗑️ [${userId}] Session fully cleared.`);
+}
+
+export async function shutdownAllWhatsAppClients() {
+  const instances = Array.from(userInstances.entries());
+
+  for (const [userId, inst] of instances) {
+    stopHeartbeat(userId);
+    clearConnectionWatchdog(userId);
+    clearRecoverySyncTimer(userId);
+    if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
+    if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
+    if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
+    inst.isConnecting = false;
+
+    if (inst.client) {
+      const clientRef = inst.client;
+      inst.client = null;
+      try { await clientRef.destroy(); } catch {}
+    }
+  }
 }
 
 // ── Status (Stories) capture ──
