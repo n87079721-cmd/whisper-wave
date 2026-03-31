@@ -68,6 +68,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [globalSearching, setGlobalSearching] = useState(false);
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [contactPromptId, setContactPromptId] = useState<string | null>(null);
+  const [showPersonaPicker, setShowPersonaPicker] = useState(false);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
