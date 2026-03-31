@@ -1941,20 +1941,29 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const inst = getInstance(userId);
   const now = Date.now();
   const lastReply = inst.autoReplyCooldowns.get(jid) || 0;
-  if (now - lastReply < 30000) return;
+  if (now - lastReply < 30000) {
+    debugLog(db, userId, 'skip_cooldown', { contact: contactName || phone, cooldownRemaining: Math.round((30000 - (now - lastReply)) / 1000) + 's' });
+    return;
+  }
 
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
-  if (!keyRow?.value) return;
+  if (!keyRow?.value) {
+    debugLog(db, userId, 'skip_no_api_key', { contact: contactName || phone });
+    return;
+  }
 
   const promptRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
   const systemPrompt = promptRow?.value || '';
   const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
 
-  if (Math.random() * 100 > replyChance) {
+  const roll = Math.random() * 100;
+  if (roll > replyChance) {
+    debugLog(db, userId, 'skip_reply_chance', { contact: contactName || phone, chance: replyChance + '%', rolled: Math.round(roll) });
     const reactionEmoji = shouldReact();
     if (reactionEmoji && latestOriginalMsg) {
       const reactDelay = Math.floor(Math.random() * 5000) + 2000;
       setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
+      debugLog(db, userId, 'reaction_sent_instead', { contact: contactName || phone, emoji: reactionEmoji });
     }
     return;
   }
