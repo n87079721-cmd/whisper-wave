@@ -334,6 +334,9 @@ const AdminPage = () => {
                         </span>
                       </div>
                       {renderLogDetails(entry)}
+                      {entry.action === 'reply_scheduled' && entry.delayMs && (
+                        <Countdown scheduledAt={entry.created_at} delayMs={entry.delayMs} />
+                      )}
                     </div>
                   </div>
                 </div>
