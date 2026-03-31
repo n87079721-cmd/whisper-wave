@@ -845,7 +845,16 @@ async function startConnection(userId, db, options = {}) {
   const inst = getInstance(userId);
   const force = options.force === true;
 
-  if (inst.isConnecting && !force) return;
+  // If stuck connecting for >2min, force-reset the lock
+  if (inst.isConnecting && !force) {
+    const stuckMs = Date.now() - (inst.connectionStartedAtMs || 0);
+    if (stuckMs > 120_000) {
+      console.warn(`⚠️ [${userId}] isConnecting stuck for ${Math.round(stuckMs / 1000)}s — force-resetting`);
+      inst.isConnecting = false;
+    } else {
+      return;
+    }
+  }
   if (!force && inst.client && inst.connectionStatus === 'connected') return;
   inst.isConnecting = true;
   inst.connectionStartedAtMs = Date.now();
@@ -858,8 +867,12 @@ async function startConnection(userId, db, options = {}) {
   const generation = inst.connectionGeneration + 1;
   inst.connectionGeneration = generation;
 
-  // Destroy previous client
+  // Destroy previous client and kill any zombie browser
   if (inst.client) {
+    try {
+      const browser = await inst.client.pupBrowser?.();
+      if (browser) await browser.close().catch(() => {});
+    } catch {}
     try { await inst.client.destroy(); } catch {}
     inst.client = null;
   }
