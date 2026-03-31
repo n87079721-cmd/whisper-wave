@@ -1367,16 +1367,21 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   >
                     <Plus className="w-4 h-4" />
                   </button>
-                  <input
+                  <textarea
                     value={replyText}
                     onChange={(e) => {
                       const nextValue = e.target.value;
                       setReplyText(nextValue);
                       if (selectedContact?.id) replyDraftsRef.current[selectedContact.id] = nextValue;
+                      // Auto-expand height
+                      e.target.style.height = 'auto';
+                      e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
                     }}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
                     placeholder={pendingAttachment ? 'Add a caption (optional)' : 'Type a message'}
-                    className="flex-1 px-4 py-2.5 rounded-full bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
+                    rows={1}
+                    className="flex-1 px-4 py-2.5 rounded-2xl bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0 resize-none overflow-y-auto"
+                    style={{ maxHeight: 120 }}
                   />
                   <button
                     onClick={handleSendReply}
