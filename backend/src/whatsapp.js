@@ -858,10 +858,23 @@ async function startConnection(userId, db, options = {}) {
   const generation = inst.connectionGeneration + 1;
   inst.connectionGeneration = generation;
 
-  // Destroy previous client
+  // Hard-destroy previous client — kill browser process if destroy() fails
   if (inst.client) {
-    try { await inst.client.destroy(); } catch {}
+    const oldClient = inst.client;
     inst.client = null;
+    try { await oldClient.destroy(); } catch {
+      // destroy() failed — force-kill the underlying browser process
+      try {
+        const browser = await oldClient.pupBrowser;
+        if (browser) {
+          const pid = browser.process()?.pid;
+          if (pid) { try { process.kill(pid, 'SIGKILL'); } catch {} }
+          try { await browser.close(); } catch {}
+        }
+      } catch {}
+    }
+    // Small delay to let the OS release resources
+    await new Promise(r => setTimeout(r, 1000));
   }
 
   try {
@@ -1036,12 +1049,22 @@ async function startConnection(userId, db, options = {}) {
       inst.historySyncInProgress = false;
       inst.contactSyncInProgress = false;
       if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
+      debugLog(db, userId, 'whatsapp_disconnected', { reason });
 
       if (requiresFreshPairing(reason)) {
+        // Session is truly dead — wipe cached browser session so next connect is clean
+        const wwebjsSessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
+        try {
+          if (fs.existsSync(wwebjsSessionDir)) {
+            fs.rmSync(wwebjsSessionDir, { recursive: true, force: true });
+            console.log(`🧹 [${userId}] Cleared wwebjs auth cache after ${reason}`);
+          }
+        } catch (e) { console.warn(`⚠️ [${userId}] Cache clear failed:`, e?.message); }
         inst.connectionStatus = 'disconnected';
         inst.reconnectAttempt = 0;
         emit(userId, 'status', { status: 'disconnected' });
       } else {
+        // Recoverable — force a hard reconnect (new browser process)
         inst.connectionStatus = 'reconnecting';
         emit(userId, 'status', { status: 'reconnecting' });
         scheduleReconnect(userId, db, generation);
@@ -1049,7 +1072,7 @@ async function startConnection(userId, db, options = {}) {
     });
 
     // ── Authentication failure ──
-    client.on('auth_failure', (msg) => {
+    client.on('auth_failure', async (msg) => {
       console.error(`❌ [${userId}] Auth failure:`, msg);
       stopHeartbeat(userId);
       clearConnectionWatchdog(userId);
@@ -1060,8 +1083,19 @@ async function startConnection(userId, db, options = {}) {
       inst.historySyncInProgress = false;
       inst.contactSyncInProgress = false;
       if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
+
+      // Wipe the cached wwebjs session so next connect gets a fresh QR
+      const wwebjsSessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
+      try {
+        if (fs.existsSync(wwebjsSessionDir)) {
+          fs.rmSync(wwebjsSessionDir, { recursive: true, force: true });
+          console.log(`🧹 [${userId}] Cleared stale wwebjs auth cache after auth_failure`);
+        }
+      } catch (e) { console.warn(`⚠️ [${userId}] Failed to clear auth cache:`, e?.message); }
+
       inst.connectionStatus = 'disconnected';
       emit(userId, 'status', { status: 'disconnected' });
+      debugLog(db, userId, 'auth_failure_cleared_cache', { reason: msg });
     });
 
     // ── Incoming messages ──
