@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2, AlertTriangle, Settings, QrCode, Phone, ArrowRight } from 'lucide-react';
 import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
 import StatusBadge from '@/components/StatusBadge';
