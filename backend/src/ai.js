@@ -142,8 +142,11 @@ export function shouldAlsoReplyAfterReaction() {
 
 /**
  * Generate a reply using OpenAI based on conversation history.
+ * Supports vision: if a message has type 'image' with a media_path, it encodes the image
+ * as base64 and sends it as a multimodal content block so the AI can "see" pictures.
+ * Uses gpt-4o when images are present (vision-capable), gpt-4o-mini otherwise.
  * @param {string} apiKey - OpenAI API key
- * @param {Array<{direction: string, content: string}>} messages - Recent messages (oldest first)
+ * @param {Array<{direction: string, content: string, type?: string, media_path?: string}>} messages - Recent messages (oldest first)
  * @param {string} systemPrompt - Custom system prompt (or default)
  * @param {string} contactName - Name of the contact for context
  * @returns {Promise<string>} The generated reply text
@@ -153,24 +156,60 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName)
 
   const prompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
 
-  // Map messages to OpenAI chat format
+  let hasImages = false;
+
+  // Map messages to OpenAI chat format, with vision support
   const chatMessages = messages
-    .filter(m => m.content && m.content.trim())
-    .map(m => ({
-      role: m.direction === 'received' ? 'user' : 'assistant',
-      content: m.content,
-    }));
+    .filter(m => (m.content && m.content.trim()) || (m.type === 'image' && m.media_path))
+    .map(m => {
+      const role = m.direction === 'received' ? 'user' : 'assistant';
+
+      // Image message with a local file — build multimodal content
+      if (m.type === 'image' && m.media_path) {
+        try {
+          const fs = await_fs();
+          if (fs.existsSync(m.media_path)) {
+            hasImages = true;
+            const imageBuffer = fs.readFileSync(m.media_path);
+            const base64 = imageBuffer.toString('base64');
+            const ext = m.media_path.split('.').pop()?.toLowerCase() || 'jpg';
+            const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
+            const mime = mimeMap[ext] || 'image/jpeg';
+
+            const content = [];
+            if (m.content && m.content.trim()) {
+              content.push({ type: 'text', text: m.content });
+            } else {
+              content.push({ type: 'text', text: '(sent a photo)' });
+            }
+            content.push({
+              type: 'image_url',
+              image_url: { url: `data:${mime};base64,${base64}`, detail: 'low' },
+            });
+
+            return { role, content };
+          }
+        } catch {
+          // Fall through to text-only
+        }
+      }
+
+      return { role, content: m.content || '(sent a photo)' };
+    });
 
   if (chatMessages.length === 0) {
     throw new Error('No message content to generate reply from');
   }
 
+  // Use gpt-4o for vision, gpt-4o-mini for text-only
+  const model = hasImages ? 'gpt-4o' : 'gpt-4o-mini';
+
   const body = {
-    model: 'gpt-4o-mini',
+    model,
     messages: [
       {
         role: 'system',
-        content: `${prompt}\n\nYou are chatting with: ${contactName || 'Unknown contact'}\nCurrent time: ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })} (New York time)`,
+        content: `${prompt}\n\nYou are chatting with: ${contactName || 'Unknown contact'}\nCurrent time: ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })} (New York time)\n\nIf someone sends you a photo, react naturally like a real person would. Comment on what you see, ask about it, or react with genuine emotion. Don't describe the image formally or say "I can see an image of..." — just respond like you're looking at a friend's pic on your phone.`,
       },
       ...chatMessages,
     ],
@@ -199,4 +238,23 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName)
   if (!reply) throw new Error('Empty response from OpenAI');
 
   return reply;
+}
+
+// Lazy fs import helper (since this is an ES module)
+let _fs = null;
+function await_fs() {
+  if (!_fs) {
+    const { createRequire } = await_createRequire();
+    const require = createRequire(import.meta.url);
+    _fs = require('fs');
+  }
+  return _fs;
+}
+
+let _createRequire = null;
+function await_createRequire() {
+  if (!_createRequire) {
+    _createRequire = { createRequire };
+  }
+  return _createRequire;
 }
