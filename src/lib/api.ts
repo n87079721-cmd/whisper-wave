@@ -493,6 +493,12 @@ export const api = {
     return requestJson<Message[]>(`/api/contacts/${contactId}/media`);
   },
 
+  // Global Message Search
+  searchMessages(query: string, limit = 50) {
+    const params = new URLSearchParams({ q: query, limit: String(limit) });
+    return requestJson<(Message & { contact_name?: string; contact_phone?: string; contact_avatar?: string })[]>(`/api/search/messages?${params}`);
+  },
+
   // Admin
   adminListUsers() {
     return requestJson<Array<{
