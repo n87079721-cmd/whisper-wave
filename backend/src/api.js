@@ -676,7 +676,33 @@ export function createApiRouter(db) {
     }
   });
 
-  // ── Get Starred Messages ──────────────────────────────────
+  // ── React to Message ──────────────────────────────────────
+  router.post('/messages/:messageId/react', async (req, res) => {
+    try {
+      const { emoji } = req.body;
+      if (!emoji) return res.status(400).json({ error: 'Emoji required' });
+
+      const wa = getWA(req);
+      const state = wa.getState();
+      if (state.status !== 'connected') return res.status(400).json({ error: 'WhatsApp not connected' });
+
+      const msgRow = db.prepare('SELECT jid FROM messages WHERE id = ? AND user_id = ?').get(req.params.messageId, req.userId);
+      if (!msgRow) return res.status(404).json({ error: 'Message not found' });
+
+      const chatId = msgRow.jid.replace(/@s\.whatsapp\.net$/, '@c.us');
+      const inst = wa.getInstance();
+      const chat = await inst.client.getChatById(chatId);
+      const waMessages = await chat.fetchMessages({ limit: 50 });
+      const waMsg = waMessages.find(m => (m.id?._serialized || m.id?.id) === req.params.messageId);
+      if (!waMsg) return res.status(404).json({ error: 'WhatsApp message not found in recent history' });
+
+      await waMsg.react(emoji);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Failed to react' });
+    }
+  });
+
   router.get('/starred-messages', (req, res) => {
     try {
       const messages = db.prepare(`

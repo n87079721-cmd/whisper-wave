@@ -576,6 +576,7 @@ export interface Message {
   reply_to_id?: string | null;
   reply_to_content?: string | null;
   reply_to_sender?: string | null;
+  reactions?: string | null;
   // joined fields for starred view
   contact_name?: string | null;
   contact_phone?: string | null;
