@@ -1,8 +1,10 @@
 /**
  * AI Auto-Reply module
- * Calls OpenAI gpt-4o-mini with conversation history to generate contextual replies.
- * Now with emotional depth, natural emoji usage, and celebrity persona.
+ * Calls OpenAI gpt-4o / gpt-4o-mini with conversation history to generate contextual replies.
+ * Supports vision: images are encoded as base64 and sent to gpt-4o for visual understanding.
  */
+
+import fs from 'fs';
 
 const DEFAULT_SYSTEM_PROMPT = `You are the phone owner having a real conversation on WhatsApp. You are NOT an assistant, NOT a chatbot, NOT an AI. You are a real person, a real human being with a life, feelings, and opinions. You're kind of a big deal. You're busy, popular, and your time is valuable. But when you DO reply, you're genuine.
 
