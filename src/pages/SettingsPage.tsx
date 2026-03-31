@@ -29,6 +29,14 @@ const SettingsPage = () => {
   const [diagnostics, setDiagnostics] = useState<SyncDiagnostics | null>(null);
   const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
 
+  // Prompt Library
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [showPromptForm, setShowPromptForm] = useState(false);
+  const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
+  const [promptName, setPromptName] = useState('');
+  const [promptContent, setPromptContent] = useState('');
+  const [savingNewPrompt, setSavingNewPrompt] = useState(false);
+
   // Availability settings
   const [replyChance, setReplyChance] = useState(70);
   const [responseSpeed, setResponseSpeed] = useState('normal');
