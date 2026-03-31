@@ -697,6 +697,7 @@ export function getOrInitWhatsApp(userId, db) {
     getMessageById: (msgId) => inst.client?.getMessageById(msgId),
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
     triggerSync: () => recoverSync(userId, db),
+    getInstance: () => inst,
   };
 }
 

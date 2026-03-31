@@ -431,6 +431,14 @@ export const api = {
     });
   },
 
+  reactToMessage(messageId: string, emoji: string) {
+    return requestJson<{ success: boolean }>(`/api/messages/${messageId}/react`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emoji }),
+    });
+  },
+
   getStarredMessages() {
     return requestJson<Message[]>('/api/starred-messages');
   },
