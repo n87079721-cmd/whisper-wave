@@ -5,7 +5,7 @@ import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
-import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation, streamMediaForMessage } from './whatsapp.js';
+import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation, streamMediaForMessage, cancelAllPendingReplies, cancelPendingReplyForContact } from './whatsapp.js';
 import { initWhatsApp } from './whatsapp.js';
 import { archiveChat, markChatRead, syncArchiveStates } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio, BG_SOUND_PROMPTS } from './elevenlabs.js';
@@ -1242,7 +1242,26 @@ RULES:
     const { key, value } = req.body;
     if (!key) return res.status(400).json({ error: 'Missing key' });
     setConfig(db, req.userId, key, value);
+
+    // When automation is turned off, cancel all pending scheduled replies
+    if (key === 'automation_enabled' && value !== 'true') {
+      const cancelled = cancelAllPendingReplies(req.userId);
+      return res.json({ success: true, cancelledReplies: cancelled });
+    }
+
     res.json({ success: true });
+  });
+
+  // Cancel a specific pending auto-reply
+  router.post('/cancel-reply', (req, res) => {
+    try {
+      const { contact } = req.body;
+      if (!contact) return res.status(400).json({ error: 'Missing contact identifier' });
+      const cancelled = cancelPendingReplyForContact(req.userId, contact);
+      res.json({ success: true, cancelled });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.post('/reconnect', async (req, res) => {

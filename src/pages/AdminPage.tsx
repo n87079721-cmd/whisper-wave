@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap } from 'lucide-react';
+import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap, Ban } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -44,8 +44,10 @@ const ACTION_CONFIG: Record<string, { icon: typeof Bot; color: string; label: st
 };
 
 // Live countdown component for scheduled replies
-const Countdown = ({ scheduledAt, delayMs }: { scheduledAt: string; delayMs: number }) => {
+const Countdown = ({ scheduledAt, delayMs, contact, onCancelled }: { scheduledAt: string; delayMs: number; contact?: string; onCancelled?: () => void }) => {
   const [now, setNow] = useState(Date.now());
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
   
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -55,6 +57,25 @@ const Countdown = ({ scheduledAt, delayMs }: { scheduledAt: string; delayMs: num
   const sendAt = new Date(scheduledAt).getTime() + delayMs;
   const remaining = Math.max(0, Math.floor((sendAt - now) / 1000));
 
+  const handleCancel = async () => {
+    if (!contact || cancelling || cancelled) return;
+    setCancelling(true);
+    try {
+      await api.cancelPendingReply(contact);
+      setCancelled(true);
+      toast.success('Reply cancelled');
+      onCancelled?.();
+    } catch {
+      toast.error('Failed to cancel');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  if (cancelled) {
+    return <span className="text-[10px] font-medium text-destructive">✕ Cancelled</span>;
+  }
+
   if (remaining <= 0) {
     return <span className="text-[10px] font-medium text-green-400">✓ sending now</span>;
   }
@@ -62,9 +83,19 @@ const Countdown = ({ scheduledAt, delayMs }: { scheduledAt: string; delayMs: num
   const mins = Math.floor(remaining / 60);
   const secs = remaining % 60;
   return (
-    <span className="text-[10px] font-mono font-medium text-amber-400 tabular-nums">
-      ⏱ {mins}:{secs.toString().padStart(2, '0')}
-    </span>
+    <div className="flex items-center gap-2 mt-0.5">
+      <span className="text-[10px] font-mono font-medium text-amber-400 tabular-nums">
+        ⏱ {mins}:{secs.toString().padStart(2, '0')}
+      </span>
+      <button
+        onClick={handleCancel}
+        disabled={cancelling}
+        className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50"
+      >
+        {cancelling ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Ban className="w-2.5 h-2.5" />}
+        Cancel
+      </button>
+    </div>
   );
 };
 
@@ -335,7 +366,7 @@ const AdminPage = () => {
                       </div>
                       {renderLogDetails(entry)}
                       {entry.action === 'reply_scheduled' && entry.delayMs && (
-                        <Countdown scheduledAt={entry.created_at} delayMs={entry.delayMs} />
+                        <Countdown scheduledAt={entry.created_at} delayMs={entry.delayMs} contact={entry.contact} onCancelled={fetchDebugLogs} />
                       )}
                     </div>
                   </div>
