@@ -704,7 +704,7 @@ function requiresFreshPairing(reason) {
 
 function isRecoverableConnectionIssue(reason) {
   const normalized = normalizeConnectionReason(reason);
-  return normalized === 'CONFLICT' || normalized === 'TIMEOUT' || normalized === 'UNLAUNCHED';
+  return normalized === 'CONFLICT' || normalized === 'TIMEOUT' || normalized === 'UNLAUNCHED' || normalized === 'NAVIGATION';
 }
 
 function startHeartbeat(userId, db) {
