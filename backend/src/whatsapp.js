@@ -2140,6 +2140,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
       latestOriginalMsg: batchEntry.latestOriginalMsg,
       latestMessageId: batchEntry.latestMessageId,
       batchedCount: batchEntry.messages.length,
+      forceReply: batchEntry.forceReply || false,
     }).catch(err => {
       console.error('Batched auto-reply error:', err?.message || err);
       debugLog(db, userId, 'batch_auto_reply_error', { contact: batchEntry.contactName || batchEntry.phone, error: err?.message || String(err) });
