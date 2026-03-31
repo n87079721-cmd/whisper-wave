@@ -1256,8 +1256,13 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
-    // Initialize client
-    await client.initialize();
+    // Initialize client with a timeout to prevent infinite hangs
+    const INIT_TIMEOUT_MS = 90_000; // 90 seconds max for Puppeteer to start + QR/session
+    const initPromise = client.initialize();
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('initialize() timed out after 90s')), INIT_TIMEOUT_MS)
+    );
+    await Promise.race([initPromise, timeoutPromise]);
     console.log(`🔄 [${userId}] WhatsApp client initializing...`);
   } catch (err) {
     console.error(`startConnection error [${userId}]:`, err?.message || err);
