@@ -404,6 +404,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
       replyDraftsRef.current[activeContactId] = '';
       setReplyText('');
+      // Reset textarea height
+      const ta = document.querySelector('textarea[rows="1"]') as HTMLTextAreaElement;
+      if (ta) ta.style.height = 'auto';
       if (pendingAttachment) clearPendingAttachment();
 
       const refreshedConversations = await api.getConversations();
