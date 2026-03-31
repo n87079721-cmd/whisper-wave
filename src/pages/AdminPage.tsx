@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { motion } from 'framer-motion';
-import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap, Ban } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap, Ban, ChevronDown, ChevronUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -115,6 +115,7 @@ const AdminPage = () => {
   const [debugLogs, setDebugLogs] = useState<DebugEntry[]>([]);
   const [debugLoading, setDebugLoading] = useState(false);
   const [debugAutoRefresh, setDebugAutoRefresh] = useState(false);
+  const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -195,17 +196,41 @@ const AdminPage = () => {
   };
 
   const renderLogDetails = (entry: DebugEntry) => {
-    const skip = ['id', 'userId', 'action', 'contact', 'created_at', 'ts'];
+    const skip = ['id', 'userId', 'action', 'contact', 'created_at', 'ts', 'replyPreview'];
     const details = Object.entries(entry).filter(([k]) => !skip.includes(k));
-    if (details.length === 0) return null;
+    const isExpanded = expandedLogId === entry.id;
+    const hasReplyPreview = !!entry.replyPreview;
+
     return (
-      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-        {details.map(([key, val]) => (
-          <span key={key} className="text-[10px] text-muted-foreground">
-            <span className="opacity-60">{key}:</span>{' '}
-            <span className="text-foreground/70">{typeof val === 'string' ? val : JSON.stringify(val)}</span>
-          </span>
-        ))}
+      <div className="mt-0.5 space-y-1">
+        {/* Reply preview - clickable to expand */}
+        {hasReplyPreview && (
+          <button
+            onClick={() => setExpandedLogId(isExpanded ? null : entry.id)}
+            className="flex items-start gap-1 text-left w-full group"
+          >
+            <span className="text-[10px] text-muted-foreground opacity-60 flex-shrink-0">replyPreview:</span>
+            <span className={`text-[10px] text-foreground/70 ${isExpanded ? '' : 'line-clamp-1'}`}>
+              {entry.replyPreview}
+            </span>
+            {String(entry.replyPreview).length > 80 && (
+              isExpanded
+                ? <ChevronUp className="w-3 h-3 text-muted-foreground flex-shrink-0 mt-0.5" />
+                : <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            )}
+          </button>
+        )}
+        {/* Other details */}
+        {details.length > 0 && (
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+            {details.map(([key, val]) => (
+              <span key={key} className="text-[10px] text-muted-foreground">
+                <span className="opacity-60">{key}:</span>{' '}
+                <span className="text-foreground/70">{typeof val === 'string' ? val : JSON.stringify(val)}</span>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
