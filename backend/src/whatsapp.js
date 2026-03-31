@@ -845,7 +845,16 @@ async function startConnection(userId, db, options = {}) {
   const inst = getInstance(userId);
   const force = options.force === true;
 
-  if (inst.isConnecting && !force) return;
+  // If stuck connecting for >2min, force-reset the lock
+  if (inst.isConnecting && !force) {
+    const stuckMs = Date.now() - (inst.connectionStartedAtMs || 0);
+    if (stuckMs > 120_000) {
+      console.warn(`⚠️ [${userId}] isConnecting stuck for ${Math.round(stuckMs / 1000)}s — force-resetting`);
+      inst.isConnecting = false;
+    } else {
+      return;
+    }
+  }
   if (!force && inst.client && inst.connectionStatus === 'connected') return;
   inst.isConnecting = true;
   inst.connectionStartedAtMs = Date.now();
@@ -858,8 +867,12 @@ async function startConnection(userId, db, options = {}) {
   const generation = inst.connectionGeneration + 1;
   inst.connectionGeneration = generation;
 
-  // Destroy previous client
+  // Destroy previous client and kill any zombie browser
   if (inst.client) {
+    try {
+      const browser = await inst.client.pupBrowser?.();
+      if (browser) await browser.close().catch(() => {});
+    } catch {}
     try { await inst.client.destroy(); } catch {}
     inst.client = null;
   }
@@ -1256,8 +1269,13 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
-    // Initialize client
-    await client.initialize();
+    // Initialize client with a timeout to prevent infinite hangs
+    const INIT_TIMEOUT_MS = 90_000; // 90 seconds max for Puppeteer to start + QR/session
+    const initPromise = client.initialize();
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('initialize() timed out after 90s')), INIT_TIMEOUT_MS)
+    );
+    await Promise.race([initPromise, timeoutPromise]);
     console.log(`🔄 [${userId}] WhatsApp client initializing...`);
   } catch (err) {
     console.error(`startConnection error [${userId}]:`, err?.message || err);
