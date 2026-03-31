@@ -23,12 +23,7 @@ function getApiUrl(): string {
   // 3. Same-origin (merged deployment — frontend served by backend)
   if (typeof window !== 'undefined') {
     const loc = window.location;
-    if (!loc.hostname.includes('lovable.app') && !loc.hostname.includes('lovableproject.com')) {
-      return loc.origin;
-    }
-    if (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1') {
-      return 'http://localhost:3002';
-    }
+    return loc.origin;
   }
 
   return '';
