@@ -2235,6 +2235,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   };
 
   pendingReply.delayTimer = setTimeout(async () => {
+    if (pendingReply.aborted) return;
     try {
       // Send typing indicator
       const chatId = fromJid(jid);
@@ -2245,6 +2246,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       } catch {}
 
       pendingReply.typingTimer = setTimeout(async () => {
+        if (pendingReply.aborted) return;
         try {
           const sent = await sendTextMessage(userId, jid, replyText, { quotedMessageId: latestMessageId });
           const replyId = sent?.id?._serialized || uuid();
