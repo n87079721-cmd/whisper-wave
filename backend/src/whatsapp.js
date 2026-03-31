@@ -2303,9 +2303,14 @@ async function softDisconnect(userId) {
   if (inst.client) {
     const clientRef = inst.client;
     inst.client = null;
-    // Only destroy — do NOT call .logout() so session is preserved
+    // Kill browser first, then destroy — prevents zombie Chromium
+    try {
+      const browser = clientRef.pupBrowser;
+      if (browser) await browser.close().catch(() => {});
+    } catch {}
     try { await clientRef.destroy(); } catch {}
   }
+  inst.isConnecting = false;
 
   emit(userId, 'status', { status: 'disconnected' });
   console.log(`🔌 [${userId}] Soft disconnect — session preserved.`);
