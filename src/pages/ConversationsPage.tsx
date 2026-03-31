@@ -931,8 +931,18 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search or start new chat"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSearch(val);
+                  // Trigger global search after 2+ chars
+                  if (val.trim().length >= 2) {
+                    setGlobalSearchQuery(val.trim());
+                  } else {
+                    setGlobalSearchQuery('');
+                    setGlobalSearchResults([]);
+                  }
+                }}
+                placeholder="Search chats & messages"
                 className="w-full pl-10 pr-3 py-2 rounded-lg bg-secondary text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
               />
             </div>
