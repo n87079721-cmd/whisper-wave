@@ -619,6 +619,28 @@ export function createApiRouter(db) {
     res.json(conversations);
   });
 
+  // ── Global Message Search ─────────────────────────────────
+  router.get('/search/messages', (req, res) => {
+    try {
+      const query = req.query.q || '';
+      const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+      if (!query.trim()) return res.json([]);
+
+      const q = `%${query}%`;
+      const results = db.prepare(`
+        SELECT m.*, c.name as contact_name, c.phone as contact_phone, c.avatar_url as contact_avatar
+        FROM messages m
+        LEFT JOIN contacts c ON c.id = m.contact_id
+        WHERE m.user_id = ? AND m.content LIKE ? AND m.type IN ('text', 'image', 'video', 'document')
+        ORDER BY m.timestamp DESC
+        LIMIT ?
+      `).all(req.userId, q, limit);
+      res.json(results);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Archive / Unarchive ─────────────────────────────────
   router.post('/archive/:contactId', async (req, res) => {
     try {
