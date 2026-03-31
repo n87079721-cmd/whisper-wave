@@ -509,6 +509,16 @@ export const api = {
   adminDeleteUser(userId: string) {
     return requestJson<{ success: boolean }>(`/api/admin/users/${userId}`, { method: 'DELETE' });
   },
+
+  adminGetDebugLogs(limit = 200, userId?: string) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (userId) params.set('userId', userId);
+    return requestJson<Array<Record<string, any>>>(`/api/admin/debug-logs?${params}`);
+  },
+
+  adminClearDebugLogs() {
+    return requestJson<{ success: boolean }>('/api/admin/debug-logs', { method: 'DELETE' });
+  },
 };
 
 // Types
