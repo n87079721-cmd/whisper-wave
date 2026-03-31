@@ -25,18 +25,23 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
   const isWaiting = status === 'qr_waiting';
   const isReconnecting = status === 'reconnecting';
 
-  // Auto-connect on mount so QR code appears immediately
+  // Auto-connect once on mount so QR code appears immediately
   useEffect(() => {
     if (!backendReady || autoConnectTriggered.current) return;
-    if (status === 'disconnected') {
-      autoConnectTriggered.current = true;
-      setConnecting(true);
-      api.reconnect()
-        .then(() => refresh())
-        .catch(() => {})
-        .finally(() => setConnecting(false));
-    }
-  }, [status, backendReady, refresh]);
+    autoConnectTriggered.current = true;
+
+    // Only auto-connect if currently disconnected
+    api.getStatus().then((data) => {
+      if (data.status === 'disconnected') {
+        setConnecting(true);
+        api.reconnect()
+          .then(() => refresh())
+          .catch(() => {})
+          .finally(() => setConnecting(false));
+      }
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendReady]);
 
   const statCards = [
     { label: 'Messages Sent', value: stats.messagesSent.toLocaleString(), icon: MessageSquare },
