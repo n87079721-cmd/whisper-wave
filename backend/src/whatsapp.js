@@ -116,6 +116,7 @@ function getInstance(userId) {
       connectionStartedAtMs: 0,
       lastConnectionActivityAtMs: 0,
       lastDisconnectReason: null,
+      failedReplyQueue: [],
     });
   }
   return userInstances.get(userId);
