@@ -1193,7 +1193,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
                                 <span className={`text-[10px] inline-btn ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
                                 {msg.is_starred ? <Star className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500 inline-btn" /> : null}
-                                {msg.direction === 'sent' && <StatusLabel status={msg.status} />}
+                                {msg.direction === 'sent' && <StatusTicks status={msg.status} />}
                                 {/* Action buttons - visible on hover (desktop) or always tiny on mobile */}
                                 {msg.type !== 'call' && !msg.is_deleted && (
                                   <div className="flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-all">
