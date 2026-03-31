@@ -858,10 +858,23 @@ async function startConnection(userId, db, options = {}) {
   const generation = inst.connectionGeneration + 1;
   inst.connectionGeneration = generation;
 
-  // Destroy previous client
+  // Hard-destroy previous client — kill browser process if destroy() fails
   if (inst.client) {
-    try { await inst.client.destroy(); } catch {}
+    const oldClient = inst.client;
     inst.client = null;
+    try { await oldClient.destroy(); } catch {
+      // destroy() failed — force-kill the underlying browser process
+      try {
+        const browser = await oldClient.pupBrowser;
+        if (browser) {
+          const pid = browser.process()?.pid;
+          if (pid) { try { process.kill(pid, 'SIGKILL'); } catch {} }
+          try { await browser.close(); } catch {}
+        }
+      } catch {}
+    }
+    // Small delay to let the OS release resources
+    await new Promise(r => setTimeout(r, 1000));
   }
 
   try {
