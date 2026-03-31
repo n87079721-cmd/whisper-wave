@@ -38,6 +38,7 @@ const ACTION_CONFIG: Record<string, { icon: typeof Bot; color: string; label: st
   skip_automation_disabled: { icon: XCircle, color: 'text-muted-foreground', label: 'Skipped (off)' },
   skip_archived_chat: { icon: XCircle, color: 'text-muted-foreground', label: 'Skipped (archived)' },
   reply_too_similar_regenerating: { icon: RefreshCw, color: 'text-yellow-400', label: 'Regenerating' },
+  reply_cancelled: { icon: XCircle, color: 'text-orange-500', label: 'Reply cancelled' },
   skip_still_too_similar: { icon: XCircle, color: 'text-red-400', label: 'Skipped (similar)' },
   reaction_sent_instead: { icon: Zap, color: 'text-pink-400', label: 'Reacted instead' },
   batch_auto_reply_error: { icon: AlertTriangle, color: 'text-red-500', label: 'Error' },
