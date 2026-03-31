@@ -1990,10 +1990,12 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     }
   }
 
+  debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, historyLength: messages.length });
   let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
   if (isReplyTooSimilar(replyText, recentOutgoing)) {
+    debugLog(db, userId, 'reply_too_similar_regenerating', { contact: contactName || phone, originalReply: replyText.slice(0, 60) });
     replyText = await generateReply(
       keyRow.value,
       messages,
@@ -2004,6 +2006,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   }
 
   if (!replyText || isReplyTooSimilar(replyText, recentOutgoing)) {
+    debugLog(db, userId, 'skip_still_too_similar', { contact: contactName || phone });
     inst.autoReplyCooldowns.set(jid, Date.now());
     return;
   }
@@ -2012,6 +2015,16 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const delay = calculateDelay(replyText.length, speed);
   // Typing duration scales with reply length: ~1s per 10 chars, min 2s, max 12s
   const typingDuration = Math.min(Math.max(Math.floor(replyText.length / 10) * 1000, 2000), 12000) + Math.floor(Math.random() * 2000);
+
+  debugLog(db, userId, 'reply_scheduled', {
+    contact: contactName || phone,
+    replyPreview: replyText.slice(0, 80),
+    replyLength: replyText.length,
+    delayMs: delay,
+    delaySec: Math.round(delay / 1000),
+    typingMs: typingDuration,
+    speed,
+  });
 
   clearPendingAutoReply(userId, jid);
 
@@ -2025,6 +2038,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     try {
       // Send typing indicator
       const chatId = fromJid(jid);
+      debugLog(db, userId, 'typing_started', { contact: contactName || phone });
       try {
         const chat = await inst.client.getChatById(chatId);
         await chat.sendStateTyping();
@@ -2057,6 +2071,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent', ?, ?, ?)
           `).run(replyId, userId, contactId, jid, replyText, replyToId, replyToContent, replyToSender);
           db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'auto_reply_sent', ?)`).run(userId, JSON.stringify({ contactId }));
+          debugLog(db, userId, 'auto_reply_sent', { contact: contactName || phone, replyPreview: replyText.slice(0, 80), replyLength: replyText.length, quoted: !!latestMessageId });
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
           emit(userId, 'message', { contactId, msgId: replyId });
