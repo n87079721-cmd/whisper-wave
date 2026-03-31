@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -41,6 +41,31 @@ const ACTION_CONFIG: Record<string, { icon: typeof Bot; color: string; label: st
   skip_still_too_similar: { icon: XCircle, color: 'text-red-400', label: 'Skipped (similar)' },
   reaction_sent_instead: { icon: Zap, color: 'text-pink-400', label: 'Reacted instead' },
   batch_auto_reply_error: { icon: AlertTriangle, color: 'text-red-500', label: 'Error' },
+};
+
+// Live countdown component for scheduled replies
+const Countdown = ({ scheduledAt, delayMs }: { scheduledAt: string; delayMs: number }) => {
+  const [now, setNow] = useState(Date.now());
+  
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const sendAt = new Date(scheduledAt).getTime() + delayMs;
+  const remaining = Math.max(0, Math.floor((sendAt - now) / 1000));
+
+  if (remaining <= 0) {
+    return <span className="text-[10px] font-medium text-green-400">✓ sending now</span>;
+  }
+
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+  return (
+    <span className="text-[10px] font-mono font-medium text-amber-400 tabular-nums">
+      ⏱ {mins}:{secs.toString().padStart(2, '0')}
+    </span>
+  );
 };
 
 const AdminPage = () => {
@@ -309,6 +334,9 @@ const AdminPage = () => {
                         </span>
                       </div>
                       {renderLogDetails(entry)}
+                      {entry.action === 'reply_scheduled' && entry.delayMs && (
+                        <Countdown scheduledAt={entry.created_at} delayMs={entry.delayMs} />
+                      )}
                     </div>
                   </div>
                 </div>
