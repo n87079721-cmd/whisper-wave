@@ -204,6 +204,7 @@ function ensureIndexes(db) {
     CREATE INDEX IF NOT EXISTS idx_statuses_expires ON statuses(expires_at);
     CREATE INDEX IF NOT EXISTS idx_call_logs_user ON call_logs(user_id);
     CREATE INDEX IF NOT EXISTS idx_call_logs_timestamp ON call_logs(user_id, timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_pending_replies_user ON pending_replies(user_id, status);
   `);
 }
 
