@@ -704,8 +704,7 @@ function requiresFreshPairing(reason) {
 
 function isRecoverableConnectionIssue(reason) {
   const normalized = normalizeConnectionReason(reason);
-  // NAVIGATION = browser page died (idle/crash), treat as recoverable
-  return normalized === 'CONFLICT' || normalized === 'TIMEOUT' || normalized === 'UNLAUNCHED' || normalized === 'NAVIGATION';
+  return normalized === 'CONFLICT' || normalized === 'TIMEOUT' || normalized === 'UNLAUNCHED';
 }
 
 function startHeartbeat(userId, db) {
@@ -859,23 +858,10 @@ async function startConnection(userId, db, options = {}) {
   const generation = inst.connectionGeneration + 1;
   inst.connectionGeneration = generation;
 
-  // Hard-destroy previous client — kill browser process if destroy() fails
+  // Destroy previous client
   if (inst.client) {
-    const oldClient = inst.client;
+    try { await inst.client.destroy(); } catch {}
     inst.client = null;
-    try { await oldClient.destroy(); } catch {
-      // destroy() failed — force-kill the underlying browser process
-      try {
-        const browser = await oldClient.pupBrowser;
-        if (browser) {
-          const pid = browser.process()?.pid;
-          if (pid) { try { process.kill(pid, 'SIGKILL'); } catch {} }
-          try { await browser.close(); } catch {}
-        }
-      } catch {}
-    }
-    // Small delay to let the OS release resources
-    await new Promise(r => setTimeout(r, 1000));
   }
 
   try {
@@ -1050,17 +1036,12 @@ async function startConnection(userId, db, options = {}) {
       inst.historySyncInProgress = false;
       inst.contactSyncInProgress = false;
       if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
-      debugLog(db, userId, 'whatsapp_disconnected', { reason });
 
       if (requiresFreshPairing(reason)) {
-        // Session needs re-scan — do NOT wipe auth cache (LocalAuth may still restore)
-        // Only user-initiated clearSession should wipe the stored session
-        console.log(`🔑 [${userId}] Disconnect reason ${reason} requires fresh pairing — awaiting user re-scan`);
         inst.connectionStatus = 'disconnected';
         inst.reconnectAttempt = 0;
         emit(userId, 'status', { status: 'disconnected' });
       } else {
-        // Recoverable — force a hard reconnect (new browser process)
         inst.connectionStatus = 'reconnecting';
         emit(userId, 'status', { status: 'reconnecting' });
         scheduleReconnect(userId, db, generation);
@@ -1068,7 +1049,7 @@ async function startConnection(userId, db, options = {}) {
     });
 
     // ── Authentication failure ──
-    client.on('auth_failure', async (msg) => {
+    client.on('auth_failure', (msg) => {
       console.error(`❌ [${userId}] Auth failure:`, msg);
       stopHeartbeat(userId);
       clearConnectionWatchdog(userId);
@@ -1079,17 +1060,8 @@ async function startConnection(userId, db, options = {}) {
       inst.historySyncInProgress = false;
       inst.contactSyncInProgress = false;
       if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
-
-      // Do NOT wipe auth cache — LocalAuth may still be valid on retry
-      // Try auto-reconnect once; if it fails again user can manually clear session
-      inst.connectionStatus = 'reconnecting';
-      emit(userId, 'status', { status: 'reconnecting' });
-      debugLog(db, userId, 'auth_failure_will_retry', { reason: msg });
-      // Single retry after 5s with fresh browser
-      setTimeout(() => {
-        if (inst.connectionGeneration !== generation) return;
-        startConnection(userId, db, { force: true });
-      }, 5000);
+      inst.connectionStatus = 'disconnected';
+      emit(userId, 'status', { status: 'disconnected' });
     });
 
     // ── Incoming messages ──
