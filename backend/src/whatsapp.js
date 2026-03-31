@@ -1052,14 +1052,9 @@ async function startConnection(userId, db, options = {}) {
       debugLog(db, userId, 'whatsapp_disconnected', { reason });
 
       if (requiresFreshPairing(reason)) {
-        // Session is truly dead — wipe cached browser session so next connect is clean
-        const wwebjsSessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
-        try {
-          if (fs.existsSync(wwebjsSessionDir)) {
-            fs.rmSync(wwebjsSessionDir, { recursive: true, force: true });
-            console.log(`🧹 [${userId}] Cleared wwebjs auth cache after ${reason}`);
-          }
-        } catch (e) { console.warn(`⚠️ [${userId}] Cache clear failed:`, e?.message); }
+        // Session needs re-scan — do NOT wipe auth cache (LocalAuth may still restore)
+        // Only user-initiated clearSession should wipe the stored session
+        console.log(`🔑 [${userId}] Disconnect reason ${reason} requires fresh pairing — awaiting user re-scan`);
         inst.connectionStatus = 'disconnected';
         inst.reconnectAttempt = 0;
         emit(userId, 'status', { status: 'disconnected' });
