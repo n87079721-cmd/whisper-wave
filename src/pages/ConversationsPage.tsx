@@ -1275,6 +1275,25 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                 </button>
                               )}
                               {renderMessageContent(msg)}
+                              {/* Reactions display */}
+                              {(() => {
+                                let reactions: Array<{ emoji: string; sender: string }> = [];
+                                try { reactions = JSON.parse(msg.reactions || '[]'); } catch {}
+                                if (reactions.length === 0) return null;
+                                const grouped = reactions.reduce<Record<string, number>>((acc, r) => {
+                                  acc[r.emoji] = (acc[r.emoji] || 0) + 1;
+                                  return acc;
+                                }, {});
+                                return (
+                                  <div className={`flex gap-0.5 mt-1 flex-wrap ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
+                                    {Object.entries(grouped).map(([emoji, count]) => (
+                                      <span key={emoji} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-background/50 border border-border text-[11px] shadow-sm">
+                                        {emoji}{count > 1 && <span className="text-muted-foreground">{count}</span>}
+                                      </span>
+                                    ))}
+                                  </div>
+                                );
+                              })()}
                               <div className={`flex items-center gap-1 mt-0.5 ${msg.direction === 'sent' ? 'justify-end' : ''}`}>
                                 <span className={`text-[10px] inline-btn ${msg.direction === 'sent' ? 'text-bubble-out-foreground/70' : 'text-muted-foreground'}`}>{formatTime(msg.timestamp)}</span>
                                 {msg.is_starred ? <Star className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500 inline-btn" /> : null}
@@ -1282,6 +1301,46 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                 {/* Action buttons - visible on hover (desktop) or always tiny on mobile */}
                                 {msg.type !== 'call' && !msg.is_deleted && (
                                   <div className="flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-all">
+                                    {/* Reaction button */}
+                                    <div className="relative">
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); setReactionPickerMsgId(prev => prev === msg.id ? null : msg.id); }}
+                                        className="inline-btn p-0.5 hover:text-primary text-muted-foreground/50 md:text-muted-foreground"
+                                        title="React"
+                                      >
+                                        <span className="text-[11px]">😊</span>
+                                      </button>
+                                      {reactionPickerMsgId === msg.id && (
+                                        <div className={`absolute z-30 bottom-full mb-1 ${msg.direction === 'sent' ? 'right-0' : 'left-0'} bg-popover border border-border rounded-xl shadow-xl p-1.5 flex gap-1`}>
+                                          {['👍', '❤️', '😂', '😮', '😢', '🙏'].map(emoji => (
+                                            <button
+                                              key={emoji}
+                                              onClick={async (e) => {
+                                                e.stopPropagation();
+                                                setReactionPickerMsgId(null);
+                                                try {
+                                                  await api.reactToMessage(msg.id, emoji);
+                                                  // Optimistic update
+                                                  setMessages(prev => prev.map(m => {
+                                                    if (m.id !== msg.id) return m;
+                                                    let reactions: Array<{ emoji: string; sender: string; timestamp: number }> = [];
+                                                    try { reactions = JSON.parse(m.reactions || '[]'); } catch {}
+                                                    reactions = reactions.filter(r => r.sender === 'me');
+                                                    reactions.push({ emoji, sender: 'me', timestamp: Date.now() });
+                                                    return { ...m, reactions: JSON.stringify(reactions) };
+                                                  }));
+                                                } catch (err: any) {
+                                                  toast.error(err.message || 'Failed to react');
+                                                }
+                                              }}
+                                              className="w-8 h-8 rounded-full hover:bg-secondary flex items-center justify-center text-lg transition-colors"
+                                            >
+                                              {emoji}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
                                     <button
                                       onClick={(e) => { e.stopPropagation(); setQuotedMessage(msg); }}
                                       className="inline-btn p-0.5 hover:text-primary text-muted-foreground/50 md:text-muted-foreground"
