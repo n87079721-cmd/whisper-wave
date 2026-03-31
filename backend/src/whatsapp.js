@@ -2100,17 +2100,23 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
   debugLog(db, userId, 'message_received_for_ai', { contact: contactName || phone, body: (originalMsg?.body || '').slice(0, 80) });
 
   const inst = getInstance(userId);
+  const hadPendingReply = inst.pendingAutoReplies.has(jid);
   clearPendingAutoReply(userId, jid);
   // Reset cooldown so follow-up messages are never ignored
   inst.autoReplyCooldowns.delete(jid);
 
   const existing = inst.messageBatchBuffers.get(jid);
+  const hadPriorBatch = !!existing;
   if (existing) {
     clearTimeout(existing.timer);
     debugLog(db, userId, 'batch_extended', { contact: contactName || phone, batchSize: (existing.messages?.length || 0) + 1 });
   }
 
-  const batchEntry = existing || { messages: [], contactId, phone, contactName, latestOriginalMsg: originalMsg, latestMessageId: null };
+  // If we cancelled a pending reply or extended a batch, force the next reply (skip chance roll)
+  const forceReply = hadPendingReply || hadPriorBatch;
+
+  const batchEntry = existing || { messages: [], contactId, phone, contactName, latestOriginalMsg: originalMsg, latestMessageId: null, forceReply: false };
+  if (forceReply) batchEntry.forceReply = true;
   batchEntry.contactId = contactId;
   batchEntry.phone = phone;
   batchEntry.contactName = contactName;
@@ -2134,6 +2140,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
       latestOriginalMsg: batchEntry.latestOriginalMsg,
       latestMessageId: batchEntry.latestMessageId,
       batchedCount: batchEntry.messages.length,
+      forceReply: batchEntry.forceReply || false,
     }).catch(err => {
       console.error('Batched auto-reply error:', err?.message || err);
       debugLog(db, userId, 'batch_auto_reply_error', { contact: batchEntry.contactName || batchEntry.phone, error: err?.message || String(err) });
@@ -2143,7 +2150,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
   inst.messageBatchBuffers.set(jid, batchEntry);
 }
 
-async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestMessageId }) {
+async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestMessageId, forceReply = false }) {
   const inst = getInstance(userId);
 
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
@@ -2168,7 +2175,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
 
   const roll = Math.random() * 100;
-  if (roll > replyChance) {
+  if (!forceReply && roll > replyChance) {
     debugLog(db, userId, 'skip_reply_chance', { contact: contactName || phone, chance: replyChance + '%', rolled: Math.round(roll) });
     const msgText = latestOriginalMsg?.body || latestOriginalMsg?.caption || '';
     const reactionEmoji = await shouldReact(keyRow.value, msgText);
@@ -2178,6 +2185,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       debugLog(db, userId, 'reaction_sent_instead', { contact: contactName || phone, emoji: reactionEmoji });
     }
     return;
+  }
+  if (forceReply) {
+    debugLog(db, userId, 'force_reply_rebatch', { contact: contactName || phone, reason: 'prior reply was cancelled by new message' });
   }
 
   const messages = db.prepare(`
