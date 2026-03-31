@@ -704,7 +704,7 @@ function requiresFreshPairing(reason) {
 
 function isRecoverableConnectionIssue(reason) {
   const normalized = normalizeConnectionReason(reason);
-  return normalized === 'CONFLICT' || normalized === 'TIMEOUT' || normalized === 'UNLAUNCHED';
+  return normalized === 'CONFLICT' || normalized === 'TIMEOUT' || normalized === 'UNLAUNCHED' || normalized === 'NAVIGATION';
 }
 
 function startHeartbeat(userId, db) {
@@ -845,10 +845,10 @@ async function startConnection(userId, db, options = {}) {
   const inst = getInstance(userId);
   const force = options.force === true;
 
-  // If stuck connecting for >2min, force-reset the lock
+  // If stuck connecting for >90s, force-reset the lock (reduced from 2min)
   if (inst.isConnecting && !force) {
     const stuckMs = Date.now() - (inst.connectionStartedAtMs || 0);
-    if (stuckMs > 120_000) {
+    if (stuckMs > 90_000) {
       console.warn(`⚠️ [${userId}] isConnecting stuck for ${Math.round(stuckMs / 1000)}s — force-resetting`);
       inst.isConnecting = false;
     } else {
@@ -867,14 +867,26 @@ async function startConnection(userId, db, options = {}) {
   const generation = inst.connectionGeneration + 1;
   inst.connectionGeneration = generation;
 
-  // Destroy previous client and kill any zombie browser
+  // Destroy previous client and kill any zombie Chromium browser
   if (inst.client) {
     try {
-      const browser = await inst.client.pupBrowser?.();
+      // pupBrowser is a property, not a method
+      const browser = inst.client.pupBrowser;
       if (browser) await browser.close().catch(() => {});
     } catch {}
     try { await inst.client.destroy(); } catch {}
     inst.client = null;
+  }
+
+  // Clean wwebjs cache (can get corrupted after logout/crash)
+  const cacheDir = path.join(DATA_DIR, 'wwebjs_cache');
+  try {
+    if (fs.existsSync(cacheDir)) {
+      fs.rmSync(cacheDir, { recursive: true, force: true });
+      console.log(`🧹 [${userId}] Cleaned wwebjs_cache`);
+    }
+  } catch (e) {
+    console.warn(`⚠️ [${userId}] Failed to clean cache: ${e?.message}`);
   }
 
   try {
@@ -896,8 +908,14 @@ async function startConnection(userId, db, options = {}) {
           '--disable-dev-shm-usage',
           '--disable-accelerated-2d-canvas',
           '--no-first-run',
-          '--no-zygote',
           '--disable-gpu',
+          '--disable-extensions',
+          '--disable-background-networking',
+          '--disable-default-apps',
+          '--disable-sync',
+          '--disable-translate',
+          '--metrics-recording-only',
+          '--mute-audio',
         ],
       },
     });
@@ -1270,16 +1288,29 @@ async function startConnection(userId, db, options = {}) {
     });
 
     // Initialize client with a timeout to prevent infinite hangs
-    const INIT_TIMEOUT_MS = 90_000; // 90 seconds max for Puppeteer to start + QR/session
+    const INIT_TIMEOUT_MS = 60_000; // 60s — if no QR/auth by then, something is stuck
+    let initTimedOut = false;
     const initPromise = client.initialize();
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('initialize() timed out after 90s')), INIT_TIMEOUT_MS)
+      setTimeout(() => { initTimedOut = true; reject(new Error('initialize() timed out after 60s')); }, INIT_TIMEOUT_MS)
     );
     await Promise.race([initPromise, timeoutPromise]);
-    console.log(`🔄 [${userId}] WhatsApp client initializing...`);
+    console.log(`🔄 [${userId}] WhatsApp client initialized successfully`);
   } catch (err) {
     console.error(`startConnection error [${userId}]:`, err?.message || err);
     clearConnectionWatchdog(userId);
+
+    // Force-kill the stale client if it timed out or crashed
+    if (inst.client) {
+      const deadClient = inst.client;
+      inst.client = null;
+      try {
+        const browser = deadClient.pupBrowser;
+        if (browser) await browser.close().catch(() => {});
+      } catch {}
+      try { await deadClient.destroy(); } catch {}
+    }
+
     inst.lastDisconnectReason = String(err?.message || err || 'start_error');
     inst.connectionPhase = 'start_error';
     inst.lastConnectionActivityAtMs = Date.now();
@@ -2272,9 +2303,14 @@ async function softDisconnect(userId) {
   if (inst.client) {
     const clientRef = inst.client;
     inst.client = null;
-    // Only destroy — do NOT call .logout() so session is preserved
+    // Kill browser first, then destroy — prevents zombie Chromium
+    try {
+      const browser = clientRef.pupBrowser;
+      if (browser) await browser.close().catch(() => {});
+    } catch {}
     try { await clientRef.destroy(); } catch {}
   }
+  inst.isConnecting = false;
 
   emit(userId, 'status', { status: 'disconnected' });
   console.log(`🔌 [${userId}] Soft disconnect — session preserved.`);
@@ -2324,6 +2360,10 @@ async function clearSession(userId, db) {
     const clientRef = inst.client;
     inst.client = null;
     try { await clientRef.logout(); } catch {}
+    try {
+      const browser = clientRef.pupBrowser;
+      if (browser) await browser.close().catch(() => {});
+    } catch {}
     try { await clientRef.destroy(); } catch {}
   }
 
@@ -2354,6 +2394,12 @@ async function clearSession(userId, db) {
   if (fs.existsSync(wwLocalAuthDefault)) {
     fs.rmSync(wwLocalAuthDefault, { recursive: true, force: true });
   }
+
+  // Also clean wwebjs cache to prevent corruption
+  const cacheDir = path.join(DATA_DIR, 'wwebjs_cache');
+  try {
+    if (fs.existsSync(cacheDir)) fs.rmSync(cacheDir, { recursive: true, force: true });
+  } catch {}
 
   inst.isConnecting = false;
   emit(userId, 'status', { status: 'disconnected' });
