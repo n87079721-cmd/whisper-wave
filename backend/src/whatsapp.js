@@ -1049,12 +1049,22 @@ async function startConnection(userId, db, options = {}) {
       inst.historySyncInProgress = false;
       inst.contactSyncInProgress = false;
       if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
+      debugLog(db, userId, 'whatsapp_disconnected', { reason });
 
       if (requiresFreshPairing(reason)) {
+        // Session is truly dead — wipe cached browser session so next connect is clean
+        const wwebjsSessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
+        try {
+          if (fs.existsSync(wwebjsSessionDir)) {
+            fs.rmSync(wwebjsSessionDir, { recursive: true, force: true });
+            console.log(`🧹 [${userId}] Cleared wwebjs auth cache after ${reason}`);
+          }
+        } catch (e) { console.warn(`⚠️ [${userId}] Cache clear failed:`, e?.message); }
         inst.connectionStatus = 'disconnected';
         inst.reconnectAttempt = 0;
         emit(userId, 'status', { status: 'disconnected' });
       } else {
+        // Recoverable — force a hard reconnect (new browser process)
         inst.connectionStatus = 'reconnecting';
         emit(userId, 'status', { status: 'reconnecting' });
         scheduleReconnect(userId, db, generation);
