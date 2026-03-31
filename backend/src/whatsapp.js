@@ -1870,19 +1870,39 @@ async function sendReaction(userId, jid, msg, emoji) {
   }
 }
 
+function debugLog(db, userId, action, details = {}) {
+  try {
+    db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'debug_log', ?)`).run(
+      userId,
+      JSON.stringify({ action, ...details, ts: new Date().toISOString() })
+    );
+  } catch {}
+}
+
 async function handleAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg) {
   const autoConfig = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'automation_enabled'").get(userId);
-  if (!autoConfig || autoConfig.value !== 'true') return;
+  if (!autoConfig || autoConfig.value !== 'true') {
+    debugLog(db, userId, 'skip_automation_disabled', { contact: contactName || phone });
+    return;
+  }
 
   // Skip archived chats
   const contactRow = db.prepare('SELECT is_archived FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
-  if (contactRow?.is_archived) return;
+  if (contactRow?.is_archived) {
+    debugLog(db, userId, 'skip_archived_chat', { contact: contactName || phone });
+    return;
+  }
+
+  debugLog(db, userId, 'message_received_for_ai', { contact: contactName || phone, body: (originalMsg?.body || '').slice(0, 80) });
 
   const inst = getInstance(userId);
   clearPendingAutoReply(userId, jid);
 
   const existing = inst.messageBatchBuffers.get(jid);
-  if (existing) clearTimeout(existing.timer);
+  if (existing) {
+    clearTimeout(existing.timer);
+    debugLog(db, userId, 'batch_extended', { contact: contactName || phone, batchSize: (existing.messages?.length || 0) + 1 });
+  }
 
   const batchEntry = existing || { messages: [], contactId, phone, contactName, latestOriginalMsg: originalMsg, latestMessageId: null };
   batchEntry.contactId = contactId;
@@ -1899,6 +1919,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
 
   batchEntry.timer = setTimeout(() => {
     inst.messageBatchBuffers.delete(jid);
+    debugLog(db, userId, 'batch_timer_fired', { contact: batchEntry.contactName || batchEntry.phone, batchSize: batchEntry.messages.length });
     executeAutoReply(userId, db, {
       contactId: batchEntry.contactId,
       jid,
@@ -1909,6 +1930,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
       batchedCount: batchEntry.messages.length,
     }).catch(err => {
       console.error('Batched auto-reply error:', err?.message || err);
+      debugLog(db, userId, 'batch_auto_reply_error', { contact: batchEntry.contactName || batchEntry.phone, error: err?.message || String(err) });
     });
   }, 12000);
 
