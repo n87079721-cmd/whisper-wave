@@ -426,11 +426,32 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     }
   };
 
-  // Copy message text to clipboard
+  // Copy message text to clipboard (with fallback for non-HTTPS)
   const handleCopyMessage = useCallback((msg: Message) => {
     const text = msg.content || '';
     if (!text) { toast.error('Nothing to copy'); return; }
-    navigator.clipboard.writeText(text).then(() => toast.success('Copied')).catch(() => toast.error('Failed to copy'));
+    
+    const copyFallback = (str: string) => {
+      const ta = document.createElement('textarea');
+      ta.value = str;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+        toast.success('Copied');
+      } catch {
+        toast.error('Failed to copy');
+      }
+      document.body.removeChild(ta);
+    };
+
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => toast.success('Copied')).catch(() => copyFallback(text));
+    } else {
+      copyFallback(text);
+    }
   }, []);
 
   // Forward message
