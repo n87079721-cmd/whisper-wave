@@ -38,6 +38,7 @@ const ACTION_CONFIG: Record<string, { icon: typeof Bot; color: string; label: st
   skip_automation_disabled: { icon: XCircle, color: 'text-muted-foreground', label: 'Skipped (off)' },
   skip_archived_chat: { icon: XCircle, color: 'text-muted-foreground', label: 'Skipped (archived)' },
   reply_too_similar_regenerating: { icon: RefreshCw, color: 'text-yellow-400', label: 'Regenerating' },
+  reply_cancelled: { icon: XCircle, color: 'text-orange-500', label: 'Reply cancelled' },
   skip_still_too_similar: { icon: XCircle, color: 'text-red-400', label: 'Skipped (similar)' },
   reaction_sent_instead: { icon: Zap, color: 'text-pink-400', label: 'Reacted instead' },
   batch_auto_reply_error: { icon: AlertTriangle, color: 'text-red-500', label: 'Error' },
@@ -372,7 +373,7 @@ const AdminPage = () => {
                       {renderLogDetails(entry)}
                       {entry.action === 'reply_scheduled' && (entry.delayMs || entry.delaySec) && !debugLogs.some(
                         (other) => other.contact === entry.contact &&
-                          (other.action === 'auto_reply_sent' || other.action === 'typing_started') &&
+                          (other.action === 'auto_reply_sent' || other.action === 'typing_started' || other.action === 'reply_cancelled') &&
                           other.id > entry.id
                       ) && (
                         <Countdown scheduledAt={entry.created_at} delayMs={entry.delayMs} delaySec={entry.delaySec} contact={entry.contact} onCancelled={fetchDebugLogs} />
