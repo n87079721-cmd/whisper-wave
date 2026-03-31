@@ -57,7 +57,9 @@ const Countdown = ({ scheduledAt, delayMs, delaySec, contact, onCancelled }: { s
     return () => clearInterval(interval);
   }, []);
 
-  const sendAt = new Date(scheduledAt).getTime() + actualDelayMs;
+  // Ensure UTC parsing – backend may omit the 'Z' suffix
+  const ts = scheduledAt.endsWith('Z') || scheduledAt.includes('+') ? scheduledAt : scheduledAt + 'Z';
+  const sendAt = new Date(ts).getTime() + actualDelayMs;
   const remaining = Math.max(0, Math.floor((sendAt - now) / 1000));
 
   const handleCancel = async () => {
