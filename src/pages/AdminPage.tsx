@@ -115,6 +115,7 @@ const AdminPage = () => {
   const [debugLogs, setDebugLogs] = useState<DebugEntry[]>([]);
   const [debugLoading, setDebugLoading] = useState(false);
   const [debugAutoRefresh, setDebugAutoRefresh] = useState(false);
+  const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
 
   const fetchUsers = useCallback(async () => {
     try {
