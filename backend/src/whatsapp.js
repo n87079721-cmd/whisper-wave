@@ -1062,7 +1062,7 @@ async function startConnection(userId, db, options = {}) {
     });
 
     // ── Authentication failure ──
-    client.on('auth_failure', (msg) => {
+    client.on('auth_failure', async (msg) => {
       console.error(`❌ [${userId}] Auth failure:`, msg);
       stopHeartbeat(userId);
       clearConnectionWatchdog(userId);
@@ -1073,8 +1073,19 @@ async function startConnection(userId, db, options = {}) {
       inst.historySyncInProgress = false;
       inst.contactSyncInProgress = false;
       if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
+
+      // Wipe the cached wwebjs session so next connect gets a fresh QR
+      const wwebjsSessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
+      try {
+        if (fs.existsSync(wwebjsSessionDir)) {
+          fs.rmSync(wwebjsSessionDir, { recursive: true, force: true });
+          console.log(`🧹 [${userId}] Cleared stale wwebjs auth cache after auth_failure`);
+        }
+      } catch (e) { console.warn(`⚠️ [${userId}] Failed to clear auth cache:`, e?.message); }
+
       inst.connectionStatus = 'disconnected';
       emit(userId, 'status', { status: 'disconnected' });
+      debugLog(db, userId, 'auth_failure_cleared_cache', { reason: msg });
     });
 
     // ── Incoming messages ──
