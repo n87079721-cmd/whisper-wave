@@ -373,7 +373,7 @@ const AdminPage = () => {
                       {renderLogDetails(entry)}
                       {entry.action === 'reply_scheduled' && (entry.delayMs || entry.delaySec) && !debugLogs.some(
                         (other) => other.contact === entry.contact &&
-                          (other.action === 'auto_reply_sent' || other.action === 'typing_started') &&
+                          (other.action === 'auto_reply_sent' || other.action === 'typing_started' || other.action === 'reply_cancelled') &&
                           other.id > entry.id
                       ) && (
                         <Countdown scheduledAt={entry.created_at} delayMs={entry.delayMs} delaySec={entry.delaySec} contact={entry.contact} onCancelled={fetchDebugLogs} />

@@ -2038,6 +2038,19 @@ function clearPendingAutoReply(userId, jid, { rescue = false } = {}) {
   if (pending.delayTimer) clearTimeout(pending.delayTimer);
   if (pending.typingTimer) clearTimeout(pending.typingTimer);
   inst.pendingAutoReplies.delete(jid);
+
+  // Log cancellation so Admin UI can hide stale countdowns
+  if (!rescue) {
+    const db = inst.db;
+    if (db) {
+      try {
+        debugLog(db, userId, 'reply_cancelled', {
+          contact: pending.contactName || pending.phone,
+          reason: 'new_message_received',
+        });
+      } catch {}
+    }
+  }
   clearTypingState(userId, jid).catch(() => {});
 
   // Rescue: push to failed reply queue so it sends after reconnect
