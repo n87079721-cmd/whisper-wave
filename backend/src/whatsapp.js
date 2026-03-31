@@ -91,6 +91,7 @@ function getInstance(userId) {
       connectionGeneration: 0,
       autoReplyCooldowns: new Map(),
       messageBatchBuffers: new Map(),
+      pendingAutoReplies: new Map(),
       contactCache: new Map(),
       archiveSyncTimer: null,
       recoverySyncTimer: null,
@@ -156,20 +157,20 @@ function getRestoreWatchdogTimeoutMs(userId, db, stage = 'restoring session') {
   const normalizedStage = String(stage || '').toLowerCase();
 
   if (normalizedStage.includes('authenticated') || normalizedStage.includes('loading')) {
+    if (scale === 'huge') return 18 * 60 * 1000;
+    if (scale === 'large') return 10 * 60 * 1000;
+    return 5 * 60 * 1000;
+  }
+
+  if (normalizedStage.includes('pairing') || normalizedStage.includes('opening')) {
     if (scale === 'huge') return 10 * 60 * 1000;
     if (scale === 'large') return 6 * 60 * 1000;
     return 3 * 60 * 1000;
   }
 
-  if (normalizedStage.includes('pairing') || normalizedStage.includes('opening')) {
-    if (scale === 'huge') return 6 * 60 * 1000;
-    if (scale === 'large') return 4 * 60 * 1000;
-    return 2 * 60 * 1000;
-  }
-
-  if (scale === 'huge') return 5 * 60 * 1000;
-  if (scale === 'large') return 3 * 60 * 1000;
-  return 90 * 1000;
+  if (scale === 'huge') return 8 * 60 * 1000;
+  if (scale === 'large') return 5 * 60 * 1000;
+  return 150 * 1000;
 }
 
 function getBackgroundContactSyncDelayMs(userId, db) {
@@ -512,13 +513,45 @@ export function getWhatsAppState(userId) {
   };
 }
 
-function hasSavedSession(userId) {
+function getPossibleSessionDirs(userId) {
+  return [
+    path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`),
+    path.join(DATA_DIR, '.wwebjs_auth', `session-${userId}`),
+  ];
+}
+
+function sessionDirHasPayload(sessionDir) {
   try {
-    const sessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
-    return fs.existsSync(sessionDir);
+    if (!fs.existsSync(sessionDir)) return false;
+    const entries = fs.readdirSync(sessionDir);
+    return entries.some((entry) => {
+      try {
+        const stats = fs.statSync(path.join(sessionDir, entry));
+        return stats.isFile() ? stats.size > 0 : stats.isDirectory();
+      } catch {
+        return false;
+      }
+    });
   } catch {
     return false;
   }
+}
+
+function hasSavedSession(userId) {
+  try {
+    return getPossibleSessionDirs(userId).some(sessionDirHasPayload);
+  } catch {
+    return false;
+  }
+}
+
+function isReconnectStale(userId, db) {
+  const inst = getInstance(userId);
+  if (inst.connectionStatus !== 'reconnecting' || inst.isConnecting) return false;
+  const lastActivityAt = inst.lastConnectionActivityAtMs || inst.connectionStartedAtMs || 0;
+  if (!lastActivityAt) return false;
+  const timeoutMs = getRestoreWatchdogTimeoutMs(userId, db, inst.connectionPhase || 'restoring session');
+  return Date.now() - lastActivityAt > timeoutMs;
 }
 
 function updateSyncState(userId, db, updates) {
@@ -590,11 +623,11 @@ export function initWhatsApp(userId, db) {
   startConnection(userId, db);
   return {
     getState: () => getWhatsAppState(userId),
-    sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
+    sendTextMessage: (jid, text, options) => sendTextMessage(userId, jid, text, options),
     sendMediaMessage: (jid, payload) => sendMediaMessage(userId, jid, payload),
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
     editMessage: (messageId, newContent) => editMessage(userId, db, messageId, newContent),
-    reconnect: () => startConnection(userId, db, { force: true }),
+    reconnect: (options = {}) => startConnection(userId, db, typeof options === 'boolean' ? { force: options } : { force: options.force !== false }),
     disconnect: () => softDisconnect(userId),
     clearSession: () => clearSession(userId, db),
     getSocket: () => getInstance(userId).client,
@@ -607,19 +640,19 @@ export function initWhatsApp(userId, db) {
 export function getOrInitWhatsApp(userId, db) {
   const inst = getInstance(userId);
 
-  if (!inst.client && !inst.isConnecting && hasSavedSession(userId)) {
-    startConnection(userId, db).catch((err) => {
+  if (hasSavedSession(userId) && ((!inst.client && !inst.isConnecting) || isReconnectStale(userId, db))) {
+    startConnection(userId, db, { force: true }).catch((err) => {
       console.error(`Auto-resume failed [${userId}]:`, err?.message || err);
     });
   }
 
   return {
     getState: () => getWhatsAppState(userId),
-    sendTextMessage: (jid, text) => sendTextMessage(userId, jid, text),
+    sendTextMessage: (jid, text, options) => sendTextMessage(userId, jid, text, options),
     sendMediaMessage: (jid, payload) => sendMediaMessage(userId, jid, payload),
     sendVoiceNote: (jid, audioBuffer) => sendVoiceNote(userId, jid, audioBuffer),
     editMessage: (messageId, newContent) => editMessage(userId, db, messageId, newContent),
-    reconnect: () => startConnection(userId, db, { force: true }),
+    reconnect: (options = {}) => startConnection(userId, db, typeof options === 'boolean' ? { force: options } : { force: options.force !== false }),
     disconnect: () => softDisconnect(userId),
     clearSession: () => clearSession(userId, db),
     getSocket: () => inst.client,
@@ -773,10 +806,9 @@ export function autoReconnectAll(db) {
   try {
     const users = db.prepare('SELECT id, username FROM users').all();
     for (const user of users) {
-      const sessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${user.id}`);
-      if (fs.existsSync(sessionDir)) {
+      if (hasSavedSession(user.id)) {
         console.log(`🔄 Auto-reconnecting user: ${user.username} (${user.id})`);
-        startConnection(user.id, db);
+        startConnection(user.id, db, { force: true });
       }
     }
   } catch (err) {
@@ -1781,6 +1813,53 @@ function calculateDelay(replyLength, speed) {
   return Math.floor(Math.random() * (range[1] - range[0])) + range[0];
 }
 
+function normalizeComparableText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isReplyTooSimilar(replyText, recentOutgoingTexts = []) {
+  const normalizedReply = normalizeComparableText(replyText);
+  if (!normalizedReply) return false;
+
+  const replyWords = new Set(normalizedReply.split(' ').filter(Boolean));
+
+  return recentOutgoingTexts.some((candidate) => {
+    const normalizedCandidate = normalizeComparableText(candidate);
+    if (!normalizedCandidate) return false;
+    if (normalizedCandidate === normalizedReply) return true;
+
+    const candidateWords = new Set(normalizedCandidate.split(' ').filter(Boolean));
+    const overlap = [...replyWords].filter((word) => candidateWords.has(word)).length;
+    const similarity = overlap / Math.max(replyWords.size, candidateWords.size, 1);
+    return similarity >= 0.72;
+  });
+}
+
+async function clearTypingState(userId, jid) {
+  const inst = getInstance(userId);
+  if (!inst.client || inst.connectionStatus !== 'connected') return;
+
+  try {
+    const chat = await inst.client.getChatById(fromJid(jid));
+    await chat.clearState();
+  } catch {}
+}
+
+function clearPendingAutoReply(userId, jid) {
+  const inst = getInstance(userId);
+  const pending = inst.pendingAutoReplies.get(jid);
+  if (!pending) return;
+
+  if (pending.delayTimer) clearTimeout(pending.delayTimer);
+  if (pending.typingTimer) clearTimeout(pending.typingTimer);
+  inst.pendingAutoReplies.delete(jid);
+  clearTypingState(userId, jid).catch(() => {});
+}
+
 async function sendReaction(userId, jid, msg, emoji) {
   const inst = getInstance(userId);
   if (!inst.client || inst.connectionStatus !== 'connected') return;
@@ -1799,34 +1878,44 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
   const contactRow = db.prepare('SELECT is_archived FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (contactRow?.is_archived) return;
 
-  const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
-  if (Math.random() * 100 > replyChance) {
-    const reactionEmoji = shouldReact();
-    if (reactionEmoji && originalMsg) {
-      const reactDelay = Math.floor(Math.random() * 5000) + 2000;
-      setTimeout(() => sendReaction(userId, jid, originalMsg, reactionEmoji), reactDelay);
-    }
-    return;
-  }
-
   const inst = getInstance(userId);
+  clearPendingAutoReply(userId, jid);
+
   const existing = inst.messageBatchBuffers.get(jid);
   if (existing) clearTimeout(existing.timer);
 
-  const batchEntry = existing || { messages: [], contactId, phone, contactName, originalMsg };
-  batchEntry.originalMsg = originalMsg;
+  const batchEntry = existing || { messages: [], contactId, phone, contactName, latestOriginalMsg: originalMsg, latestMessageId: null };
+  batchEntry.contactId = contactId;
+  batchEntry.phone = phone;
+  batchEntry.contactName = contactName;
+  batchEntry.latestOriginalMsg = originalMsg;
+  batchEntry.latestMessageId = originalMsg?.id?._serialized || originalMsg?.id?.id || null;
+  batchEntry.messages.push({
+    id: batchEntry.latestMessageId,
+    content: originalMsg?.body || originalMsg?.caption || '',
+    timestamp: Date.now(),
+  });
+  if (batchEntry.messages.length > 10) batchEntry.messages = batchEntry.messages.slice(-10);
 
   batchEntry.timer = setTimeout(() => {
     inst.messageBatchBuffers.delete(jid);
-    executeAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg).catch(err => {
+    executeAutoReply(userId, db, {
+      contactId: batchEntry.contactId,
+      jid,
+      phone: batchEntry.phone,
+      contactName: batchEntry.contactName,
+      latestOriginalMsg: batchEntry.latestOriginalMsg,
+      latestMessageId: batchEntry.latestMessageId,
+      batchedCount: batchEntry.messages.length,
+    }).catch(err => {
       console.error('Batched auto-reply error:', err?.message || err);
     });
-  }, 8000);
+  }, 12000);
 
   inst.messageBatchBuffers.set(jid, batchEntry);
 }
 
-async function executeAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg) {
+async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestMessageId }) {
   const inst = getInstance(userId);
   const now = Date.now();
   const lastReply = inst.autoReplyCooldowns.get(jid) || 0;
@@ -1837,6 +1926,16 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
 
   const promptRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
   const systemPrompt = promptRow?.value || '';
+  const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
+
+  if (Math.random() * 100 > replyChance) {
+    const reactionEmoji = shouldReact();
+    if (reactionEmoji && latestOriginalMsg) {
+      const reactDelay = Math.floor(Math.random() * 5000) + 2000;
+      setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
+    }
+    return;
+  }
 
   const messages = db.prepare(`
     SELECT content, direction, type FROM messages 
@@ -1848,11 +1947,12 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
 
   // lastMsgContent no longer needed — delay is based on reply length
   const speed = getConfigValue(db, userId, 'ai_response_speed', 'normal');
+  const recentOutgoing = messages.filter((message) => message.direction === 'sent').slice(-6).map((message) => message.content);
 
   const reactionEmoji = shouldReact();
-  if (reactionEmoji && originalMsg) {
+  if (reactionEmoji && latestOriginalMsg) {
     const reactDelay = Math.floor(Math.random() * 3000) + 1000;
-    setTimeout(() => sendReaction(userId, jid, originalMsg, reactionEmoji), reactDelay);
+    setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
     if (!shouldAlsoReplyAfterReaction()) {
       inst.autoReplyCooldowns.set(jid, Date.now());
       return;
@@ -1861,12 +1961,36 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
 
   let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone);
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+
+  if (isReplyTooSimilar(replyText, recentOutgoing)) {
+    replyText = await generateReply(
+      keyRow.value,
+      messages,
+      `${systemPrompt}\n\nIMPORTANT: Do not repeat or closely paraphrase any recent outgoing reply. Make the next reply clearly different in wording and energy.`,
+      contactName || phone,
+    );
+    replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+  }
+
+  if (!replyText || isReplyTooSimilar(replyText, recentOutgoing)) {
+    inst.autoReplyCooldowns.set(jid, Date.now());
+    return;
+  }
+
   // Use REPLY length for delay (not incoming message length)
   const delay = calculateDelay(replyText.length, speed);
   // Typing duration scales with reply length: ~1s per 10 chars, min 2s, max 12s
   const typingDuration = Math.min(Math.max(Math.floor(replyText.length / 10) * 1000, 2000), 12000) + Math.floor(Math.random() * 2000);
 
-  setTimeout(async () => {
+  clearPendingAutoReply(userId, jid);
+
+  const pendingReply = {
+    delayTimer: null,
+    typingTimer: null,
+    latestMessageId,
+  };
+
+  pendingReply.delayTimer = setTimeout(async () => {
     try {
       // Send typing indicator
       const chatId = fromJid(jid);
@@ -1874,37 +1998,67 @@ async function executeAutoReply(userId, db, contactId, jid, phone, contactName, 
         const chat = await inst.client.getChatById(chatId);
         await chat.sendStateTyping();
       } catch {}
-      setTimeout(async () => {
+
+      pendingReply.typingTimer = setTimeout(async () => {
         try {
-          const sent = await sendTextMessage(userId, jid, replyText);
+          const sent = await sendTextMessage(userId, jid, replyText, { quotedMessageId: latestMessageId });
           const replyId = sent?.id?._serialized || uuid();
 
           // Clear typing
-          try {
-            const chat = await inst.client.getChatById(chatId);
-            await chat.clearState();
-          } catch {}
+          await clearTypingState(userId, jid);
+
+          let replyToId = null, replyToContent = null, replyToSender = null;
+          if (latestMessageId) {
+            const quotedRow = db.prepare('SELECT content, direction, contact_id FROM messages WHERE id = ? AND user_id = ?').get(latestMessageId, userId);
+            if (quotedRow) {
+              replyToId = latestMessageId;
+              replyToContent = (quotedRow.content || '').slice(0, 200);
+              replyToSender = quotedRow.direction === 'sent' ? 'You' : null;
+              if (!replyToSender) {
+                const quotedContact = db.prepare('SELECT name, phone FROM contacts WHERE id = ? AND user_id = ?').get(quotedRow.contact_id, userId);
+                replyToSender = quotedContact?.name || quotedContact?.phone || null;
+              }
+            }
+          }
 
           db.prepare(`
-            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
-            VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent')
-          `).run(replyId, userId, contactId, jid, replyText);
+            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, reply_to_id, reply_to_content, reply_to_sender)
+            VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent', ?, ?, ?)
+          `).run(replyId, userId, contactId, jid, replyText, replyToId, replyToContent, replyToSender);
           db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'auto_reply_sent', ?)`).run(userId, JSON.stringify({ contactId }));
           inst.autoReplyCooldowns.set(jid, Date.now());
+          inst.pendingAutoReplies.delete(jid);
+          emit(userId, 'message', { contactId, msgId: replyId });
         } catch (err) {
           console.error('Failed to send auto-reply:', err?.message || err);
+          inst.pendingAutoReplies.delete(jid);
+          await clearTypingState(userId, jid);
         }
       }, typingDuration);
     } catch (err) {
       console.error('Typing indicator error:', err?.message || err);
+      inst.pendingAutoReplies.delete(jid);
     }
   }, Math.max(delay - typingDuration, 1000));
+
+  inst.pendingAutoReplies.set(jid, pendingReply);
 }
 
 // ── Send messages ──
 
-async function sendTextMessage(userId, jid, text) {
+async function sendTextMessage(userId, jid, text, options = {}) {
+  const { quotedMessageId } = options || {};
+
   return sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
+    if (quotedMessageId && typeof client.getMessageById === 'function') {
+      try {
+        const quotedMessage = await client.getMessageById(quotedMessageId);
+        if (quotedMessage) {
+          return await quotedMessage.reply(text);
+        }
+      } catch {}
+    }
+
     if (chat) return await chat.sendMessage(text);
     return await client.sendMessage(target, text);
   });
@@ -1974,6 +2128,7 @@ async function softDisconnect(userId) {
   inst.autoReplyCooldowns.clear();
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
+  inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid));
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
   if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
@@ -2011,6 +2166,7 @@ async function clearSession(userId, db) {
   inst.autoReplyCooldowns.clear();
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
+  inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid));
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
   if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }

@@ -690,20 +690,7 @@ export function createApiRouter(db) {
       const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId, jid });
 
       let sendResult;
-      // If quoting a message, use reply
-      if (quotedMessageId) {
-        try {
-          const quotedMsg = await wa.getMessageById(quotedMessageId);
-          if (quotedMsg) {
-            sendResult = await quotedMsg.reply(message);
-          }
-        } catch (err) {
-          console.log('Quote reply failed, sending as plain:', err?.message);
-        }
-      }
-      if (!sendResult) {
-        sendResult = await wa.sendTextMessage(targetJid, message);
-      }
+      sendResult = await wa.sendTextMessage(targetJid, message, { quotedMessageId });
       const msgId = getSentMessageId(sendResult);
 
       // Get quoted message info for DB
@@ -1263,11 +1250,11 @@ RULES:
       const wa = getWA(req);
       const currentState = wa.getState();
 
-      if (currentState.status === 'reconnecting' || currentState.status === 'qr_waiting') {
+      if (currentState.status === 'qr_waiting') {
         return res.json({ success: true, state: currentState, skipped: true });
       }
 
-      await wa.reconnect();
+      await wa.reconnect({ force: true });
       res.json({ success: true, state: wa.getState() });
     } catch (err) {
       res.status(500).json({ error: err.message });
