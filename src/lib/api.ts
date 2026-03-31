@@ -519,6 +519,14 @@ export const api = {
   adminClearDebugLogs() {
     return requestJson<{ success: boolean }>('/api/admin/debug-logs', { method: 'DELETE' });
   },
+
+  cancelPendingReply(contact: string) {
+    return requestJson<{ success: boolean; cancelled: boolean }>('/api/cancel-reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contact }),
+    });
+  },
 };
 
 // Types
