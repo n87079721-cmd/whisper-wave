@@ -62,6 +62,7 @@ const SettingsPage = () => {
     api.getConfig('ai_response_speed').then(data => {
       if (data.exists) setResponseSpeed(data.value || 'normal');
     }).catch(() => {});
+    api.getPrompts().then(setPrompts).catch(() => {});
   }, []);
 
   const handleSaveKey = async () => {
