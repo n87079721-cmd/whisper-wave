@@ -928,6 +928,9 @@ async function startConnection(userId, db, options = {}) {
       inst.reconnectAttempt = 0;
       startHeartbeat(userId, db);
 
+      // Drain any failed reply queue from before disconnect
+      drainFailedReplyQueue(userId, db);
+
       inst.syncState = {
         phase: 'waiting_history',
         connectedAt: new Date().toISOString(),
