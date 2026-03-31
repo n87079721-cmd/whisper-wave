@@ -2052,6 +2052,8 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
 
   const inst = getInstance(userId);
   clearPendingAutoReply(userId, jid);
+  // Reset cooldown so follow-up messages are never ignored
+  inst.autoReplyCooldowns.delete(jid);
 
   const existing = inst.messageBatchBuffers.get(jid);
   if (existing) {
