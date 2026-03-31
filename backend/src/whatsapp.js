@@ -845,10 +845,10 @@ async function startConnection(userId, db, options = {}) {
   const inst = getInstance(userId);
   const force = options.force === true;
 
-  // If stuck connecting for >2min, force-reset the lock
+  // If stuck connecting for >90s, force-reset the lock (reduced from 2min)
   if (inst.isConnecting && !force) {
     const stuckMs = Date.now() - (inst.connectionStartedAtMs || 0);
-    if (stuckMs > 120_000) {
+    if (stuckMs > 90_000) {
       console.warn(`⚠️ [${userId}] isConnecting stuck for ${Math.round(stuckMs / 1000)}s — force-resetting`);
       inst.isConnecting = false;
     } else {
@@ -867,14 +867,26 @@ async function startConnection(userId, db, options = {}) {
   const generation = inst.connectionGeneration + 1;
   inst.connectionGeneration = generation;
 
-  // Destroy previous client and kill any zombie browser
+  // Destroy previous client and kill any zombie Chromium browser
   if (inst.client) {
     try {
-      const browser = await inst.client.pupBrowser?.();
+      // pupBrowser is a property, not a method
+      const browser = inst.client.pupBrowser;
       if (browser) await browser.close().catch(() => {});
     } catch {}
     try { await inst.client.destroy(); } catch {}
     inst.client = null;
+  }
+
+  // Clean wwebjs cache (can get corrupted after logout/crash)
+  const cacheDir = path.join(DATA_DIR, 'wwebjs_cache');
+  try {
+    if (fs.existsSync(cacheDir)) {
+      fs.rmSync(cacheDir, { recursive: true, force: true });
+      console.log(`🧹 [${userId}] Cleaned wwebjs_cache`);
+    }
+  } catch (e) {
+    console.warn(`⚠️ [${userId}] Failed to clean cache: ${e?.message}`);
   }
 
   try {
@@ -896,8 +908,14 @@ async function startConnection(userId, db, options = {}) {
           '--disable-dev-shm-usage',
           '--disable-accelerated-2d-canvas',
           '--no-first-run',
-          '--no-zygote',
           '--disable-gpu',
+          '--disable-extensions',
+          '--disable-background-networking',
+          '--disable-default-apps',
+          '--disable-sync',
+          '--disable-translate',
+          '--metrics-recording-only',
+          '--mute-audio',
         ],
       },
     });
