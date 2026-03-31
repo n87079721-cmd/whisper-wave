@@ -1,27 +1,52 @@
 
 
-## Plan: Audio Upload Support + Auto-Delete After Send
+## Plan: Fix Multi-Person AI Replies, Handle Ignored Messages, and Add Emoji Reactions
 
-### What's changing
-1. **Audio files sent as audio, not documents** — currently uploaded audio files (mp3, m4a, ogg, etc.) get classified as "document" because `detectOutgoingMessageType` only checks for image/video. Fix this so audio attachments send as proper audio messages.
+### Problems Identified
 
-2. **Auto-delete audio file from server after sending** — once the audio is successfully sent to WhatsApp, delete the saved file from disk so it doesn't persist on the VPS.
+1. **AI can only chat with 1 person at a time** — The `autoReplyCooldowns` map has a 30-second cooldown per JID, which is fine. The real issue is likely that the cooldown or batch buffer from one conversation blocks another. Looking at the code, each JID has its own batch buffer and cooldown, so concurrent conversations should work. However, if a reply is being generated (async), the cooldown gets set even before sending, which could cause timing issues. The main suspect: the `executeAutoReply` function runs sequentially — if one AI generation takes long, the 12-second batch timer for another contact fires but the generation blocks.
 
-3. **Frontend audio preview** — when an audio file is attached via the + button, show an audio player preview (instead of a document icon) so the user can listen before sending.
+2. **New messages get ignored** — When someone sends follow-up messages while the AI is already generating/waiting to send a reply, the `clearPendingAutoReply` at line 2054 cancels the scheduled reply but the new message only resets the 12-second batch timer. If the cooldown (30s) was already set from a previous reply, the new batch fires `executeAutoReply` which immediately returns due to cooldown. Messages get ignored.
 
-### Technical details
+3. **No emoji reactions in the chat UI** — The backend sends reactions via WhatsApp but there's no listener for `message_reaction` events, no DB storage, and no UI to display or send reactions.
 
-**File 1: `backend/src/api.js`**
-- In `detectOutgoingMessageType`: add `if (normalized.startsWith('audio/')) return 'audio';`
-- In the `/send/media` route: after successful send, if the mimeType is `audio/*`, schedule deletion of the persisted file from `data/message-media/` using `fs.unlinkSync` (or set the media_path to null in the DB so it doesn't try to serve it later)
-- The DB record stays (so the message shows in chat history) but the local file is removed
+### Changes
 
-**File 2: `src/pages/ConversationsPage.tsx`**
-- In `handleSelectAttachment`: add `audio` as a recognized kind alongside image/video/document
-- In the attachment preview area: render an `<audio controls>` element for audio attachments instead of the document preview
-- The pending attachment type already includes `kind` — just extend the union type to include `'audio'`
+#### 1. Backend: Fix concurrent AI replies (backend/src/whatsapp.js)
+- Remove the 30-second cooldown skip in `executeAutoReply` — it causes messages to be ignored. Instead, if a reply is already pending for a JID, cancel it and generate a fresh one that includes the new messages.
+- Ensure `handleAutoReply` properly cancels any in-progress pending reply AND resets cooldown when new messages arrive, so the AI always responds to the latest batch.
+- Make the cooldown only apply AFTER a successful send, not as a pre-check blocker.
 
-### Files to modify
-1. `backend/src/api.js` — detect audio type + delete file after send
-2. `src/pages/ConversationsPage.tsx` — audio attachment kind + audio preview player
+#### 2. Backend: Listen for reaction events (backend/src/whatsapp.js)
+- Add `client.on('message_reaction', ...)` listener to capture incoming and outgoing reactions.
+- Store reactions in a new `reactions` column on the messages table (JSON array of `{emoji, sender, timestamp}`).
+- Emit a `message_reaction` SSE event to the frontend.
+
+#### 3. Backend: API endpoint for sending reactions (backend/src/api.js)
+- Add `POST /api/messages/:id/react` endpoint that accepts `{emoji}` and calls `msg.react(emoji)` on the WhatsApp client.
+
+#### 4. Frontend: Display reactions on messages (src/pages/ConversationsPage.tsx)
+- Show emoji reaction badges below each message bubble.
+- Add a reaction picker (long-press/right-click on a message) with common emojis: 👍 ❤️ 😂 😮 😢 🙏.
+- Call the new API endpoint when user picks a reaction.
+
+#### 5. Database: Add reactions storage
+- Add `reactions` TEXT column to messages table (JSON string).
+- Migration handled inline via the existing `try { ALTER TABLE }` pattern.
+
+### Technical Flow
+
+```text
+User sends reaction in UI
+  → POST /api/messages/:id/react {emoji: "❤️"}
+  → Backend fetches WA message, calls msg.react(emoji)
+  → WhatsApp fires message_reaction event
+  → Backend updates DB, emits SSE event
+  → Frontend updates reaction badge on message
+
+Incoming reaction from contact
+  → message_reaction event fires
+  → Backend stores in DB
+  → SSE → Frontend shows reaction badge
+```
 
