@@ -1,52 +1,44 @@
 
 
-## Plan: Fix Multi-Person AI Replies, Handle Ignored Messages, and Add Emoji Reactions
+## Plan: Smart Batching — Cancel In-Progress Replies on New Messages
 
-### Problems Identified
+### What's Happening Now
 
-1. **AI can only chat with 1 person at a time** — The `autoReplyCooldowns` map has a 30-second cooldown per JID, which is fine. The real issue is likely that the cooldown or batch buffer from one conversation blocks another. Looking at the code, each JID has its own batch buffer and cooldown, so concurrent conversations should work. However, if a reply is being generated (async), the cooldown gets set even before sending, which could cause timing issues. The main suspect: the `executeAutoReply` function runs sequentially — if one AI generation takes long, the 12-second batch timer for another contact fires but the generation blocks.
-
-2. **New messages get ignored** — When someone sends follow-up messages while the AI is already generating/waiting to send a reply, the `clearPendingAutoReply` at line 2054 cancels the scheduled reply but the new message only resets the 12-second batch timer. If the cooldown (30s) was already set from a previous reply, the new batch fires `executeAutoReply` which immediately returns due to cooldown. Messages get ignored.
-
-3. **No emoji reactions in the chat UI** — The backend sends reactions via WhatsApp but there's no listener for `message_reaction` events, no DB storage, and no UI to display or send reactions.
+When someone texts and the AI starts its delay/typing phase, a follow-up message 2 minutes later triggers `clearPendingAutoReply` which cancels the old reply, but then starts a whole new 12-second batch timer + AI generation + delay cycle. The old reply is wasted, and the new generation may only focus on the latest message instead of addressing everything unreplied.
 
 ### Changes
 
-#### 1. Backend: Fix concurrent AI replies (backend/src/whatsapp.js)
-- Remove the 30-second cooldown skip in `executeAutoReply` — it causes messages to be ignored. Instead, if a reply is already pending for a JID, cancel it and generate a fresh one that includes the new messages.
-- Ensure `handleAutoReply` properly cancels any in-progress pending reply AND resets cooldown when new messages arrive, so the AI always responds to the latest batch.
-- Make the cooldown only apply AFTER a successful send, not as a pre-check blocker.
+#### 1. Add abort flag to pending replies (`backend/src/whatsapp.js`)
 
-#### 2. Backend: Listen for reaction events (backend/src/whatsapp.js)
-- Add `client.on('message_reaction', ...)` listener to capture incoming and outgoing reactions.
-- Store reactions in a new `reactions` column on the messages table (JSON array of `{emoji, sender, timestamp}`).
-- Emit a `message_reaction` SSE event to the frontend.
+In `clearPendingAutoReply`, set an `aborted = true` flag on the pending reply object before deleting it. In the `delayTimer` and `typingTimer` callbacks (lines ~2228-2280), check `if (pendingReply.aborted) return;` so even if timers fire late, the stale reply won't send.
 
-#### 3. Backend: API endpoint for sending reactions (backend/src/api.js)
-- Add `POST /api/messages/:id/react` endpoint that accepts `{emoji}` and calls `msg.react(emoji)` on the WhatsApp client.
+This is a safety net — the timers are already cleared, but race conditions with async code can cause them to fire anyway.
 
-#### 4. Frontend: Display reactions on messages (src/pages/ConversationsPage.tsx)
-- Show emoji reaction badges below each message bubble.
-- Add a reaction picker (long-press/right-click on a message) with common emojis: 👍 ❤️ 😂 😮 😢 🙏.
-- Call the new API endpoint when user picks a reaction.
+#### 2. Count unreplied messages and hint the AI (`backend/src/whatsapp.js` + `backend/src/ai.js`)
 
-#### 5. Database: Add reactions storage
-- Add `reactions` TEXT column to messages table (JSON string).
-- Migration handled inline via the existing `try { ALTER TABLE }` pattern.
+In `executeAutoReply`, after fetching the last 50 messages, count how many incoming messages appear after the last outgoing message. Pass this count to `generateReply` as an optional parameter.
 
-### Technical Flow
+In `generateReply` (`backend/src/ai.js`), accept an optional `unrepliedCount` parameter. When > 1, append to the system prompt:
 
-```text
-User sends reaction in UI
-  → POST /api/messages/:id/react {emoji: "❤️"}
-  → Backend fetches WA message, calls msg.react(emoji)
-  → WhatsApp fires message_reaction event
-  → Backend updates DB, emits SSE event
-  → Frontend updates reaction badge on message
-
-Incoming reaction from contact
-  → message_reaction event fires
-  → Backend stores in DB
-  → SSE → Frontend shows reaction badge
 ```
+"The contact sent {N} messages since your last reply. Make sure your response addresses all of them naturally."
+```
+
+This ensures the AI reads and responds to ALL unreplied messages in one go, not just the latest.
+
+#### 3. Signature change for `generateReply`
+
+```javascript
+// backend/src/ai.js
+export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount } = {}) {
+  // ... existing code ...
+  // Add to system prompt when unrepliedCount > 1:
+  // "The contact sent N messages since your last reply. Address all of them."
+}
+```
+
+### Files Changed
+
+- **backend/src/whatsapp.js** — Add `aborted` flag in `clearPendingAutoReply`; check it in timer callbacks; count unreplied messages in `executeAutoReply` and pass to `generateReply`
+- **backend/src/ai.js** — Accept `unrepliedCount` option; inject hint into system prompt when > 1
 
