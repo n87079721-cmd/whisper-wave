@@ -68,7 +68,7 @@ const AdminPage = () => {
   const fetchDebugLogs = useCallback(async () => {
     setDebugLoading(true);
     try {
-      const data = await api.adminGetDebugLogs(200);
+      const data = await api.adminGetDebugLogs(200) as DebugEntry[];
       setDebugLogs(data);
     } catch (err: any) {
       toast.error(err.message || 'Failed to load debug logs');
