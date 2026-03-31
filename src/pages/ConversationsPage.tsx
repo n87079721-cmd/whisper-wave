@@ -165,7 +165,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     // Sync archive states from WhatsApp then refresh conversations
     api.syncArchives().catch(() => {});
     refreshConversations().then(() => setLoading(false));
-    // voices removed — AI voice mode moved to Voice Studio
+    api.getPrompts().then(setPrompts).catch(() => {});
   }, [refreshConversations]);
 
   useEffect(() => {
