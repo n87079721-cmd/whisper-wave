@@ -116,6 +116,7 @@ function getInstance(userId) {
       connectionStartedAtMs: 0,
       lastConnectionActivityAtMs: 0,
       lastDisconnectReason: null,
+      failedReplyQueue: [],
     });
   }
   return userInstances.get(userId);
@@ -926,6 +927,9 @@ async function startConnection(userId, db, options = {}) {
       inst.connectionStatus = 'connected';
       inst.reconnectAttempt = 0;
       startHeartbeat(userId, db);
+
+      // Drain any failed reply queue from before disconnect
+      drainFailedReplyQueue(userId, db);
 
       inst.syncState = {
         phase: 'waiting_history',
@@ -2098,8 +2102,14 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
           emit(userId, 'message', { contactId, msgId: replyId });
         } catch (err) {
           console.error('Failed to send auto-reply:', err?.message || err);
+          debugLog(db, userId, 'auto_reply_failed', { contact: contactName || phone, error: err?.message || String(err), replyPreview: replyText.slice(0, 80) });
           inst.pendingAutoReplies.delete(jid);
           await clearTypingState(userId, jid);
+          // Queue for retry when connection restores
+          if (inst.failedReplyQueue.length < 20) {
+            inst.failedReplyQueue.push({ jid, contactId, contactName, phone, replyText, latestMessageId, queuedAt: Date.now() });
+            debugLog(db, userId, 'reply_queued_for_retry', { contact: contactName || phone, queueSize: inst.failedReplyQueue.length });
+          }
         }
       }, typingDuration);
     } catch (err) {
@@ -2111,7 +2121,48 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   inst.pendingAutoReplies.set(jid, pendingReply);
 }
 
+// ── Drain failed reply queue on reconnect ──
+
+async function drainFailedReplyQueue(userId, db) {
+  const inst = getInstance(userId);
+  const queue = inst.failedReplyQueue.splice(0);
+  if (queue.length === 0) return;
+
+  debugLog(db, userId, 'draining_failed_replies', { count: queue.length });
+  console.log(`📤 [${userId}] Draining ${queue.length} failed auto-replies`);
+
+  for (const item of queue) {
+    // Skip if queued more than 30 minutes ago
+    if (Date.now() - item.queuedAt > 30 * 60 * 1000) {
+      debugLog(db, userId, 'reply_expired', { contact: item.contactName || item.phone, age: Math.round((Date.now() - item.queuedAt) / 1000) + 's' });
+      continue;
+    }
+    try {
+      // Small stagger between queued sends
+      await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+      if (inst.connectionStatus !== 'connected') {
+        // Re-queue remaining
+        inst.failedReplyQueue.push(...queue.slice(queue.indexOf(item)));
+        debugLog(db, userId, 'drain_aborted_disconnected', { remaining: queue.length - queue.indexOf(item) });
+        break;
+      }
+      const sent = await sendTextMessage(userId, item.jid, item.replyText, { quotedMessageId: item.latestMessageId });
+      const replyId = sent?.id?._serialized || require('crypto').randomUUID();
+      db.prepare(`
+        INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
+        VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent')
+      `).run(replyId, userId, item.contactId, item.jid, item.replyText);
+      debugLog(db, userId, 'queued_reply_sent', { contact: item.contactName || item.phone, replyPreview: item.replyText.slice(0, 80) });
+      emit(userId, 'message', { contactId: item.contactId, msgId: replyId });
+    } catch (err) {
+      debugLog(db, userId, 'queued_reply_failed', { contact: item.contactName || item.phone, error: err?.message || String(err) });
+      console.error(`❌ [${userId}] Queued reply send failed:`, err?.message);
+    }
+  }
+}
+
 // ── Send messages ──
+
 
 async function sendTextMessage(userId, jid, text, options = {}) {
   const { quotedMessageId } = options || {};
