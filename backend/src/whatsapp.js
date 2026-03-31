@@ -1950,7 +1950,7 @@ async function clearTypingState(userId, jid) {
   } catch {}
 }
 
-function clearPendingAutoReply(userId, jid) {
+function clearPendingAutoReply(userId, jid, { rescue = false } = {}) {
   const inst = getInstance(userId);
   const pending = inst.pendingAutoReplies.get(jid);
   if (!pending) return;
@@ -1959,6 +1959,17 @@ function clearPendingAutoReply(userId, jid) {
   if (pending.typingTimer) clearTimeout(pending.typingTimer);
   inst.pendingAutoReplies.delete(jid);
   clearTypingState(userId, jid).catch(() => {});
+
+  // Rescue: push to failed reply queue so it sends after reconnect
+  if (rescue && pending.replyText && inst.failedReplyQueue.length < 20) {
+    inst.failedReplyQueue.push({
+      jid: pending.jid, contactId: pending.contactId,
+      contactName: pending.contactName, phone: pending.phone,
+      replyText: pending.replyText, latestMessageId: pending.latestMessageId,
+      queuedAt: pending.scheduledAt || Date.now(),
+    });
+    console.log(`🛟 [${userId}] Rescued pending reply for ${pending.contactName || pending.phone} to failed queue`);
+  }
 }
 
 async function sendReaction(userId, jid, msg, emoji) {
