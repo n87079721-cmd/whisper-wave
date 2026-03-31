@@ -1079,18 +1079,16 @@ async function startConnection(userId, db, options = {}) {
       inst.contactSyncInProgress = false;
       if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
 
-      // Wipe the cached wwebjs session so next connect gets a fresh QR
-      const wwebjsSessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
-      try {
-        if (fs.existsSync(wwebjsSessionDir)) {
-          fs.rmSync(wwebjsSessionDir, { recursive: true, force: true });
-          console.log(`🧹 [${userId}] Cleared stale wwebjs auth cache after auth_failure`);
-        }
-      } catch (e) { console.warn(`⚠️ [${userId}] Failed to clear auth cache:`, e?.message); }
-
-      inst.connectionStatus = 'disconnected';
-      emit(userId, 'status', { status: 'disconnected' });
-      debugLog(db, userId, 'auth_failure_cleared_cache', { reason: msg });
+      // Do NOT wipe auth cache — LocalAuth may still be valid on retry
+      // Try auto-reconnect once; if it fails again user can manually clear session
+      inst.connectionStatus = 'reconnecting';
+      emit(userId, 'status', { status: 'reconnecting' });
+      debugLog(db, userId, 'auth_failure_will_retry', { reason: msg });
+      // Single retry after 5s with fresh browser
+      setTimeout(() => {
+        if (inst.connectionGeneration !== generation) return;
+        startConnection(userId, db, { force: true });
+      }, 5000);
     });
 
     // ── Incoming messages ──
