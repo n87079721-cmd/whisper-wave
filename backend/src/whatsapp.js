@@ -2133,6 +2133,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     delayTimer: null,
     typingTimer: null,
     latestMessageId,
+    // Store metadata so we can rescue this reply if connection drops
+    jid, contactId, contactName, phone, replyText,
+    scheduledAt: Date.now(),
   };
 
   pendingReply.delayTimer = setTimeout(async () => {
