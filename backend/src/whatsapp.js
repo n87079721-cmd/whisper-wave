@@ -2033,6 +2033,8 @@ function clearPendingAutoReply(userId, jid, { rescue = false } = {}) {
   const pending = inst.pendingAutoReplies.get(jid);
   if (!pending) return;
 
+  // Mark as aborted so any in-flight timer callbacks won't send
+  pending.aborted = true;
   if (pending.delayTimer) clearTimeout(pending.delayTimer);
   if (pending.typingTimer) clearTimeout(pending.typingTimer);
   inst.pendingAutoReplies.delete(jid);
