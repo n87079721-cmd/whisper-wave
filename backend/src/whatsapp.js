@@ -1950,7 +1950,7 @@ async function clearTypingState(userId, jid) {
   } catch {}
 }
 
-function clearPendingAutoReply(userId, jid) {
+function clearPendingAutoReply(userId, jid, { rescue = false } = {}) {
   const inst = getInstance(userId);
   const pending = inst.pendingAutoReplies.get(jid);
   if (!pending) return;
@@ -1959,6 +1959,17 @@ function clearPendingAutoReply(userId, jid) {
   if (pending.typingTimer) clearTimeout(pending.typingTimer);
   inst.pendingAutoReplies.delete(jid);
   clearTypingState(userId, jid).catch(() => {});
+
+  // Rescue: push to failed reply queue so it sends after reconnect
+  if (rescue && pending.replyText && inst.failedReplyQueue.length < 20) {
+    inst.failedReplyQueue.push({
+      jid: pending.jid, contactId: pending.contactId,
+      contactName: pending.contactName, phone: pending.phone,
+      replyText: pending.replyText, latestMessageId: pending.latestMessageId,
+      queuedAt: pending.scheduledAt || Date.now(),
+    });
+    console.log(`🛟 [${userId}] Rescued pending reply for ${pending.contactName || pending.phone} to failed queue`);
+  }
 }
 
 async function sendReaction(userId, jid, msg, emoji) {
@@ -2133,6 +2144,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     delayTimer: null,
     typingTimer: null,
     latestMessageId,
+    // Store metadata so we can rescue this reply if connection drops
+    jid, contactId, contactName, phone, replyText,
+    scheduledAt: Date.now(),
   };
 
   pendingReply.delayTimer = setTimeout(async () => {
@@ -2322,7 +2336,7 @@ async function softDisconnect(userId) {
   inst.autoReplyCooldowns.clear();
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
-  inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid));
+  inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid, { rescue: true }));
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
   if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
@@ -2365,7 +2379,7 @@ async function clearSession(userId, db) {
   inst.autoReplyCooldowns.clear();
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
-  inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid));
+  inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid)); // no rescue on full logout
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
   if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
