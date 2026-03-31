@@ -2175,7 +2175,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
 
   const roll = Math.random() * 100;
-  if (roll > replyChance) {
+  if (!forceReply && roll > replyChance) {
     debugLog(db, userId, 'skip_reply_chance', { contact: contactName || phone, chance: replyChance + '%', rolled: Math.round(roll) });
     const msgText = latestOriginalMsg?.body || latestOriginalMsg?.caption || '';
     const reactionEmoji = await shouldReact(keyRow.value, msgText);
@@ -2185,6 +2185,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       debugLog(db, userId, 'reaction_sent_instead', { contact: contactName || phone, emoji: reactionEmoji });
     }
     return;
+  }
+  if (forceReply) {
+    debugLog(db, userId, 'force_reply_rebatch', { contact: contactName || phone, reason: 'prior reply was cancelled by new message' });
   }
 
   const messages = db.prepare(`
