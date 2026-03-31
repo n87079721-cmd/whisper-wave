@@ -1242,7 +1242,26 @@ RULES:
     const { key, value } = req.body;
     if (!key) return res.status(400).json({ error: 'Missing key' });
     setConfig(db, req.userId, key, value);
+
+    // When automation is turned off, cancel all pending scheduled replies
+    if (key === 'automation_enabled' && value !== 'true') {
+      const cancelled = cancelAllPendingReplies(req.userId);
+      return res.json({ success: true, cancelledReplies: cancelled });
+    }
+
     res.json({ success: true });
+  });
+
+  // Cancel a specific pending auto-reply
+  router.post('/cancel-reply', (req, res) => {
+    try {
+      const { contact } = req.body;
+      if (!contact) return res.status(400).json({ error: 'Missing contact identifier' });
+      const cancelled = cancelPendingReplyForContact(req.userId, contact);
+      res.json({ success: true, cancelled });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.post('/reconnect', async (req, res) => {

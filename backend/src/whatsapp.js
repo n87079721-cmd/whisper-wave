@@ -512,6 +512,28 @@ function isUuidLike(value) {
 
 // ── Exports ──────────────────────────────────────────────
 
+export function cancelAllPendingReplies(userId) {
+  const inst = getInstance(userId);
+  const count = inst.pendingAutoReplies.size;
+  if (count === 0) return 0;
+  inst.pendingAutoReplies.forEach((_, jid) => clearPendingAutoReply(userId, jid));
+  console.log(`🚫 [${userId}] Cancelled ${count} pending auto-replies (automation disabled)`);
+  return count;
+}
+
+export function cancelPendingReplyForContact(userId, contactIdentifier) {
+  const inst = getInstance(userId);
+  // contactIdentifier can be a JID, phone, or contact name
+  for (const [jid, pending] of inst.pendingAutoReplies.entries()) {
+    if (jid === contactIdentifier || pending.phone === contactIdentifier || pending.contactName === contactIdentifier) {
+      clearPendingAutoReply(userId, jid);
+      console.log(`🚫 [${userId}] Cancelled pending reply for ${contactIdentifier}`);
+      return true;
+    }
+  }
+  return false;
+}
+
 export function getWhatsAppState(userId) {
   const inst = getInstance(userId);
   return {
