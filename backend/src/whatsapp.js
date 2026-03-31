@@ -704,7 +704,8 @@ function requiresFreshPairing(reason) {
 
 function isRecoverableConnectionIssue(reason) {
   const normalized = normalizeConnectionReason(reason);
-  return normalized === 'CONFLICT' || normalized === 'TIMEOUT' || normalized === 'UNLAUNCHED';
+  // NAVIGATION = browser page died (idle/crash), treat as recoverable
+  return normalized === 'CONFLICT' || normalized === 'TIMEOUT' || normalized === 'UNLAUNCHED' || normalized === 'NAVIGATION';
 }
 
 function startHeartbeat(userId, db) {
@@ -1052,14 +1053,9 @@ async function startConnection(userId, db, options = {}) {
       debugLog(db, userId, 'whatsapp_disconnected', { reason });
 
       if (requiresFreshPairing(reason)) {
-        // Session is truly dead — wipe cached browser session so next connect is clean
-        const wwebjsSessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
-        try {
-          if (fs.existsSync(wwebjsSessionDir)) {
-            fs.rmSync(wwebjsSessionDir, { recursive: true, force: true });
-            console.log(`🧹 [${userId}] Cleared wwebjs auth cache after ${reason}`);
-          }
-        } catch (e) { console.warn(`⚠️ [${userId}] Cache clear failed:`, e?.message); }
+        // Session needs re-scan — do NOT wipe auth cache (LocalAuth may still restore)
+        // Only user-initiated clearSession should wipe the stored session
+        console.log(`🔑 [${userId}] Disconnect reason ${reason} requires fresh pairing — awaiting user re-scan`);
         inst.connectionStatus = 'disconnected';
         inst.reconnectAttempt = 0;
         emit(userId, 'status', { status: 'disconnected' });
@@ -1084,18 +1080,16 @@ async function startConnection(userId, db, options = {}) {
       inst.contactSyncInProgress = false;
       if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
 
-      // Wipe the cached wwebjs session so next connect gets a fresh QR
-      const wwebjsSessionDir = path.join(DATA_DIR, 'wwebjs_auth', `session-${userId}`);
-      try {
-        if (fs.existsSync(wwebjsSessionDir)) {
-          fs.rmSync(wwebjsSessionDir, { recursive: true, force: true });
-          console.log(`🧹 [${userId}] Cleared stale wwebjs auth cache after auth_failure`);
-        }
-      } catch (e) { console.warn(`⚠️ [${userId}] Failed to clear auth cache:`, e?.message); }
-
-      inst.connectionStatus = 'disconnected';
-      emit(userId, 'status', { status: 'disconnected' });
-      debugLog(db, userId, 'auth_failure_cleared_cache', { reason: msg });
+      // Do NOT wipe auth cache — LocalAuth may still be valid on retry
+      // Try auto-reconnect once; if it fails again user can manually clear session
+      inst.connectionStatus = 'reconnecting';
+      emit(userId, 'status', { status: 'reconnecting' });
+      debugLog(db, userId, 'auth_failure_will_retry', { reason: msg });
+      // Single retry after 5s with fresh browser
+      setTimeout(() => {
+        if (inst.connectionGeneration !== generation) return;
+        startConnection(userId, db, { force: true });
+      }, 5000);
     });
 
     // ── Incoming messages ──
