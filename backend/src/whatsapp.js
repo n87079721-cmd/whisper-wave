@@ -2526,6 +2526,7 @@ async function clearSession(userId, db) {
     db.prepare('DELETE FROM contacts WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM stats WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM call_logs WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM pending_replies WHERE user_id = ?').run(userId);
   } catch (err) {
     console.error('Failed to clear DB tables:', err?.message || err);
   }
