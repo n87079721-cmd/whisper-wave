@@ -2041,15 +2041,14 @@ function clearPendingAutoReply(userId, jid, { rescue = false } = {}) {
 
   // Log cancellation so Admin UI can hide stale countdowns
   if (!rescue) {
-    const db = inst.db;
-    if (db) {
+    import('./db.js').then(({ db }) => {
       try {
         debugLog(db, userId, 'reply_cancelled', {
           contact: pending.contactName || pending.phone,
           reason: 'new_message_received',
         });
       } catch {}
-    }
+    }).catch(() => {});
   }
   clearTypingState(userId, jid).catch(() => {});
 
