@@ -66,11 +66,11 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
   useEffect(() => {
     fetchContacts();
     let es: EventSource | null = null;
-    const interval = window.setInterval(() => fetchContacts(search), 30000);
+    const interval = window.setInterval(() => fetchContacts(search, true), 30000);
     try {
       es = api.createEventSource();
-      es.addEventListener('history_sync', () => fetchContacts(search));
-      es.addEventListener('contacts_sync', () => fetchContacts(search));
+      es.addEventListener('history_sync', () => fetchContacts(search, true));
+      es.addEventListener('contacts_sync', () => fetchContacts(search, true));
       es.onerror = () => {};
     } catch {}
     return () => { es?.close(); window.clearInterval(interval); };
