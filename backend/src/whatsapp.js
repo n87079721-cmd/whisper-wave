@@ -2197,7 +2197,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const roll = Math.random() * 100;
   if (!forceReply && roll > replyChance) {
     debugLog(db, userId, 'skip_reply_chance', { contact: contactName || phone, chance: replyChance + '%', rolled: Math.round(roll) });
-    const msgText = latestOriginalMsg?.body || latestOriginalMsg?.caption || '';
+    const msgText = effectiveContent;
     const reactionEmoji = await shouldReact(keyRow.value, msgText);
     if (reactionEmoji && latestOriginalMsg) {
       const reactDelay = Math.floor(Math.random() * 5000) + 2000;
