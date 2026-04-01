@@ -2172,7 +2172,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
   inst.messageBatchBuffers.set(jid, batchEntry);
 }
 
-async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestMessageId, forceReply = false }) {
+async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestResolvedContent, latestMessageId, forceReply = false }) {
   const inst = getInstance(userId);
 
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
