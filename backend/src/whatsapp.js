@@ -2218,7 +2218,10 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     ORDER BY timestamp DESC LIMIT 50
   `).all(contactId, userId).reverse();
 
-  if (messages.length === 0) return;
+  if (messages.length === 0) {
+    debugLog(db, userId, 'skip_no_messages', { contact: contactName || phone });
+    return;
+  }
 
   // lastMsgContent no longer needed — delay is based on reply length
   const speed = getConfigValue(db, userId, 'ai_response_speed', 'normal');
