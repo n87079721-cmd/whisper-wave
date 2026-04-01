@@ -2159,6 +2159,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
       phone: batchEntry.phone,
       contactName: batchEntry.contactName,
       latestOriginalMsg: batchEntry.latestOriginalMsg,
+      latestResolvedContent: batchEntry.latestResolvedContent,
       latestMessageId: batchEntry.latestMessageId,
       batchedCount: batchEntry.messages.length,
       forceReply: batchEntry.forceReply || false,
