@@ -1,34 +1,29 @@
 
 
-## Enable AI to Understand Incoming Voice Notes
+## Fix: AI Can't See or Reply to Voice Notes
 
-### What This Does
-When someone sends a voice note, the system will transcribe it to text so the AI knows what the person said and can respond naturally — instead of just seeing "🎤 Voice message."
+### Problem
+Voice notes are being transcribed correctly and saved to the database, but the AI never sees them because:
 
-### How It Works
+1. **SQL filter excludes voice messages** — the query that builds conversation history only fetches `type IN ('text', 'image')`, so voice notes (type `'voice'`) are completely invisible to the AI.
+2. **Debug log shows blank body** — it reads `originalMsg.body` (the raw WhatsApp message, which is empty for voice notes) instead of the transcribed content from the DB.
 
-1. **Intercept incoming voice notes** (`backend/src/whatsapp.js`, ~line 1441)
-   - When an incoming message is type `ptt`/`audio`, download the media buffer
-   - Send the audio to a transcription API before passing it to the AI
+### Fix
 
-2. **Add transcription function** (`backend/src/elevenlabs.js`)
-   - New `transcribeAudio(audioBuffer)` function
-   - Calls ElevenLabs Scribe API (`POST https://api.elevenlabs.io/v1/speech-to-text`) with the audio file
-   - Returns the transcribed text
+**`backend/src/whatsapp.js`** — 3 small changes:
 
-3. **Feed transcription to AI context** (`backend/src/whatsapp.js`, auto-reply logic)
-   - Replace `🎤 Voice message` content with the actual transcribed text like `🎤 [Voice note]: "hey are you coming tonight?"`
-   - The AI system prompt already handles text — it will now naturally respond to what was actually said
+1. **Line ~2214** — Add `'voice'` to the SQL type filter so transcribed voice notes appear in conversation history:
+   ```sql
+   WHERE ... AND type IN ('text', 'image', 'voice') ...
+   ```
 
-4. **Add ElevenLabs API key config** (`backend/src/.env`)
-   - Reuse the existing `ELEVENLABS_API_KEY` already configured for TTS
+2. **Line ~2119** — Update the debug log to show transcribed content for voice notes. Pass `resolvedContent` to `handleAutoReply` so the debug log and batch entry can use it:
+   - Add `resolvedContent` as a parameter to `handleAutoReply` (line ~1268)
+   - Use it in the debug log body field (line ~2119)
+   - Use it in the batch entry content (line ~2146) and for `shouldReact` calls (lines ~2199, ~2224)
 
-### Technical Detail
-- ElevenLabs Scribe v2 supports OGG/Opus (WhatsApp's native voice format) — no conversion needed
-- Transcription adds ~1-2s latency per voice note, which is fine since reply delays are already randomized
-- Fallback: if transcription fails, fall back to `🎤 Voice message` so nothing breaks
+3. **Lines ~2199, ~2224** — Use the DB-stored content (which has the transcription) for `shouldReact()` instead of the raw empty `originalMsg.body`.
 
 ### Files
-- **`backend/src/elevenlabs.js`** — Add `transcribeAudio()` function (~20 lines)
-- **`backend/src/whatsapp.js`** — Call transcription on incoming voice messages and pass result to AI (~15 lines changed in 2 locations)
+- **`backend/src/whatsapp.js`** — Add `'voice'` to SQL filter, pass transcribed content through auto-reply pipeline (~6 lines changed across 4 locations)
 
