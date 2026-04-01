@@ -1,12 +1,43 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, MessageSquare, Plus, X, Send } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Search, Plus, X, Send, ChevronDown, ChevronUp } from 'lucide-react';
 import { api, type Contact } from '@/lib/api';
-import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
+import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials, getContactPhoneLabel } from '@/lib/contactDisplay';
 import { toast } from 'sonner';
 
 interface ContactsPageProps {
   onOpenChat?: (contact: Contact) => void;
   onNavigateSettings?: () => void;
+}
+
+interface MergedContact {
+  primary: Contact;
+  alternates: Contact[];
+  totalMessages: number;
+}
+
+function deduplicateContacts(contacts: Contact[]): MergedContact[] {
+  const byName = new Map<string, Contact[]>();
+
+  for (const c of contacts) {
+    const name = getContactDisplayName(c).toLowerCase().trim();
+    // Only group if the contact has a real recognizable name (not phone-only or unknown)
+    const isRealName = name && !name.startsWith('+') && !name.startsWith('contact •') && name !== 'unknown contact' && !/^\d+$/.test(name.replace(/\s/g, ''));
+    const key = isRealName ? name : `__unique_${c.id}`;
+    const arr = byName.get(key) || [];
+    arr.push(c);
+    byName.set(key, arr);
+  }
+
+  const result: MergedContact[] = [];
+  for (const group of byName.values()) {
+    // Sort by message_count desc — primary is the most active
+    group.sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
+    const [primary, ...alternates] = group;
+    const totalMessages = group.reduce((sum, c) => sum + (c.message_count || 0), 0);
+    result.push({ primary, alternates, totalMessages });
+  }
+
+  return result;
 }
 
 const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
@@ -18,6 +49,7 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [saving, setSaving] = useState(false);
+  const [expandedContact, setExpandedContact] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   const fetchContacts = useCallback((searchQuery = '') => {
@@ -67,11 +99,13 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
     }
   };
 
-  // Group contacts alphabetically
-  const grouped = contacts.reduce<Record<string, Contact[]>>((acc, c) => {
-    const letter = getContactDisplayName(c)[0]?.toUpperCase() || '#';
+  const merged = useMemo(() => deduplicateContacts(contacts), [contacts]);
+
+  // Group merged contacts alphabetically
+  const grouped = merged.reduce<Record<string, MergedContact[]>>((acc, mc) => {
+    const letter = getContactDisplayName(mc.primary)[0]?.toUpperCase() || '#';
     const key = /[A-Z]/.test(letter) ? letter : '#';
-    (acc[key] = acc[key] || []).push(c);
+    (acc[key] = acc[key] || []).push(mc);
     return acc;
   }, {});
   const sortedKeys = Object.keys(grouped).sort((a, b) => a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b));
@@ -82,7 +116,7 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
         <div>
           <h1 className="text-lg font-bold text-foreground">Contacts</h1>
           <p className="text-sm text-muted-foreground">
-            {loading ? 'Loading...' : `${totalCount} contacts synced${contacts.length < totalCount ? ` · showing ${contacts.length}` : ''}`}
+            {loading ? 'Loading...' : `${totalCount} contacts synced${merged.length < totalCount ? ` · ${merged.length} unique` : ''}`}
           </p>
         </div>
         <button
@@ -129,7 +163,7 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
         />
       </div>
 
-      {contacts.length === 0 && !loading ? (
+      {merged.length === 0 && !loading ? (
         <p className="text-sm text-muted-foreground text-center py-8">
           {search ? 'No contacts match your search.' : 'No contacts yet. Connect WhatsApp to sync.'}
         </p>
@@ -140,37 +174,82 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
               <div className="px-3 py-1.5 sticky top-0 bg-background z-10">
                 <span className="text-xs font-semibold text-primary">{letter}</span>
               </div>
-              {grouped[letter].map((contact) => (
-                <div
-                  key={contact.id}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-secondary/60 transition-colors"
-                >
-                  {contact.avatar_url ? (
-                    <img src={contact.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-                  ) : (
-                    <div className="w-10 h-10 rounded-full flex items-center justify-center border border-border bg-muted text-sm font-medium text-foreground flex-shrink-0">
-                      {getContactInitials(contact)}
+              {grouped[letter].map((mc) => {
+                const { primary, alternates, totalMessages } = mc;
+                const hasDupes = alternates.length > 0;
+                const isExpanded = expandedContact === primary.id;
+
+                return (
+                  <div key={primary.id}>
+                    <div className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-secondary/60 transition-colors">
+                      {primary.avatar_url ? (
+                        <img src={primary.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center border border-border bg-muted text-sm font-medium text-foreground flex-shrink-0">
+                          {getContactInitials(primary)}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => onOpenChat?.(primary)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-[15px] font-medium text-foreground truncate">{getContactDisplayName(primary)}</p>
+                          {hasDupes && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent text-accent-foreground font-medium flex-shrink-0">
+                              {alternates.length + 1}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">{getContactPhoneLabel(primary) || getContactDisplayMeta(primary)}</p>
+                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-muted-foreground opacity-60">{totalMessages}</span>
+                        <button
+                          onClick={() => onOpenChat?.(primary)}
+                          className="p-1.5 rounded-md hover:bg-primary/10 text-primary transition-colors"
+                          title="Message"
+                        >
+                          <Send className="w-4 h-4" />
+                        </button>
+                        {hasDupes && (
+                          <button
+                            onClick={() => setExpandedContact(isExpanded ? null : primary.id)}
+                            className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground transition-colors"
+                            title={isExpanded ? 'Collapse' : 'Show alternate numbers'}
+                          >
+                            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  )}
-                  <button
-                    onClick={() => onOpenChat?.(contact)}
-                    className="min-w-0 flex-1 text-left"
-                  >
-                    <p className="text-[15px] font-medium text-foreground truncate">{getContactDisplayName(contact)}</p>
-                    <p className="text-xs text-muted-foreground">{getContactDisplayMeta(contact)}</p>
-                  </button>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground opacity-60">{contact.message_count || 0}</span>
-                    <button
-                      onClick={() => onOpenChat?.(contact)}
-                      className="p-1.5 rounded-md hover:bg-primary/10 text-primary transition-colors"
-                      title="Message"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
+
+                    {/* Expanded alternates */}
+                    {hasDupes && isExpanded && (
+                      <div className="ml-12 border-l-2 border-border">
+                        {alternates.map(alt => (
+                          <div
+                            key={alt.id}
+                            className="flex items-center gap-3 px-3 py-2 hover:bg-secondary/40 transition-colors"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs text-muted-foreground">{getContactPhoneLabel(alt) || alt.jid}</p>
+                              <p className="text-[10px] text-muted-foreground/60">{alt.message_count || 0} messages</p>
+                            </div>
+                            <button
+                              onClick={() => onOpenChat?.(alt)}
+                              className="p-1.5 rounded-md hover:bg-primary/10 text-primary transition-colors"
+                              title="Message this number"
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ))}
         </div>
