@@ -215,7 +215,20 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
     messages: [
       {
         role: 'system',
-        content: `${prompt}\n\nYou are chatting with: ${contactName || 'Unknown contact'}\nCurrent time: ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })} (New York time)\n\nIf someone sends you a photo, react naturally like a real person would. Comment on what you see, ask about it, or react with genuine emotion. Don't describe the image formally or say "I can see an image of..." — just respond like you're looking at a friend's pic on your phone.`,
+        content: (() => {
+          const now = new Date();
+          const nyTime = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
+          const nyHour = parseInt(now.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }));
+          let timeLabel;
+          if (nyHour >= 5 && nyHour < 9) timeLabel = 'early morning';
+          else if (nyHour >= 9 && nyHour < 12) timeLabel = 'morning';
+          else if (nyHour >= 12 && nyHour < 14) timeLabel = 'midday';
+          else if (nyHour >= 14 && nyHour < 17) timeLabel = 'afternoon';
+          else if (nyHour >= 17 && nyHour < 21) timeLabel = 'evening';
+          else if (nyHour >= 21 || nyHour < 1) timeLabel = 'late night';
+          else timeLabel = 'middle of the night';
+          return `${prompt}\n\nYou are chatting with: ${contactName || 'Unknown contact'}\nCurrent time: ${nyTime} (${timeLabel}, New York time)\n\nMatch your energy and greetings to the time of day naturally — say good morning in the morning, be chill/sleepy late at night, etc. Behave like a real person who is aware of what time it is.\n\nIf someone sends you a photo, react naturally like a real person would. Comment on what you see, ask about it, or react with genuine emotion. Don't describe the image formally or say "I can see an image of..." — just respond like you're looking at a friend's pic on your phone.`;
+        })(),
       },
       ...chatMessages,
     ],
