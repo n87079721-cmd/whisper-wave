@@ -1,41 +1,17 @@
 
 
-## Fix: AI Stops Replying to Multiple People
+## Night Mode: AI Sleep Schedule
 
-### Root Cause
+### What It Does
+- **After midnight (12 AM)**: The AI occasionally comments on why the contact is still awake (e.g., "why u still up lol", "go to sleep bro") — woven naturally into replies, not forced every time.
+- **After 2 AM**: The AI sends one final "goodnight" type message, then goes completely silent until 9 AM. Any messages received between 2 AM – 9 AM get no reply at all.
+- **At 9 AM+**: Normal behavior resumes.
 
-There are **two silent return paths** in `executeAutoReply` that exit without any debug logging, making it look like the AI just "stopped":
+### How It Works
 
-1. **React-only path (line ~2231-2236)**: When `shouldReact()` returns an emoji AND `shouldAlsoReplyAfterReaction()` returns false (~12% chance), the function sends a reaction, sets the cooldown, and **returns silently** — no debug log, no reply. This likely killed Amy's rebatched reply.
+1. **Update the time-of-day prompt in `ai.js`** (~line 218-230)
+   - Add a new time bracket for midnight–2 AM: instruct the AI to be sleepy, occasionally ask why they're still up, keep replies extra short
+   - This is a prompt-level change — the AI naturally weaves in "why are you up" comments without forcing it every message
 
-2. **Empty messages path (line ~2221)**: If the DB query returns no messages, it returns with zero logging.
-
-Neither of these is a "real" bug in execution flow — the per-JID keying is correct and contacts don't interfere with each other. But the silent exits make it impossible to diagnose AND they set cooldowns that can block follow-up replies.
-
-### Fix
-
-**`backend/src/whatsapp.js`** — Add debug logging to both silent paths:
-
-1. **Line ~2231-2236** (react-only return): Add a debug log before returning:
-   ```js
-   debugLog(db, userId, 'react_only_no_reply', { 
-     contact: contactName || phone, emoji: reactionEmoji 
-   });
-   ```
-
-2. **Line ~2221** (empty messages): Add a debug log:
-   ```js
-   if (messages.length === 0) {
-     debugLog(db, userId, 'skip_no_messages', { contact: contactName || phone });
-     return;
-   }
-   ```
-
-3. **Line ~2231** — When `forceReply` is true (rebatch), **skip the react-only exit** so the AI always sends a text reply for rebatched messages. This prevents the scenario where a cancelled reply gets replaced by just a reaction:
-   ```js
-   if (!shouldAlsoReplyAfterReaction() && !forceReply) {
-   ```
-
-### Files
-- **`backend/src/whatsapp.js`** — 3 small changes (~5 lines total)
-
+2. **Update active hours logic in `whatsapp.js`** (~line 1970)
+   - Change the default
