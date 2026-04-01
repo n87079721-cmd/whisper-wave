@@ -2144,7 +2144,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
   batchEntry.latestMessageId = originalMsg?.id?._serialized || originalMsg?.id?.id || null;
   batchEntry.messages.push({
     id: batchEntry.latestMessageId,
-    content: originalMsg?.body || originalMsg?.caption || '',
+    content: effectiveContent,
     timestamp: Date.now(),
   });
   if (batchEntry.messages.length > 10) batchEntry.messages = batchEntry.messages.slice(-10);
