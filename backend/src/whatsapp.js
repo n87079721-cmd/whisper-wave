@@ -1968,8 +1968,8 @@ function getConfigValue(db, userId, key, fallback) {
 }
 
 function isWithinActiveHours(db, userId) {
-  const start = getConfigValue(db, userId, 'ai_active_hours_start', '10:00');
-  const end = getConfigValue(db, userId, 'ai_active_hours_end', '23:00');
+  const start = getConfigValue(db, userId, 'ai_active_hours_start', '09:00');
+  const end = getConfigValue(db, userId, 'ai_active_hours_end', '02:00');
   const timezone = getConfigValue(db, userId, 'ai_timezone', 'America/New_York');
 
   let now;
