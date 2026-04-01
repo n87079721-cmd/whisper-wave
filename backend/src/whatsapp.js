@@ -2116,7 +2116,8 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
     return;
   }
 
-  debugLog(db, userId, 'message_received_for_ai', { contact: contactName || phone, body: (originalMsg?.body || '').slice(0, 80) });
+  const effectiveContent = resolvedContent || originalMsg?.body || originalMsg?.caption || '';
+  debugLog(db, userId, 'message_received_for_ai', { contact: contactName || phone, body: effectiveContent.slice(0, 80) });
 
   const inst = getInstance(userId);
   const hadPendingReply = inst.pendingAutoReplies.has(jid);
