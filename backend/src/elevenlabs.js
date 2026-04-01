@@ -215,6 +215,34 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgrou
 }
 
 // Generate MP3 preview (not converted to OGG, for browser playback)
+// Transcribe audio using ElevenLabs Scribe v2
+export async function transcribeAudio(apiKey, audioBuffer, mimetype = 'audio/ogg') {
+  try {
+    const formData = new FormData();
+    const blob = new Blob([audioBuffer], { type: mimetype });
+    formData.append('file', blob, 'audio.ogg');
+    formData.append('model_id', 'scribe_v2');
+
+    const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+      method: 'POST',
+      headers: { 'xi-api-key': apiKey },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`ElevenLabs transcription failed (${response.status}): ${errText}`);
+      return null;
+    }
+
+    const result = await response.json();
+    return result.text?.trim() || null;
+  } catch (err) {
+    console.error('Transcription error:', err.message);
+    return null;
+  }
+}
+
 export async function generatePreviewAudio(apiKey, text, voiceId, modelId, backgroundSound, bgVolume = 0.15) {
   if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
