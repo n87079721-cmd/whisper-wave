@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Search, MessageSquare } from 'lucide-react';
+import { Search, MessageSquare, Plus, X } from 'lucide-react';
 import { api, type Contact } from '@/lib/api';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
+import { toast } from 'sonner';
 
 interface ContactsPageProps {
   onOpenChat?: (contact: Contact) => void;
@@ -12,6 +13,10 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const fetchContacts = () => {
     api.getContacts().then(data => { setContacts(data); setLoading(false); }).catch(() => setLoading(false));
@@ -30,6 +35,23 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
     return () => { es?.close(); window.clearInterval(interval); };
   }, []);
 
+  const handleSaveContact = async () => {
+    if (!newPhone.trim()) { toast.error('Phone number is required'); return; }
+    setSaving(true);
+    try {
+      await api.saveContact(newName.trim(), newPhone.trim());
+      toast.success(newName.trim() ? `${newName.trim()} saved` : 'Contact saved');
+      setNewName('');
+      setNewPhone('');
+      setShowAdd(false);
+      fetchContacts();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save contact');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const filtered = contacts.filter(c =>
     getContactDisplayName(c).toLowerCase().includes(search.toLowerCase()) ||
     cleanContactPhone(c.phone || '').includes(search)
@@ -46,12 +68,47 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
 
   return (
     <div className="space-y-4 max-w-2xl mx-auto">
-      <div>
-        <h1 className="text-lg font-bold text-foreground">Contacts</h1>
-        <p className="text-sm text-muted-foreground">
-          {loading ? 'Loading...' : `${contacts.length} contacts synced`}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-bold text-foreground">Contacts</h1>
+          <p className="text-sm text-muted-foreground">
+            {loading ? 'Loading...' : `${contacts.length} contacts synced`}
+          </p>
+        </div>
+        <button
+          onClick={() => setShowAdd(!showAdd)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+        >
+          {showAdd ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+          {showAdd ? 'Cancel' : 'Add'}
+        </button>
       </div>
+
+      {showAdd && (
+        <div className="bg-secondary/60 rounded-lg p-4 space-y-3 border border-border">
+          <p className="text-sm font-medium text-foreground">Save New Contact</p>
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="Name (optional)"
+            className="w-full px-3 py-2.5 rounded-lg bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none border border-border"
+          />
+          <input
+            value={newPhone}
+            onChange={(e) => setNewPhone(e.target.value)}
+            placeholder="Phone number (e.g. 2348012345678)"
+            className="w-full px-3 py-2.5 rounded-lg bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none border border-border"
+          />
+          <button
+            onClick={handleSaveContact}
+            disabled={saving || !newPhone.trim()}
+            className="w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save Contact'}
+          </button>
+        </div>
+      )}
+
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <input

@@ -571,6 +571,41 @@ export function createApiRouter(db) {
     res.json(contacts);
   });
 
+  // ── Save / Create Contact Manually ──────────────────────
+  router.post('/contacts', (req, res) => {
+    try {
+      const { name, phone } = req.body;
+      if (!phone) return res.status(400).json({ error: 'Phone number is required' });
+
+      const digits = phone.replace(/\D/g, '');
+      if (!digits || digits.length < 7) return res.status(400).json({ error: 'Invalid phone number' });
+
+      const jid = `${digits}@s.whatsapp.net`;
+      const contactName = name?.trim() || `+${digits}`;
+
+      // Check if already exists
+      const existing = db.prepare('SELECT id FROM contacts WHERE jid = ? AND user_id = ?').get(jid, req.userId);
+      if (existing) {
+        // Update name if provided
+        if (name?.trim()) {
+          db.prepare("UPDATE contacts SET name = ?, updated_at = datetime('now') WHERE id = ?").run(contactName, existing.id);
+        }
+        return res.json({ id: existing.id, updated: true });
+      }
+
+      const id = uuid();
+      db.prepare(`
+        INSERT INTO contacts (id, user_id, jid, name, phone, is_group, updated_at)
+        VALUES (?, ?, ?, ?, ?, 0, datetime('now'))
+      `).run(id, req.userId, jid, contactName, digits);
+
+      res.json({ id, created: true });
+    } catch (err) {
+      console.error('Save contact error:', err);
+      res.status(500).json({ error: 'Failed to save contact' });
+    }
+  });
+
   // ── Messages / Conversations ─────────────────────────────
   router.get('/messages/:contactId', (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 100, 500);
