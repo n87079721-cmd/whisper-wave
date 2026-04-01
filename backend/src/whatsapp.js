@@ -2141,6 +2141,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
   batchEntry.phone = phone;
   batchEntry.contactName = contactName;
   batchEntry.latestOriginalMsg = originalMsg;
+  batchEntry.latestResolvedContent = effectiveContent;
   batchEntry.latestMessageId = originalMsg?.id?._serialized || originalMsg?.id?.id || null;
   batchEntry.messages.push({
     id: batchEntry.latestMessageId,
