@@ -366,6 +366,31 @@ const SettingsPage = () => {
                 </div>
               </div>
 
+              {/* Active Hours */}
+              <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
+                <div className="flex items-center gap-2">
+                  <Power className="w-4 h-4 text-primary" />
+                  <label className="text-sm font-medium text-foreground">Active Hours (Night Mode)</label>
+                </div>
+                <p className="text-xs text-muted-foreground">AI only replies between these hours (New York time). Outside this window, messages are ignored.</p>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <label className="text-[10px] text-muted-foreground mb-1 block">Start</label>
+                    <input type="time" value={activeHoursStart}
+                      onChange={(e) => { setActiveHoursStart(e.target.value); saveAvailabilitySetting('ai_active_hours_start', e.target.value); }}
+                      className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
+                  </div>
+                  <span className="text-muted-foreground text-sm mt-4">→</span>
+                  <div className="flex-1">
+                    <label className="text-[10px] text-muted-foreground mb-1 block">End</label>
+                    <input type="time" value={activeHoursEnd}
+                      onChange={(e) => { setActiveHoursEnd(e.target.value); saveAvailabilitySetting('ai_active_hours_end', e.target.value); }}
+                      className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Currently: <span className="font-medium text-foreground">{activeHoursStart}</span> to <span className="font-medium text-foreground">{activeHoursEnd}</span></p>
+              </div>
+
               {/* System Prompt */}
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
