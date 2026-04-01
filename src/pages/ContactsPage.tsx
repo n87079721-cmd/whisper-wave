@@ -52,8 +52,8 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
   const [expandedContact, setExpandedContact] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  const fetchContacts = useCallback((searchQuery = '') => {
-    setLoading(true);
+  const fetchContacts = useCallback((searchQuery = '', isBackground = false) => {
+    if (!isBackground) setLoading(true);
     api.getContacts({ search: searchQuery, limit: 5000 })
       .then(res => {
         setContacts(res.contacts);
