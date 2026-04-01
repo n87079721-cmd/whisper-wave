@@ -1,29 +1,32 @@
 
 
-## Stop AI from Always Quoting/Replying to Messages
+## Delay AI Reactions to Feel More Natural
 
 ### Problem
-Every AI auto-reply uses WhatsApp's "reply-to" (quoted message) feature, dragging the last message into the reply bubble. Real people rarely do this — they just type a new message most of the time.
+Currently, the AI reaction (emoji) fires almost immediately (1-3s delay), while the reply takes much longer (typing delay + response delay). This means the reaction always lands well before the reply, which looks unnatural. Real people either react after reading and replying, or react quickly then reply later — but not with a robotic 1-3s reaction every time.
 
 ### Change
 
-**`backend/src/whatsapp.js` (~line 2284)** — Randomize whether the AI quotes the message or sends a plain message:
+**`backend/src/whatsapp.js`** — Two locations where reactions are sent (lines ~2206 and ~2181):
 
-- ~20% chance: quote/reply to the last message (feels natural occasionally)
-- ~80% chance: just send a plain text message with no quote
+**When AI also replies (line ~2206):**
+- Move the reaction to fire **after** the reply is sent (inside the typing timer callback, after `sendTextMessage`)
+- Add a small random delay after the reply (3-8s) before reacting
 
-Apply the same logic in the batch-reply path (~line 2359).
+**When AI only reacts, no reply (line ~2181):**
+- Keep the existing delay (2-7s) — this is fine since there's no reply to coordinate with
 
+**Implementation sketch (reply path, ~line 2206):**
 ```
-// Before sending, randomly decide whether to quote
-const shouldQuote = Math.random() < 0.2;
-const sent = await sendTextMessage(userId, jid, replyText, { 
-  quotedMessageId: shouldQuote ? latestMessageId : null 
-});
+// Remove the immediate setTimeout for reaction here
+// Instead, store reactionEmoji + latestOriginalMsg on pendingReply
+// After sendTextMessage succeeds (~line 2285), send the reaction:
+if (pendingReply.reactionEmoji && pendingReply.reactionMsg) {
+  const postReplyDelay = Math.floor(Math.random() * 5000) + 3000;
+  setTimeout(() => sendReaction(userId, jid, pendingReply.reactionMsg, pendingReply.reactionEmoji), postReplyDelay);
+}
 ```
-
-Also update the reply metadata stored in DB — only set `replyToId`/`replyToContent`/`replyToSender` when `shouldQuote` is true.
 
 ### Files
-- **`backend/src/whatsapp.js`** — Add quote randomization in 2 places (~5 lines each)
+- **`backend/src/whatsapp.js`** — Move reaction send to after reply in 1 code path (~10 lines changed)
 
