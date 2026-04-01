@@ -2315,6 +2315,11 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
           emit(userId, 'message', { contactId, msgId: replyId });
+          // Send reaction after reply with a natural delay
+          if (pendingReaction) {
+            const postReplyDelay = Math.floor(Math.random() * 5000) + 3000;
+            setTimeout(() => sendReaction(userId, jid, pendingReaction.msg, pendingReaction.emoji), postReplyDelay);
+          }
         } catch (err) {
           console.error('Failed to send auto-reply:', err?.message || err);
           debugLog(db, userId, 'auto_reply_failed', { contact: contactName || phone, error: err?.message || String(err), replyPreview: replyText.slice(0, 80) });
