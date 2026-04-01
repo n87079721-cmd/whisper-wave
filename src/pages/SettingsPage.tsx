@@ -40,6 +40,8 @@ const SettingsPage = () => {
   // Availability settings
   const [replyChance, setReplyChance] = useState(70);
   const [responseSpeed, setResponseSpeed] = useState('normal');
+  const [activeHoursStart, setActiveHoursStart] = useState('09:00');
+  const [activeHoursEnd, setActiveHoursEnd] = useState('02:00');
 
   const activeSpeed = SPEED_OPTIONS.find((option) => option.id === responseSpeed) ?? SPEED_OPTIONS[1];
 
