@@ -22,7 +22,7 @@ const SendMessagePage = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    api.getContacts().then(setContacts).catch(() => {});
+    api.getContacts().then(res => setContacts(res.contacts)).catch(() => {});
     api.getVoices().then(v => {
       setVoices(v);
       if (v.length > 0) setSelectedVoice(v[0].id);

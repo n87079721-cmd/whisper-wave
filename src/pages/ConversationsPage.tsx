@@ -130,7 +130,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [selectedContact, loadingOlder, hasMoreMessages, messages]);
 
   const refreshAllContacts = useCallback(async (search?: string) => {
-    try { setAllContacts(await api.getContacts({ search, limit: 50 })); } catch {}
+    try { const res = await api.getContacts({ search, limit: 50 }); setAllContacts(res.contacts); } catch {}
   }, []);
 
   const refreshConversations = useCallback(async () => {
