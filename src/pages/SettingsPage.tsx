@@ -40,6 +40,8 @@ const SettingsPage = () => {
   // Availability settings
   const [replyChance, setReplyChance] = useState(70);
   const [responseSpeed, setResponseSpeed] = useState('normal');
+  const [activeHoursStart, setActiveHoursStart] = useState('09:00');
+  const [activeHoursEnd, setActiveHoursEnd] = useState('02:00');
 
   const activeSpeed = SPEED_OPTIONS.find((option) => option.id === responseSpeed) ?? SPEED_OPTIONS[1];
 
@@ -61,6 +63,12 @@ const SettingsPage = () => {
     }).catch(() => {});
     api.getConfig('ai_response_speed').then(data => {
       if (data.exists) setResponseSpeed(data.value || 'normal');
+    }).catch(() => {});
+    api.getConfig('ai_active_hours_start').then(data => {
+      if (data.exists) setActiveHoursStart(data.value || '09:00');
+    }).catch(() => {});
+    api.getConfig('ai_active_hours_end').then(data => {
+      if (data.exists) setActiveHoursEnd(data.value || '02:00');
     }).catch(() => {});
     api.getPrompts().then(setPrompts).catch(() => {});
   }, []);
@@ -356,6 +364,31 @@ const SettingsPage = () => {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Active Hours */}
+              <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
+                <div className="flex items-center gap-2">
+                  <Power className="w-4 h-4 text-primary" />
+                  <label className="text-sm font-medium text-foreground">Active Hours (Night Mode)</label>
+                </div>
+                <p className="text-xs text-muted-foreground">AI only replies between these hours (New York time). Outside this window, messages are ignored.</p>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <label className="text-[10px] text-muted-foreground mb-1 block">Start</label>
+                    <input type="time" value={activeHoursStart}
+                      onChange={(e) => { setActiveHoursStart(e.target.value); saveAvailabilitySetting('ai_active_hours_start', e.target.value); }}
+                      className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
+                  </div>
+                  <span className="text-muted-foreground text-sm mt-4">→</span>
+                  <div className="flex-1">
+                    <label className="text-[10px] text-muted-foreground mb-1 block">End</label>
+                    <input type="time" value={activeHoursEnd}
+                      onChange={(e) => { setActiveHoursEnd(e.target.value); saveAvailabilitySetting('ai_active_hours_end', e.target.value); }}
+                      className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Currently: <span className="font-medium text-foreground">{activeHoursStart}</span> to <span className="font-medium text-foreground">{activeHoursEnd}</span></p>
               </div>
 
               {/* System Prompt */}
