@@ -2218,7 +2218,10 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     ORDER BY timestamp DESC LIMIT 50
   `).all(contactId, userId).reverse();
 
-  if (messages.length === 0) return;
+  if (messages.length === 0) {
+    debugLog(db, userId, 'skip_no_messages', { contact: contactName || phone });
+    return;
+  }
 
   // lastMsgContent no longer needed — delay is based on reply length
   const speed = getConfigValue(db, userId, 'ai_response_speed', 'normal');
@@ -2228,11 +2231,12 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const reactionEmoji = await shouldReact(keyRow.value, latestMsgText);
   let pendingReaction = null;
   if (reactionEmoji && latestOriginalMsg) {
-    if (!shouldAlsoReplyAfterReaction()) {
+    if (!shouldAlsoReplyAfterReaction() && !forceReply) {
       // React-only: send with normal delay
       const reactDelay = Math.floor(Math.random() * 5000) + 2000;
       setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
       inst.autoReplyCooldowns.set(jid, Date.now());
+      debugLog(db, userId, 'react_only_no_reply', { contact: contactName || phone, emoji: reactionEmoji });
       return;
     }
     // Will reply too — defer reaction until after reply is sent
