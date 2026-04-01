@@ -2204,13 +2204,17 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   const latestMsgText = latestOriginalMsg?.body || latestOriginalMsg?.caption || '';
   const reactionEmoji = await shouldReact(keyRow.value, latestMsgText);
+  let pendingReaction = null;
   if (reactionEmoji && latestOriginalMsg) {
-    const reactDelay = Math.floor(Math.random() * 3000) + 1000;
-    setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
     if (!shouldAlsoReplyAfterReaction()) {
+      // React-only: send with normal delay
+      const reactDelay = Math.floor(Math.random() * 5000) + 2000;
+      setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
       inst.autoReplyCooldowns.set(jid, Date.now());
       return;
     }
+    // Will reply too — defer reaction until after reply is sent
+    pendingReaction = { emoji: reactionEmoji, msg: latestOriginalMsg };
   }
 
   // Count unreplied messages (received after last sent)
@@ -2311,6 +2315,11 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
           emit(userId, 'message', { contactId, msgId: replyId });
+          // Send reaction after reply with a natural delay
+          if (pendingReaction) {
+            const postReplyDelay = Math.floor(Math.random() * 5000) + 3000;
+            setTimeout(() => sendReaction(userId, jid, pendingReaction.msg, pendingReaction.emoji), postReplyDelay);
+          }
         } catch (err) {
           console.error('Failed to send auto-reply:', err?.message || err);
           debugLog(db, userId, 'auto_reply_failed', { contact: contactName || phone, error: err?.message || String(err), replyPreview: replyText.slice(0, 80) });
