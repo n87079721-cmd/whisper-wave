@@ -710,7 +710,20 @@ const VoiceStudioPage = () => {
                       <input
                         autoFocus
                         value={contactSearch}
-                        onChange={e => setContactSearch(e.target.value)}
+                        onChange={e => {
+                          setContactSearch(e.target.value);
+                          // Server-side search for contacts not in local list
+                          const val = e.target.value.trim();
+                          if (val.length >= 2) {
+                            api.getContacts({ search: val, limit: 50 }).then(res => {
+                              setContacts(prev => {
+                                const existingIds = new Set(prev.map(c => c.id));
+                                const newOnes = res.contacts.filter(c => !existingIds.has(c.id));
+                                return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+                              });
+                            }).catch(() => {});
+                          }
+                        }}
                         placeholder="Search contacts..."
                         className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
                       />
@@ -722,7 +735,8 @@ const VoiceStudioPage = () => {
                           const q = contactSearch.toLowerCase();
                           const name = getContactDisplayName(c).toLowerCase();
                           const meta = getContactDisplayMeta(c).toLowerCase();
-                          return name.includes(q) || meta.includes(q);
+                          const phone = (c.phone || '').toLowerCase();
+                          return name.includes(q) || meta.includes(q) || phone.includes(q);
                         })
                         .map(c => (
                           <button
