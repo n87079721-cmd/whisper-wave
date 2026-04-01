@@ -1,28 +1,32 @@
 
 
-## Fix: Night Mode Not Working + Remove "New York" From Time
+## Fix Contacts: Load All WhatsApp Contacts + Add Save & Message Options
 
-### Problems
+### Problem
+- Contacts page loads only 200 contacts (API limit), but dashboard shows 1950+
+- Search only works within those 200 (client-side filtering)
+- No quick "message" action on individual contacts
+- Need ability to save new contacts manually
 
-1. **Night mode doesn't work** — `isWithinActiveHours()` is defined (line 1970) but never called anywhere. No code checks active hours before generating a reply, so the AI replies 24/7.
+### Plan
 
-2. **AI mentions "New York"** — The system prompt (ai.js line 238) includes `(${timeLabel}, New York time)` which the AI parrots when asked about the time.
+#### 1. Backend: Raise limit & improve search (`backend/src/api.js`)
+- Increase max limit from 1000 to 5000
+- Add `jid` column to the search filter so LID-only contacts can be found by name or JID
+- Return a `total` count alongside results so the frontend knows how many exist
 
-### Fix
+#### 2. Frontend: Server-side search + load all (`src/pages/ContactsPage.tsx`)
+- Fetch contacts with `limit: 5000` to load all WhatsApp contacts at once
+- Move search to server-side with debounce (300ms) — calls `api.getContacts({ search, limit: 200 })` so it searches the full database
+- Show total count from API response (e.g. "1950 contacts synced")
+- Add a "Message" button on each contact row that opens the Send Message page or chat with that contact pre-filled
+- Keep the existing "Add" button for saving new contacts manually
 
-**`backend/src/whatsapp.js`** — Add active hours check at the top of `handleAutoReply` (after automation_enabled check, ~line 2110):
-```js
-if (!isWithinActiveHours(db, userId)) {
-  debugLog(db, userId, 'skip_outside_active_hours', { contact: contactName || phone });
-  return;
-}
-```
+#### 3. Frontend API type update (`src/lib/api.ts`)
+- Update `getContacts` return type to handle the new `{ contacts, total }` response shape (or keep flat array if we just raise the limit)
 
-**`backend/src/ai.js`** — Change the time format in the system prompt (line 238):
-- Replace `Current time: ${nyTime} (${timeLabel}, New York time)` with `Current time: ${nyTime} (${timeLabel})`
-- This removes the location reference so the AI just says the time naturally without mentioning New York.
-
-### Files
-- **`backend/src/whatsapp.js`** — Add 4 lines after line 2110
-- **`backend/src/ai.js`** — Remove ", New York time" from 1 line
+### Files to Change
+- **`backend/src/api.js`** — Raise max limit to 5000, add `jid` to search, optionally return total count
+- **`src/pages/ContactsPage.tsx`** — Load with higher limit, debounced server-side search, add Message button per contact
+- **`src/lib/api.ts`** — Minor adjustment if response shape changes
 
