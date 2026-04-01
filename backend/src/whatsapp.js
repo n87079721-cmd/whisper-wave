@@ -2222,7 +2222,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const speed = getConfigValue(db, userId, 'ai_response_speed', 'normal');
   const recentOutgoing = messages.filter((message) => message.direction === 'sent').slice(-6).map((message) => message.content);
 
-  const latestMsgText = latestOriginalMsg?.body || latestOriginalMsg?.caption || '';
+  const latestMsgText = effectiveContent;
   const reactionEmoji = await shouldReact(keyRow.value, latestMsgText);
   let pendingReaction = null;
   if (reactionEmoji && latestOriginalMsg) {
