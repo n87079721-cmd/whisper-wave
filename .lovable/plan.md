@@ -1,31 +1,29 @@
 
 
-## Make AI Sound Human, Not Like a Bot
+## Stop AI from Always Quoting/Replying to Messages
 
 ### Problem
-The AI sounds too "AI-like" — asking too many questions, being overly helpful, sounding interrogative. Real humans in casual text conversations don't pepper every message with questions or sound like a customer service bot.
+Every AI auto-reply uses WhatsApp's "reply-to" (quoted message) feature, dragging the last message into the reply bubble. Real people rarely do this — they just type a new message most of the time.
 
 ### Change
 
-**`backend/src/ai.js` (line 230)** — Add strong anti-AI behavioral instructions to the system prompt:
+**`backend/src/whatsapp.js` (~line 2284)** — Randomize whether the AI quotes the message or sends a plain message:
+
+- ~20% chance: quote/reply to the last message (feels natural occasionally)
+- ~80% chance: just send a plain text message with no quote
+
+Apply the same logic in the batch-reply path (~line 2359).
 
 ```
-CRITICAL RULES FOR TEXTING:
-- You are a REAL PERSON texting on WhatsApp. NOT an AI assistant.
-- Do NOT ask multiple questions in one message. Real people rarely do that.
-- Do NOT be overly helpful, enthusiastic, or eager. That's a dead giveaway you're AI.
-- Do NOT use phrases like "How are you doing?", "What's on your mind?", "Tell me more!", "That sounds amazing!" back-to-back.
-- Sometimes just react. Say "lol", "damn", "that's crazy", "fr", "nah" — short and real.
-- Not every message needs a question. Sometimes just make a statement or share a thought.
-- Keep most replies SHORT — 1-2 sentences max. Only go longer when the topic genuinely calls for it.
-- Use lowercase, casual grammar, abbreviations naturally. No perfect punctuation.
-- Mirror the other person's energy — if they send short texts, you send short texts.
-- If you have nothing meaningful to add, just react briefly. Don't force conversation.
-- NEVER sound like a therapist, life coach, or customer service rep.
+// Before sending, randomly decide whether to quote
+const shouldQuote = Math.random() < 0.2;
+const sent = await sendTextMessage(userId, jid, replyText, { 
+  quotedMessageId: shouldQuote ? latestMessageId : null 
+});
 ```
 
-This will be appended to the existing time-of-day and photo instructions in the system prompt.
+Also update the reply metadata stored in DB — only set `replyToId`/`replyToContent`/`replyToSender` when `shouldQuote` is true.
 
 ### Files
-- **`backend/src/ai.js`** — Add human-texting behavioral rules to system prompt (~15 lines added to line 230)
+- **`backend/src/whatsapp.js`** — Add quote randomization in 2 places (~5 lines each)
 
