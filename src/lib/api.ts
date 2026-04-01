@@ -188,6 +188,14 @@ export const api = {
   },
 
   // Contacts
+  saveContact(name: string, phone: string) {
+    return requestJson<{ id: string; created?: boolean; updated?: boolean }>('/api/contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, phone }),
+    });
+  },
+
   getContacts(options?: { search?: string; limit?: number; offset?: number }) {
     const params = new URLSearchParams();
     if (options?.search) params.set('search', options.search);
