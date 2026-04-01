@@ -52,8 +52,8 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
   const [expandedContact, setExpandedContact] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  const fetchContacts = useCallback((searchQuery = '') => {
-    setLoading(true);
+  const fetchContacts = useCallback((searchQuery = '', isBackground = false) => {
+    if (!isBackground) setLoading(true);
     api.getContacts({ search: searchQuery, limit: 5000 })
       .then(res => {
         setContacts(res.contacts);
@@ -66,11 +66,11 @@ const ContactsPage = ({ onOpenChat }: ContactsPageProps) => {
   useEffect(() => {
     fetchContacts();
     let es: EventSource | null = null;
-    const interval = window.setInterval(() => fetchContacts(search), 30000);
+    const interval = window.setInterval(() => fetchContacts(search, true), 30000);
     try {
       es = api.createEventSource();
-      es.addEventListener('history_sync', () => fetchContacts(search));
-      es.addEventListener('contacts_sync', () => fetchContacts(search));
+      es.addEventListener('history_sync', () => fetchContacts(search, true));
+      es.addEventListener('contacts_sync', () => fetchContacts(search, true));
       es.onerror = () => {};
     } catch {}
     return () => { es?.close(); window.clearInterval(interval); };
