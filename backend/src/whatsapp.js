@@ -2357,7 +2357,8 @@ async function drainFailedReplyQueue(userId, db) {
         debugLog(db, userId, 'drain_aborted_disconnected', { remaining: queue.length - queue.indexOf(item) });
         break;
       }
-      const sent = await sendTextMessage(userId, item.jid, item.replyText, { quotedMessageId: item.latestMessageId });
+      const shouldQuote = Math.random() < 0.2;
+      const sent = await sendTextMessage(userId, item.jid, item.replyText, { quotedMessageId: shouldQuote ? item.latestMessageId : null });
       const replyId = sent?.id?._serialized || require('crypto').randomUUID();
       db.prepare(`
         INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
