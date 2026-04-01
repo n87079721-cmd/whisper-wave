@@ -1265,7 +1265,7 @@ async function startConnection(userId, db, options = {}) {
           db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'message_received', ?)`).run(userId, JSON.stringify({ contactId }));
 
           if (!isGroup) {
-            handleAutoReply(userId, db, contactId, resolvedJid, phone, contactName, msg).catch(err => {
+            handleAutoReply(userId, db, contactId, resolvedJid, phone, contactName, msg, resolvedContent).catch(err => {
               console.error('Auto-reply error:', err?.message || err);
             });
           }
