@@ -532,9 +532,18 @@ export function createApiRouter(db) {
 
   // ── Contacts ──────────────────────────────────────────────
   router.get('/contacts', (req, res) => {
-    const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
+    const limit = Math.min(parseInt(req.query.limit) || 200, 5000);
     const offset = parseInt(req.query.offset) || 0;
     const search = req.query.search || '';
+
+    // Get total count
+    let totalRow;
+    if (search) {
+      const q = `%${search}%`;
+      totalRow = db.prepare(`SELECT COUNT(*) as total FROM contacts WHERE user_id = ? AND is_group = 0 AND (name LIKE ? OR phone LIKE ? OR jid LIKE ?)`).get(req.userId, q, q, q);
+    } else {
+      totalRow = db.prepare(`SELECT COUNT(*) as total FROM contacts WHERE user_id = ? AND is_group = 0`).get(req.userId);
+    }
 
     let contacts;
     if (search) {
@@ -549,10 +558,10 @@ export function createApiRouter(db) {
           GROUP BY contact_id
         ) mc ON mc.contact_id = c.id
         WHERE c.user_id = ? AND c.is_group = 0
-          AND (c.name LIKE ? OR c.phone LIKE ?)
+          AND (c.name LIKE ? OR c.phone LIKE ? OR c.jid LIKE ?)
         ORDER BY c.updated_at DESC
         LIMIT ? OFFSET ?
-      `).all(req.userId, req.userId, q, q, limit, offset);
+      `).all(req.userId, req.userId, q, q, q, limit, offset);
     } else {
       contacts = db.prepare(`
         SELECT c.*, COALESCE(mc.message_count, 0) as message_count
@@ -568,7 +577,7 @@ export function createApiRouter(db) {
         LIMIT ? OFFSET ?
       `).all(req.userId, req.userId, limit, offset);
     }
-    res.json(contacts);
+    res.json({ contacts, total: totalRow?.total || 0 });
   });
 
   // ── Save / Create Contact Manually ──────────────────────
