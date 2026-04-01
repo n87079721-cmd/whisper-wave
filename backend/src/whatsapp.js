@@ -2102,7 +2102,7 @@ function debugLog(db, userId, action, details = {}) {
   } catch {}
 }
 
-async function handleAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg) {
+async function handleAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg, resolvedContent) {
   const autoConfig = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'automation_enabled'").get(userId);
   if (!autoConfig || autoConfig.value !== 'true') {
     debugLog(db, userId, 'skip_automation_disabled', { contact: contactName || phone });
