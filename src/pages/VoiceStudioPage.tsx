@@ -143,7 +143,7 @@ const VoiceStudioPage = () => {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
-    api.getContacts().then(setContacts).catch(() => {});
+    api.getContacts().then(res => setContacts(res.contacts)).catch(() => {});
     setLoadingVoices(true);
     api
       .getVoices()
