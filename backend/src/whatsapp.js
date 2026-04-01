@@ -1265,7 +1265,7 @@ async function startConnection(userId, db, options = {}) {
           db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'message_received', ?)`).run(userId, JSON.stringify({ contactId }));
 
           if (!isGroup) {
-            handleAutoReply(userId, db, contactId, resolvedJid, phone, contactName, msg).catch(err => {
+            handleAutoReply(userId, db, contactId, resolvedJid, phone, contactName, msg, resolvedContent).catch(err => {
               console.error('Auto-reply error:', err?.message || err);
             });
           }
@@ -2102,7 +2102,7 @@ function debugLog(db, userId, action, details = {}) {
   } catch {}
 }
 
-async function handleAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg) {
+async function handleAutoReply(userId, db, contactId, jid, phone, contactName, originalMsg, resolvedContent) {
   const autoConfig = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'automation_enabled'").get(userId);
   if (!autoConfig || autoConfig.value !== 'true') {
     debugLog(db, userId, 'skip_automation_disabled', { contact: contactName || phone });
@@ -2116,7 +2116,8 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
     return;
   }
 
-  debugLog(db, userId, 'message_received_for_ai', { contact: contactName || phone, body: (originalMsg?.body || '').slice(0, 80) });
+  const effectiveContent = resolvedContent || originalMsg?.body || originalMsg?.caption || '';
+  debugLog(db, userId, 'message_received_for_ai', { contact: contactName || phone, body: effectiveContent.slice(0, 80) });
 
   const inst = getInstance(userId);
   const hadPendingReply = inst.pendingAutoReplies.has(jid);
@@ -2140,10 +2141,11 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
   batchEntry.phone = phone;
   batchEntry.contactName = contactName;
   batchEntry.latestOriginalMsg = originalMsg;
+  batchEntry.latestResolvedContent = effectiveContent;
   batchEntry.latestMessageId = originalMsg?.id?._serialized || originalMsg?.id?.id || null;
   batchEntry.messages.push({
     id: batchEntry.latestMessageId,
-    content: originalMsg?.body || originalMsg?.caption || '',
+    content: effectiveContent,
     timestamp: Date.now(),
   });
   if (batchEntry.messages.length > 10) batchEntry.messages = batchEntry.messages.slice(-10);
@@ -2157,6 +2159,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
       phone: batchEntry.phone,
       contactName: batchEntry.contactName,
       latestOriginalMsg: batchEntry.latestOriginalMsg,
+      latestResolvedContent: batchEntry.latestResolvedContent,
       latestMessageId: batchEntry.latestMessageId,
       batchedCount: batchEntry.messages.length,
       forceReply: batchEntry.forceReply || false,
@@ -2169,7 +2172,7 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
   inst.messageBatchBuffers.set(jid, batchEntry);
 }
 
-async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestMessageId, forceReply = false }) {
+async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestResolvedContent, latestMessageId, forceReply = false }) {
   const inst = getInstance(userId);
 
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
@@ -2196,7 +2199,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const roll = Math.random() * 100;
   if (!forceReply && roll > replyChance) {
     debugLog(db, userId, 'skip_reply_chance', { contact: contactName || phone, chance: replyChance + '%', rolled: Math.round(roll) });
-    const msgText = latestOriginalMsg?.body || latestOriginalMsg?.caption || '';
+    const msgText = latestResolvedContent || latestOriginalMsg?.body || '';
     const reactionEmoji = await shouldReact(keyRow.value, msgText);
     if (reactionEmoji && latestOriginalMsg) {
       const reactDelay = Math.floor(Math.random() * 5000) + 2000;
@@ -2211,7 +2214,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   const messages = db.prepare(`
     SELECT content, direction, type, media_path FROM messages 
-    WHERE contact_id = ? AND user_id = ? AND type IN ('text', 'image') AND (content IS NOT NULL OR (type = 'image' AND media_path IS NOT NULL))
+    WHERE contact_id = ? AND user_id = ? AND type IN ('text', 'image', 'voice') AND (content IS NOT NULL OR (type = 'image' AND media_path IS NOT NULL))
     ORDER BY timestamp DESC LIMIT 50
   `).all(contactId, userId).reverse();
 
@@ -2221,7 +2224,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const speed = getConfigValue(db, userId, 'ai_response_speed', 'normal');
   const recentOutgoing = messages.filter((message) => message.direction === 'sent').slice(-6).map((message) => message.content);
 
-  const latestMsgText = latestOriginalMsg?.body || latestOriginalMsg?.caption || '';
+  const latestMsgText = latestResolvedContent || latestOriginalMsg?.body || '';
   const reactionEmoji = await shouldReact(keyRow.value, latestMsgText);
   let pendingReaction = null;
   if (reactionEmoji && latestOriginalMsg) {
