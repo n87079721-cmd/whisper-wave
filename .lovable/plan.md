@@ -1,32 +1,34 @@
 
 
-## Delay AI Reactions to Feel More Natural
+## Enable AI to Understand Incoming Voice Notes
 
-### Problem
-Currently, the AI reaction (emoji) fires almost immediately (1-3s delay), while the reply takes much longer (typing delay + response delay). This means the reaction always lands well before the reply, which looks unnatural. Real people either react after reading and replying, or react quickly then reply later — but not with a robotic 1-3s reaction every time.
+### What This Does
+When someone sends a voice note, the system will transcribe it to text so the AI knows what the person said and can respond naturally — instead of just seeing "🎤 Voice message."
 
-### Change
+### How It Works
 
-**`backend/src/whatsapp.js`** — Two locations where reactions are sent (lines ~2206 and ~2181):
+1. **Intercept incoming voice notes** (`backend/src/whatsapp.js`, ~line 1441)
+   - When an incoming message is type `ptt`/`audio`, download the media buffer
+   - Send the audio to a transcription API before passing it to the AI
 
-**When AI also replies (line ~2206):**
-- Move the reaction to fire **after** the reply is sent (inside the typing timer callback, after `sendTextMessage`)
-- Add a small random delay after the reply (3-8s) before reacting
+2. **Add transcription function** (`backend/src/elevenlabs.js`)
+   - New `transcribeAudio(audioBuffer)` function
+   - Calls ElevenLabs Scribe API (`POST https://api.elevenlabs.io/v1/speech-to-text`) with the audio file
+   - Returns the transcribed text
 
-**When AI only reacts, no reply (line ~2181):**
-- Keep the existing delay (2-7s) — this is fine since there's no reply to coordinate with
+3. **Feed transcription to AI context** (`backend/src/whatsapp.js`, auto-reply logic)
+   - Replace `🎤 Voice message` content with the actual transcribed text like `🎤 [Voice note]: "hey are you coming tonight?"`
+   - The AI system prompt already handles text — it will now naturally respond to what was actually said
 
-**Implementation sketch (reply path, ~line 2206):**
-```
-// Remove the immediate setTimeout for reaction here
-// Instead, store reactionEmoji + latestOriginalMsg on pendingReply
-// After sendTextMessage succeeds (~line 2285), send the reaction:
-if (pendingReply.reactionEmoji && pendingReply.reactionMsg) {
-  const postReplyDelay = Math.floor(Math.random() * 5000) + 3000;
-  setTimeout(() => sendReaction(userId, jid, pendingReply.reactionMsg, pendingReply.reactionEmoji), postReplyDelay);
-}
-```
+4. **Add ElevenLabs API key config** (`backend/src/.env`)
+   - Reuse the existing `ELEVENLABS_API_KEY` already configured for TTS
+
+### Technical Detail
+- ElevenLabs Scribe v2 supports OGG/Opus (WhatsApp's native voice format) — no conversion needed
+- Transcription adds ~1-2s latency per voice note, which is fine since reply delays are already randomized
+- Fallback: if transcription fails, fall back to `🎤 Voice message` so nothing breaks
 
 ### Files
-- **`backend/src/whatsapp.js`** — Move reaction send to after reply in 1 code path (~10 lines changed)
+- **`backend/src/elevenlabs.js`** — Add `transcribeAudio()` function (~20 lines)
+- **`backend/src/whatsapp.js`** — Call transcription on incoming voice messages and pass result to AI (~15 lines changed in 2 locations)
 
