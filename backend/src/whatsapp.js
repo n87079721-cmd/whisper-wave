@@ -1200,6 +1200,24 @@ async function startConnection(userId, db, options = {}) {
           mediaPath = savedMedia?.mediaPath || null;
           resolvedMediaName = savedMedia?.mediaName || mediaName || null;
           resolvedMediaMime = savedMedia?.mediaMime || mimetype || null;
+
+          // Transcribe incoming voice notes so AI can understand them
+          if (msgType === 'voice' && direction === 'received' && mediaPath && !mediaPath.startsWith('wa:')) {
+            try {
+              const elevenLabsKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
+              if (elevenLabsKey) {
+                const mediaDir = path.join(__dirname, '..', 'data', 'message-media');
+                const audioBuffer = fs.readFileSync(path.join(mediaDir, mediaPath));
+                const transcript = await transcribeAudio(elevenLabsKey, audioBuffer, resolvedMediaMime || 'audio/ogg');
+                if (transcript) {
+                  resolvedContent = `🎤 [Voice note]: "${transcript}"`;
+                  console.log(`🎤 [${userId}] Transcribed voice note from ${contactId}: "${transcript.slice(0, 80)}..."`);
+                }
+              }
+            } catch (transcribeErr) {
+              console.log(`🎤 [${userId}] Voice transcription failed, using fallback: ${transcribeErr?.message}`);
+            }
+          }
         }
 
         // Capture quoted message context
