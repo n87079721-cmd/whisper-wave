@@ -64,6 +64,12 @@ const SettingsPage = () => {
     api.getConfig('ai_response_speed').then(data => {
       if (data.exists) setResponseSpeed(data.value || 'normal');
     }).catch(() => {});
+    api.getConfig('ai_active_hours_start').then(data => {
+      if (data.exists) setActiveHoursStart(data.value || '09:00');
+    }).catch(() => {});
+    api.getConfig('ai_active_hours_end').then(data => {
+      if (data.exists) setActiveHoursEnd(data.value || '02:00');
+    }).catch(() => {});
     api.getPrompts().then(setPrompts).catch(() => {});
   }, []);
 
