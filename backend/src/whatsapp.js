@@ -2109,6 +2109,11 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
     return;
   }
 
+  if (!isWithinActiveHours(db, userId)) {
+    debugLog(db, userId, 'skip_outside_active_hours', { contact: contactName || phone });
+    return;
+  }
+
   // Skip archived chats
   const contactRow = db.prepare('SELECT is_archived FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (contactRow?.is_archived) {
