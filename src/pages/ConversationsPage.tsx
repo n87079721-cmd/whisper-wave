@@ -1155,6 +1155,20 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     </div>
                   )}
                 </div>
+                {/* Brain icon — Memory/Directive/AI toggle */}
+                <button
+                  onClick={() => { setShowMemoryPanel(v => !v); setShowPersonaPicker(false); }}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors relative ${
+                    !contactAiEnabled ? 'text-destructive bg-destructive/10' :
+                    (contactMemory || contactDirective) ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:bg-secondary'
+                  }`}
+                  title="Memory & AI Settings"
+                >
+                  {contactAiEnabled ? <Brain className="w-4 h-4" /> : <BotOff className="w-4 h-4" />}
+                  {(contactMemory || contactDirective) && contactAiEnabled && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-primary" />
+                  )}
+                </button>
                 <button
                   onClick={() => { setChatSearchOpen(o => !o); setChatSearch(''); setTimeout(() => chatSearchInputRef.current?.focus(), 100); }}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
