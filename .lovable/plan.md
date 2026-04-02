@@ -1,55 +1,36 @@
 
 
-# Per-Chat Memory, Directives, and AI Toggle
+# Updated Plan: Smarter React-Only + Memory Panel UX Fixes
 
-## Features
+## Three things to address
 
-1. **Per-chat memory** — Persistent notes about a contact (unlimited length, clearable)
-2. **Per-chat directive** — Temporary behavior instruction with optional expiry (clearable)
-3. **Per-chat AI toggle** — Disable/enable AI auto-reply for specific contacts
+### 1. Smarter React-Only Logic (backend)
+Replace the blind 60/40 coin flip in `shouldAlsoReplyAfterReaction()` with context-aware logic.
 
-## Technical Plan
+**`backend/src/ai.js`** — Update the function signature to accept `unrepliedCount` and `messageText`:
+- 2+ unreplied messages → always reply (they're waiting)
+- Message contains `?` → always reply
+- Message is a conversation-ender ("ok", "lol", "haha", "bet", single emoji, "k", "cool") → 70% react-only
+- Otherwise → 85% reply, 15% react-only
 
-### 1. Database: Add columns to `contacts` (`backend/src/db.js`)
-Add migration in `ensureCurrentTables` for 4 new columns:
-- `memory TEXT` — persistent notes
-- `active_directive TEXT` — current behavior instruction
-- `directive_expires TEXT` — optional expiry datetime
-- `ai_enabled INTEGER DEFAULT 1` — per-chat AI toggle (1 = on, 0 = off)
+**`backend/src/whatsapp.js`** (~line 2278) — Move the unreplied count computation (lines 2291-2295) **before** line 2278, then pass `unrepliedCount` and `latestMsgText` to `shouldAlsoReplyAfterReaction()`.
 
-### 2. Backend API: New endpoints (`backend/src/api.js`)
-- `PUT /contacts/:id/memory` — save or clear memory (empty string = clear)
-- `PUT /contacts/:id/directive` — save or clear directive + optional expiry
-- `GET /contacts/:id/memory` — fetch memory + directive + ai_enabled
-- `PUT /contacts/:id/ai-toggle` — toggle AI on/off for this contact
+### 2. Close Memory Panel by Tapping Outside
+**`src/pages/ConversationsPage.tsx`** — Convert the inline `showMemoryPanel` div (line 1197) into a proper **Sheet** (slide-out drawer) using the existing `Sheet` component from `src/components/ui/sheet.tsx`. This gives:
+- Tap the overlay/outside to close
+- Smooth slide-in/out animation
+- Proper scrollable content area on all screen sizes
+- No landscape-mode issues — Sheet content scrolls within its own viewport
 
-### 3. AI Integration (`backend/src/whatsapp.js`)
-- In `handleAutoReply` (~line 2136), after the archived check, add: if `ai_enabled = 0` on the contact, skip with debug log `skip_ai_disabled_for_contact`
-- In `executeAutoReply` (~line 2207), after building the system prompt, append memory and active directive (if not expired) to the prompt
+The Sheet will contain the same three sections (AI toggle, Memory textarea, Directive textarea + expiry) but laid out in a full-height scrollable panel that works on any device orientation.
 
-### 4. Frontend API (`src/lib/api.ts`)
-Add methods:
-- `getContactMemory(id)` — returns `{ memory, active_directive, directive_expires, ai_enabled }`
-- `updateContactMemory(id, memory)`
-- `updateContactDirective(id, directive, expires?)`
-- `toggleContactAI(id, enabled)`
+### 3. Settings Panel Responsive Fix
+The current memory panel uses `max-h-[60vh]` which clips content on small screens or landscape. By moving to a Sheet, this is solved — the Sheet takes full available height and scrolls internally.
 
-### 5. Chat UI (`src/pages/ConversationsPage.tsx`)
-- Add a **brain icon** (🧠) button in the chat header next to the persona picker
-- Clicking it opens a modal/panel with three sections:
-  - **Memory** — large expandable textarea + Save + Clear buttons
-  - **Active Directive** — textarea + date picker for expiry + Save + Clear buttons
-  - **AI Toggle** — switch to enable/disable AI for this chat
-- Small indicator dot on brain icon when memory or directive is set
-- Load memory/directive/ai_enabled when selecting a contact
-- Toast confirmations on save/clear actions
-
-### Files Changed
+## Files Changed
 | File | Change |
 |------|--------|
-| `backend/src/db.js` | Add 4 columns via ALTER TABLE migration |
-| `backend/src/api.js` | Add 4 endpoints |
-| `backend/src/whatsapp.js` | Skip if AI disabled; inject memory + directive into prompt |
-| `src/lib/api.ts` | Add 4 API methods |
-| `src/pages/ConversationsPage.tsx` | Add brain icon + memory/directive/AI panel UI |
+| `backend/src/ai.js` | Context-aware `shouldAlsoReplyAfterReaction(unrepliedCount, messageText)` |
+| `backend/src/whatsapp.js` | Move unreplied count before reaction check, pass context |
+| `src/pages/ConversationsPage.tsx` | Replace inline memory panel with Sheet component, add close-on-outside-tap |
 
