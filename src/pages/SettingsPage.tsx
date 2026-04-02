@@ -42,6 +42,7 @@ const SettingsPage = () => {
   const [responseSpeed, setResponseSpeed] = useState('normal');
   const [activeHoursStart, setActiveHoursStart] = useState('09:00');
   const [activeHoursEnd, setActiveHoursEnd] = useState('02:00');
+  const [activeTimezone, setActiveTimezone] = useState('America/New_York');
 
   const activeSpeed = SPEED_OPTIONS.find((option) => option.id === responseSpeed) ?? SPEED_OPTIONS[1];
 
