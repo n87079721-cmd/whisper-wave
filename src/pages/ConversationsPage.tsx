@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Send, Loader2, Volume2, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film, Eye, EyeOff, Pencil, Check, CheckCheck, PhoneMissed, Star, Reply, User, Copy, Forward, BookOpen } from 'lucide-react';
+import { Search, Send, Loader2, Volume2, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film, Eye, EyeOff, Pencil, Check, CheckCheck, PhoneMissed, Star, Reply, User, Copy, Forward, BookOpen, Brain, BotOff } from 'lucide-react';
 import { api, type Contact, type Message, type Voice, type Prompt } from '@/lib/api';
 import { toast } from 'sonner';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
@@ -71,6 +71,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [contactPromptId, setContactPromptId] = useState<string | null>(null);
   const [showPersonaPicker, setShowPersonaPicker] = useState(false);
+  const [showMemoryPanel, setShowMemoryPanel] = useState(false);
+  const [contactMemory, setContactMemory] = useState('');
+  const [contactDirective, setContactDirective] = useState('');
+  const [contactDirectiveExpires, setContactDirectiveExpires] = useState('');
+  const [contactAiEnabled, setContactAiEnabled] = useState(true);
+  const [savingMemory, setSavingMemory] = useState(false);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -291,8 +297,21 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     setShowProfile(false);
     setEditingMsgId(null);
     setShowPersonaPicker(false);
+    setShowMemoryPanel(false);
     // Load contact's assigned prompt
     api.getContactPrompt(selectedContact.id).then(data => setContactPromptId(data.promptId)).catch(() => setContactPromptId(null));
+    // Load contact memory/directive/ai toggle
+    api.getContactMemory(selectedContact.id).then(data => {
+      setContactMemory(data.memory || '');
+      setContactDirective(data.active_directive || '');
+      setContactDirectiveExpires(data.directive_expires || '');
+      setContactAiEnabled(data.ai_enabled !== 0);
+    }).catch(() => {
+      setContactMemory('');
+      setContactDirective('');
+      setContactDirectiveExpires('');
+      setContactAiEnabled(true);
+    });
     refreshMessages(selectedContact.id, { forceScroll: true });
   }, [selectedContact?.id, refreshMessages]);
 
@@ -1136,6 +1155,20 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     </div>
                   )}
                 </div>
+                {/* Brain icon — Memory/Directive/AI toggle */}
+                <button
+                  onClick={() => { setShowMemoryPanel(v => !v); setShowPersonaPicker(false); }}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors relative ${
+                    !contactAiEnabled ? 'text-destructive bg-destructive/10' :
+                    (contactMemory || contactDirective) ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:bg-secondary'
+                  }`}
+                  title="Memory & AI Settings"
+                >
+                  {contactAiEnabled ? <Brain className="w-4 h-4" /> : <BotOff className="w-4 h-4" />}
+                  {(contactMemory || contactDirective) && contactAiEnabled && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-primary" />
+                  )}
+                </button>
                 <button
                   onClick={() => { setChatSearchOpen(o => !o); setChatSearch(''); setTimeout(() => chatSearchInputRef.current?.focus(), 100); }}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
@@ -1159,6 +1192,109 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   {selectedContact.is_archived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                 </button>
               </div>
+
+              {/* Memory/Directive/AI panel */}
+              {showMemoryPanel && (
+                <div className="px-3 py-3 border-b border-border bg-card space-y-4 max-h-[60vh] overflow-y-auto">
+                  {/* AI Toggle */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">AI Auto-Reply</p>
+                      <p className="text-xs text-muted-foreground">Enable/disable AI for this chat</p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const newVal = !contactAiEnabled;
+                        setContactAiEnabled(newVal);
+                        await api.toggleContactAI(selectedContact.id, newVal);
+                        toast.success(newVal ? 'AI enabled for this chat' : 'AI disabled for this chat');
+                      }}
+                      className={`w-11 h-6 rounded-full transition-colors relative ${contactAiEnabled ? 'bg-primary' : 'bg-muted'}`}
+                    >
+                      <span className={`block w-5 h-5 rounded-full bg-background shadow-sm transition-transform ${contactAiEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+
+                  {/* Memory */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-sm font-medium text-foreground">Memory Notes</p>
+                      {contactMemory && (
+                        <button
+                          onClick={async () => {
+                            setContactMemory('');
+                            await api.updateContactMemory(selectedContact.id, '');
+                            toast.success('Memory cleared');
+                          }}
+                          className="text-xs text-destructive hover:underline"
+                        >Clear</button>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-1.5">Persistent context the AI remembers about this person</p>
+                    <textarea
+                      value={contactMemory}
+                      onChange={(e) => setContactMemory(e.target.value)}
+                      placeholder="e.g. We've been planning a trip to Miami. They have a dog named Max..."
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[100px] resize-y placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <button
+                      disabled={savingMemory}
+                      onClick={async () => {
+                        setSavingMemory(true);
+                        await api.updateContactMemory(selectedContact.id, contactMemory);
+                        setSavingMemory(false);
+                        toast.success('Memory saved');
+                      }}
+                      className="mt-1.5 px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                    >{savingMemory ? 'Saving...' : 'Save Memory'}</button>
+                  </div>
+
+                  {/* Directive */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-sm font-medium text-foreground">Active Directive</p>
+                      {contactDirective && (
+                        <button
+                          onClick={async () => {
+                            setContactDirective('');
+                            setContactDirectiveExpires('');
+                            await api.updateContactDirective(selectedContact.id, '', '');
+                            toast.success('Directive cleared');
+                          }}
+                          className="text-xs text-destructive hover:underline"
+                        >Clear</button>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-1.5">Temporary behavior instruction (e.g. "be flirty this week")</p>
+                    <textarea
+                      value={contactDirective}
+                      onChange={(e) => setContactDirective(e.target.value)}
+                      placeholder="e.g. Act distant and busy, respond slowly..."
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[60px] resize-y placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <input
+                        type="date"
+                        value={contactDirectiveExpires ? contactDirectiveExpires.split('T')[0] : ''}
+                        onChange={(e) => setContactDirectiveExpires(e.target.value ? new Date(e.target.value + 'T23:59:59').toISOString() : '')}
+                        className="px-2 py-1.5 text-xs rounded-md border border-input bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                        placeholder="Expires (optional)"
+                      />
+                      <span className="text-xs text-muted-foreground">Expires (optional)</span>
+                    </div>
+                    <button
+                      disabled={savingMemory}
+                      onClick={async () => {
+                        setSavingMemory(true);
+                        await api.updateContactDirective(selectedContact.id, contactDirective, contactDirectiveExpires || undefined);
+                        setSavingMemory(false);
+                        toast.success('Directive saved');
+                      }}
+                      className="mt-1.5 px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                    >{savingMemory ? 'Saving...' : 'Save Directive'}</button>
+                  </div>
+                </div>
+              )}
 
               {/* In-chat search bar */}
               {chatSearchOpen && (
