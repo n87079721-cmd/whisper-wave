@@ -1974,14 +1974,15 @@ function isWithinActiveHours(db, userId) {
 
   let now;
   try {
-    const formatter = new Intl.DateTimeFormat('en-US', {
+    // Use hourCycle h23 for reliable 0-23 hour format (hour12:false can return 24 for midnight)
+    const timeStr = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
-      hour: 'numeric', minute: 'numeric', hour12: false
-    });
-    const parts = formatter.formatToParts(new Date());
-    const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0');
-    const minute = parseInt(parts.find(p => p.type === 'minute')?.value || '0');
-    now = hour * 60 + minute;
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23'
+    }).format(new Date());
+    const [h, m] = timeStr.split(':').map(Number);
+    now = h * 60 + m;
   } catch {
     const d = new Date();
     now = d.getHours() * 60 + d.getMinutes();
@@ -1991,8 +1992,11 @@ function isWithinActiveHours(db, userId) {
   const [eh, em] = end.split(':').map(Number);
   const startMin = sh * 60 + sm;
   const endMin = eh * 60 + em;
-  if (startMin <= endMin) return now >= startMin && now <= endMin;
-  return now >= startMin || now <= endMin;
+
+  // Cross-midnight window (e.g. 08:00 → 02:00): active if now >= start OR now < end
+  if (startMin > endMin) return now >= startMin || now < endMin;
+  // Same-day window (e.g. 09:00 → 17:00): active if now >= start AND now < end
+  return now >= startMin && now < endMin;
 }
 
 function calculateDelay(replyLength, speed) {
