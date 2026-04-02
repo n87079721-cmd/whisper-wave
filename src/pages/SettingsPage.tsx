@@ -376,7 +376,24 @@ const SettingsPage = () => {
                   <Power className="w-4 h-4 text-primary" />
                   <label className="text-sm font-medium text-foreground">Active Hours (Night Mode)</label>
                 </div>
-                <p className="text-xs text-muted-foreground">AI only replies between these hours (New York time). Outside this window, messages are ignored.</p>
+                <p className="text-xs text-muted-foreground">AI only replies between these hours. Outside this window, messages are ignored.</p>
+                <div className="mb-2">
+                  <label className="text-[10px] text-muted-foreground mb-1 block">Timezone</label>
+                  <select value={activeTimezone}
+                    onChange={(e) => { setActiveTimezone(e.target.value); saveAvailabilitySetting('ai_timezone', e.target.value); }}
+                    className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary/50">
+                    <option value="America/New_York">New York (ET)</option>
+                    <option value="America/Chicago">Chicago (CT)</option>
+                    <option value="America/Denver">Denver (MT)</option>
+                    <option value="America/Los_Angeles">Los Angeles (PT)</option>
+                    <option value="America/Toronto">Toronto (ET)</option>
+                    <option value="Europe/London">London (GMT/BST)</option>
+                    <option value="Europe/Paris">Paris (CET)</option>
+                    <option value="Africa/Lagos">Lagos (WAT)</option>
+                    <option value="Asia/Dubai">Dubai (GST)</option>
+                    <option value="Asia/Kolkata">India (IST)</option>
+                  </select>
+                </div>
                 <div className="flex items-center gap-3">
                   <div className="flex-1">
                     <label className="text-[10px] text-muted-foreground mb-1 block">Start</label>
@@ -392,7 +409,7 @@ const SettingsPage = () => {
                       className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" />
                   </div>
                 </div>
-                <p className="text-[10px] text-muted-foreground">Currently: <span className="font-medium text-foreground">{activeHoursStart}</span> to <span className="font-medium text-foreground">{activeHoursEnd}</span></p>
+                <p className="text-[10px] text-muted-foreground">Currently: <span className="font-medium text-foreground">{activeHoursStart}</span> to <span className="font-medium text-foreground">{activeHoursEnd}</span> ({activeTimezone.split('/').pop()?.replace('_', ' ')})</p>
               </div>
 
               {/* System Prompt */}
