@@ -2210,16 +2210,33 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   // Per-contact prompt: check if contact has an assigned persona
   let systemPrompt = '';
+  let contactMemory = '';
+  let contactDirective = '';
   try {
-    const contactRow = db.prepare("SELECT prompt_id FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
     if (contactRow?.prompt_id) {
       const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
       systemPrompt = promptRow?.content || '';
+    }
+    if (contactRow?.memory) {
+      contactMemory = contactRow.memory;
+    }
+    if (contactRow?.active_directive) {
+      const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
+      if (notExpired) {
+        contactDirective = contactRow.active_directive;
+      }
     }
   } catch {}
   if (!systemPrompt) {
     const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
     systemPrompt = globalRow?.value || '';
+  }
+  if (contactMemory) {
+    systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON:\n${contactMemory}`;
+  }
+  if (contactDirective) {
+    systemPrompt += `\n\nCURRENT BEHAVIOR INSTRUCTION:\n${contactDirective}`;
   }
   const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
 

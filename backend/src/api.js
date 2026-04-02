@@ -615,6 +615,56 @@ export function createApiRouter(db) {
     }
   });
 
+  // ── Contact Memory, Directive & AI Toggle ────────────────
+  router.get('/contacts/:id/memory', (req, res) => {
+    try {
+      const row = db.prepare('SELECT memory, active_directive, directive_expires, ai_enabled FROM contacts WHERE id = ? AND user_id = ?')
+        .get(req.params.id, req.userId);
+      if (!row) return res.status(404).json({ error: 'Contact not found' });
+      res.json({
+        memory: row.memory || '',
+        active_directive: row.active_directive || '',
+        directive_expires: row.directive_expires || null,
+        ai_enabled: row.ai_enabled ?? 1,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.put('/contacts/:id/memory', (req, res) => {
+    try {
+      const { memory } = req.body;
+      db.prepare("UPDATE contacts SET memory = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+        .run(memory || null, req.params.id, req.userId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.put('/contacts/:id/directive', (req, res) => {
+    try {
+      const { directive, expires } = req.body;
+      db.prepare("UPDATE contacts SET active_directive = ?, directive_expires = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+        .run(directive || null, expires || null, req.params.id, req.userId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.put('/contacts/:id/ai-toggle', (req, res) => {
+    try {
+      const { enabled } = req.body;
+      db.prepare("UPDATE contacts SET ai_enabled = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+        .run(enabled ? 1 : 0, req.params.id, req.userId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Messages / Conversations ─────────────────────────────
   router.get('/messages/:contactId', (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 100, 500);
