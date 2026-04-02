@@ -71,6 +71,9 @@ const SettingsPage = () => {
     api.getConfig('ai_active_hours_end').then(data => {
       if (data.exists) setActiveHoursEnd(data.value || '02:00');
     }).catch(() => {});
+    api.getConfig('ai_timezone').then(data => {
+      if (data.exists) setActiveTimezone(data.value || 'America/New_York');
+    }).catch(() => {});
     api.getPrompts().then(setPrompts).catch(() => {});
   }, []);
 
