@@ -2272,26 +2272,27 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const recentOutgoing = messages.filter((message) => message.direction === 'sent').slice(-6).map((message) => message.content);
 
   const latestMsgText = latestResolvedContent || latestOriginalMsg?.body || '';
-  const reactionEmoji = await shouldReact(keyRow.value, latestMsgText);
-  let pendingReaction = null;
-  if (reactionEmoji && latestOriginalMsg) {
-    if (!shouldAlsoReplyAfterReaction() && !forceReply) {
-      // React-only: send with normal delay
-      const reactDelay = Math.floor(Math.random() * 5000) + 2000;
-      setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
-      inst.autoReplyCooldowns.set(jid, Date.now());
-      debugLog(db, userId, 'react_only_no_reply', { contact: contactName || phone, emoji: reactionEmoji });
-      return;
-    }
-    // Will reply too — defer reaction until after reply is sent
-    pendingReaction = { emoji: reactionEmoji, msg: latestOriginalMsg };
-  }
 
-  // Count unreplied messages (received after last sent)
+  // Count unreplied messages FIRST (needed for context-aware reaction logic)
   let unrepliedCount = 0;
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].direction === 'sent') break;
     if (messages[i].direction === 'received') unrepliedCount++;
+  }
+
+  const reactionEmoji = await shouldReact(keyRow.value, latestMsgText);
+  let pendingReaction = null;
+  if (reactionEmoji && latestOriginalMsg) {
+    if (!shouldAlsoReplyAfterReaction(unrepliedCount, latestMsgText) && !forceReply) {
+      // React-only: send with normal delay
+      const reactDelay = Math.floor(Math.random() * 5000) + 2000;
+      setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
+      inst.autoReplyCooldowns.set(jid, Date.now());
+      debugLog(db, userId, 'react_only_no_reply', { contact: contactName || phone, emoji: reactionEmoji, unrepliedCount });
+      return;
+    }
+    // Will reply too — defer reaction until after reply is sent
+    pendingReaction = { emoji: reactionEmoji, msg: latestOriginalMsg };
   }
 
   debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, historyLength: messages.length, unrepliedCount });
