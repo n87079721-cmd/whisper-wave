@@ -156,6 +156,18 @@ function ensureCurrentTables(db) {
     if (!cols.has('unread_count')) {
       db.exec("ALTER TABLE contacts ADD COLUMN unread_count INTEGER DEFAULT 0");
     }
+    if (!cols.has('memory')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN memory TEXT");
+    }
+    if (!cols.has('active_directive')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN active_directive TEXT");
+    }
+    if (!cols.has('directive_expires')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN directive_expires TEXT");
+    }
+    if (!cols.has('ai_enabled')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN ai_enabled INTEGER DEFAULT 1");
+    }
   } catch {}
 
   try {
