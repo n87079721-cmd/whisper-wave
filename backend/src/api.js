@@ -1804,14 +1804,19 @@ RULES:
         await wa.clearSession();
       } catch {}
 
-      // Delete all user data (CASCADE should handle most, but be thorough)
-      db.prepare('DELETE FROM messages WHERE user_id = ?').run(targetId);
-      db.prepare('DELETE FROM contacts WHERE user_id = ?').run(targetId);
-      db.prepare('DELETE FROM stats WHERE user_id = ?').run(targetId);
-      db.prepare('DELETE FROM config WHERE user_id = ?').run(targetId);
-      db.prepare('DELETE FROM call_logs WHERE user_id = ?').run(targetId);
-      db.prepare('DELETE FROM statuses WHERE user_id = ?').run(targetId);
-      db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+      // Delete all user data in a transaction for atomicity
+      const deleteUser = db.transaction(() => {
+        db.prepare('DELETE FROM custom_sounds WHERE user_id = ?').run(targetId);
+        db.prepare('DELETE FROM prompts WHERE user_id = ?').run(targetId);
+        db.prepare('DELETE FROM messages WHERE user_id = ?').run(targetId);
+        db.prepare('DELETE FROM contacts WHERE user_id = ?').run(targetId);
+        db.prepare('DELETE FROM stats WHERE user_id = ?').run(targetId);
+        db.prepare('DELETE FROM config WHERE user_id = ?').run(targetId);
+        db.prepare('DELETE FROM call_logs WHERE user_id = ?').run(targetId);
+        db.prepare('DELETE FROM statuses WHERE user_id = ?').run(targetId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+      });
+      deleteUser();
 
       // Clean up auth directories
       const path = await import('path');
