@@ -1156,9 +1156,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     </div>
                   )}
                 </div>
-                {/* Brain icon — Memory/Directive/AI toggle */}
                 <button
-                  onClick={() => { setShowMemoryPanel(v => !v); setShowPersonaPicker(false); }}
+                  onClick={() => { setShowMemoryPanel(true); setShowPersonaPicker(false); }}
                   className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors relative ${
                     !contactAiEnabled ? 'text-destructive bg-destructive/10' :
                     (contactMemory || contactDirective) ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:bg-secondary'
