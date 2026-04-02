@@ -1972,20 +1972,20 @@ function isWithinActiveHours(db, userId) {
   const end = getConfigValue(db, userId, 'ai_active_hours_end', '02:00');
   const timezone = getConfigValue(db, userId, 'ai_timezone', 'America/New_York');
 
-  let now;
+  let nowMin;
   try {
-    // Use hourCycle h23 for reliable 0-23 hour format (hour12:false can return 24 for midnight)
-    const timeStr = new Intl.DateTimeFormat('en-US', {
+    const parts = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
+      hourCycle: 'h23',
       hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23'
-    }).format(new Date());
-    const [h, m] = timeStr.split(':').map(Number);
-    now = h * 60 + m;
+      minute: '2-digit'
+    }).formatToParts(new Date());
+    const h = +(parts.find(p => p.type === 'hour')?.value || 0);
+    const m = +(parts.find(p => p.type === 'minute')?.value || 0);
+    nowMin = h * 60 + m;
   } catch {
     const d = new Date();
-    now = d.getHours() * 60 + d.getMinutes();
+    nowMin = d.getUTCHours() * 60 + d.getUTCMinutes();
   }
 
   const [sh, sm] = start.split(':').map(Number);
@@ -1993,10 +1993,24 @@ function isWithinActiveHours(db, userId) {
   const startMin = sh * 60 + sm;
   const endMin = eh * 60 + em;
 
-  // Cross-midnight window (e.g. 08:00 → 02:00): active if now >= start OR now < end
-  if (startMin > endMin) return now >= startMin || now < endMin;
-  // Same-day window (e.g. 09:00 → 17:00): active if now >= start AND now < end
-  return now >= startMin && now < endMin;
+  let within;
+  if (startMin <= endMin) {
+    // Same-day window (e.g. 09:00 → 17:00)
+    within = nowMin >= startMin && nowMin < endMin;
+  } else {
+    // Cross-midnight window (e.g. 08:00 → 02:00): active if now >= start OR now < end
+    within = nowMin >= startMin || nowMin < endMin;
+  }
+
+  // Log computed values for debugging
+  try {
+    debugLog(db, userId, 'active_hours_check', {
+      nowMin, startMin, endMin, timezone, within,
+      serverUTC: new Date().toISOString()
+    });
+  } catch {}
+
+  return within;
 }
 
 function calculateDelay(replyLength, speed) {
