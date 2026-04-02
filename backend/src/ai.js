@@ -135,11 +135,31 @@ Reply with ONLY the single emoji, nothing else.`,
 }
 
 /**
- * After reacting, should we ALSO send a text reply? 
- * ~60% of the time yes, ~40% just the reaction is enough.
+ * After reacting, should we ALSO send a text reply?
+ * Context-aware: considers how many messages are unreplied and message content.
  */
-export function shouldAlsoReplyAfterReaction() {
-  return Math.random() < 0.60;
+const CONVERSATION_ENDERS = new Set([
+  'ok', 'okay', 'k', 'kk', 'lol', 'lmao', 'haha', 'hahaha', 'bet', 'cool',
+  'aight', 'ight', 'true', 'facts', 'word', 'nice', 'nah', 'yea', 'yep',
+  'yeah', 'ya', 'alr', 'alright', 'fs', 'fr', 'ong', 'smh', 'damn', 'wow',
+]);
+
+function isConversationEnder(text) {
+  const cleaned = text.trim().toLowerCase().replace(/[.!]+$/, '');
+  // Single emoji or very short emoji-only
+  if (/^[\p{Emoji}\u200d\ufe0f]{1,4}$/u.test(cleaned)) return true;
+  return CONVERSATION_ENDERS.has(cleaned);
+}
+
+export function shouldAlsoReplyAfterReaction(unrepliedCount = 0, messageText = '') {
+  // They're waiting — always reply
+  if (unrepliedCount >= 2) return true;
+  // They asked a question — always reply
+  if (messageText.includes('?')) return true;
+  // Conversation ender — mostly just react
+  if (isConversationEnder(messageText)) return Math.random() < 0.30;
+  // Normal message — usually reply
+  return Math.random() < 0.85;
 }
 
 /**
