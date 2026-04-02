@@ -71,6 +71,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [contactPromptId, setContactPromptId] = useState<string | null>(null);
   const [showPersonaPicker, setShowPersonaPicker] = useState(false);
+  const [showMemoryPanel, setShowMemoryPanel] = useState(false);
+  const [contactMemory, setContactMemory] = useState('');
+  const [contactDirective, setContactDirective] = useState('');
+  const [contactDirectiveExpires, setContactDirectiveExpires] = useState('');
+  const [contactAiEnabled, setContactAiEnabled] = useState(true);
+  const [savingMemory, setSavingMemory] = useState(false);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
