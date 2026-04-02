@@ -1193,108 +1193,116 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 </button>
               </div>
 
-              {/* Memory/Directive/AI panel */}
-              {showMemoryPanel && (
-                <div className="px-3 py-3 border-b border-border bg-card space-y-4 max-h-[60vh] overflow-y-auto">
-                  {/* AI Toggle */}
-                  <div className="flex items-center justify-between">
+              {/* Memory/Directive/AI Sheet */}
+              <Sheet open={showMemoryPanel} onOpenChange={setShowMemoryPanel}>
+                <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+                  <SheetHeader>
+                    <SheetTitle className="flex items-center gap-2">
+                      <Brain className="w-5 h-5" />
+                      Memory & AI Settings
+                    </SheetTitle>
+                  </SheetHeader>
+                  <div className="space-y-6 mt-4">
+                    {/* AI Toggle */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">AI Auto-Reply</p>
+                        <p className="text-xs text-muted-foreground">Enable/disable AI for this chat</p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const newVal = !contactAiEnabled;
+                          setContactAiEnabled(newVal);
+                          await api.toggleContactAI(selectedContact.id, newVal);
+                          toast.success(newVal ? 'AI enabled for this chat' : 'AI disabled for this chat');
+                        }}
+                        className={`w-11 h-6 rounded-full transition-colors relative ${contactAiEnabled ? 'bg-primary' : 'bg-muted'}`}
+                      >
+                        <span className={`block w-5 h-5 rounded-full bg-background shadow-sm transition-transform ${contactAiEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                      </button>
+                    </div>
+
+                    {/* Memory */}
                     <div>
-                      <p className="text-sm font-medium text-foreground">AI Auto-Reply</p>
-                      <p className="text-xs text-muted-foreground">Enable/disable AI for this chat</p>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        const newVal = !contactAiEnabled;
-                        setContactAiEnabled(newVal);
-                        await api.toggleContactAI(selectedContact.id, newVal);
-                        toast.success(newVal ? 'AI enabled for this chat' : 'AI disabled for this chat');
-                      }}
-                      className={`w-11 h-6 rounded-full transition-colors relative ${contactAiEnabled ? 'bg-primary' : 'bg-muted'}`}
-                    >
-                      <span className={`block w-5 h-5 rounded-full bg-background shadow-sm transition-transform ${contactAiEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                    </button>
-                  </div>
-
-                  {/* Memory */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <p className="text-sm font-medium text-foreground">Memory Notes</p>
-                      {contactMemory && (
-                        <button
-                          onClick={async () => {
-                            setContactMemory('');
-                            await api.updateContactMemory(selectedContact.id, '');
-                            toast.success('Memory cleared');
-                          }}
-                          className="text-xs text-destructive hover:underline"
-                        >Clear</button>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground mb-1.5">Persistent context the AI remembers about this person</p>
-                    <textarea
-                      value={contactMemory}
-                      onChange={(e) => setContactMemory(e.target.value)}
-                      placeholder="e.g. We've been planning a trip to Miami. They have a dog named Max..."
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[100px] resize-y placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                    />
-                    <button
-                      disabled={savingMemory}
-                      onClick={async () => {
-                        setSavingMemory(true);
-                        await api.updateContactMemory(selectedContact.id, contactMemory);
-                        setSavingMemory(false);
-                        toast.success('Memory saved');
-                      }}
-                      className="mt-1.5 px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                    >{savingMemory ? 'Saving...' : 'Save Memory'}</button>
-                  </div>
-
-                  {/* Directive */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <p className="text-sm font-medium text-foreground">Active Directive</p>
-                      {contactDirective && (
-                        <button
-                          onClick={async () => {
-                            setContactDirective('');
-                            setContactDirectiveExpires('');
-                            await api.updateContactDirective(selectedContact.id, '', '');
-                            toast.success('Directive cleared');
-                          }}
-                          className="text-xs text-destructive hover:underline"
-                        >Clear</button>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground mb-1.5">Temporary behavior instruction (e.g. "be flirty this week")</p>
-                    <textarea
-                      value={contactDirective}
-                      onChange={(e) => setContactDirective(e.target.value)}
-                      placeholder="e.g. Act distant and busy, respond slowly..."
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[60px] resize-y placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                    />
-                    <div className="flex items-center gap-2 mt-1.5">
-                      <input
-                        type="date"
-                        value={contactDirectiveExpires ? contactDirectiveExpires.split('T')[0] : ''}
-                        onChange={(e) => setContactDirectiveExpires(e.target.value ? new Date(e.target.value + 'T23:59:59').toISOString() : '')}
-                        className="px-2 py-1.5 text-xs rounded-md border border-input bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                        placeholder="Expires (optional)"
+                      <div className="flex items-center justify-between mb-1.5">
+                        <p className="text-sm font-medium text-foreground">Memory Notes</p>
+                        {contactMemory && (
+                          <button
+                            onClick={async () => {
+                              setContactMemory('');
+                              await api.updateContactMemory(selectedContact.id, '');
+                              toast.success('Memory cleared');
+                            }}
+                            className="text-xs text-destructive hover:underline"
+                          >Clear</button>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-1.5">Persistent context the AI remembers about this person</p>
+                      <textarea
+                        value={contactMemory}
+                        onChange={(e) => setContactMemory(e.target.value)}
+                        placeholder="e.g. We've been planning a trip to Miami. They have a dog named Max..."
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[100px] resize-y placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       />
-                      <span className="text-xs text-muted-foreground">Expires (optional)</span>
+                      <button
+                        disabled={savingMemory}
+                        onClick={async () => {
+                          setSavingMemory(true);
+                          await api.updateContactMemory(selectedContact.id, contactMemory);
+                          setSavingMemory(false);
+                          toast.success('Memory saved');
+                        }}
+                        className="mt-1.5 px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                      >{savingMemory ? 'Saving...' : 'Save Memory'}</button>
                     </div>
-                    <button
-                      disabled={savingMemory}
-                      onClick={async () => {
-                        setSavingMemory(true);
-                        await api.updateContactDirective(selectedContact.id, contactDirective, contactDirectiveExpires || undefined);
-                        setSavingMemory(false);
-                        toast.success('Directive saved');
-                      }}
-                      className="mt-1.5 px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                    >{savingMemory ? 'Saving...' : 'Save Directive'}</button>
+
+                    {/* Directive */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <p className="text-sm font-medium text-foreground">Active Directive</p>
+                        {contactDirective && (
+                          <button
+                            onClick={async () => {
+                              setContactDirective('');
+                              setContactDirectiveExpires('');
+                              await api.updateContactDirective(selectedContact.id, '', '');
+                              toast.success('Directive cleared');
+                            }}
+                            className="text-xs text-destructive hover:underline"
+                          >Clear</button>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-1.5">Temporary behavior instruction (e.g. "be flirty this week")</p>
+                      <textarea
+                        value={contactDirective}
+                        onChange={(e) => setContactDirective(e.target.value)}
+                        placeholder="e.g. Act distant and busy, respond slowly..."
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[60px] resize-y placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <input
+                          type="date"
+                          value={contactDirectiveExpires ? contactDirectiveExpires.split('T')[0] : ''}
+                          onChange={(e) => setContactDirectiveExpires(e.target.value ? new Date(e.target.value + 'T23:59:59').toISOString() : '')}
+                          className="px-2 py-1.5 text-xs rounded-md border border-input bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          placeholder="Expires (optional)"
+                        />
+                        <span className="text-xs text-muted-foreground">Expires (optional)</span>
+                      </div>
+                      <button
+                        disabled={savingMemory}
+                        onClick={async () => {
+                          setSavingMemory(true);
+                          await api.updateContactDirective(selectedContact.id, contactDirective, contactDirectiveExpires || undefined);
+                          setSavingMemory(false);
+                          toast.success('Directive saved');
+                        }}
+                        className="mt-1.5 px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                      >{savingMemory ? 'Saving...' : 'Save Directive'}</button>
+                    </div>
                   </div>
-                </div>
-              )}
+                </SheetContent>
+              </Sheet>
 
               {/* In-chat search bar */}
               {chatSearchOpen && (
