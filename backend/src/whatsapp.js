@@ -2133,9 +2133,13 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
   }
 
   // Skip archived chats
-  const contactRow = db.prepare('SELECT is_archived FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+  const contactRow = db.prepare('SELECT is_archived, ai_enabled FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (contactRow?.is_archived) {
     debugLog(db, userId, 'skip_archived_chat', { contact: contactName || phone });
+    return;
+  }
+  if (contactRow?.ai_enabled === 0) {
+    debugLog(db, userId, 'skip_ai_disabled_for_contact', { contact: contactName || phone });
     return;
   }
 
