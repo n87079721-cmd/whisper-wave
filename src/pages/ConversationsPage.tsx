@@ -297,8 +297,21 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     setShowProfile(false);
     setEditingMsgId(null);
     setShowPersonaPicker(false);
+    setShowMemoryPanel(false);
     // Load contact's assigned prompt
     api.getContactPrompt(selectedContact.id).then(data => setContactPromptId(data.promptId)).catch(() => setContactPromptId(null));
+    // Load contact memory/directive/ai toggle
+    api.getContactMemory(selectedContact.id).then(data => {
+      setContactMemory(data.memory || '');
+      setContactDirective(data.active_directive || '');
+      setContactDirectiveExpires(data.directive_expires || '');
+      setContactAiEnabled(data.ai_enabled !== 0);
+    }).catch(() => {
+      setContactMemory('');
+      setContactDirective('');
+      setContactDirectiveExpires('');
+      setContactAiEnabled(true);
+    });
     refreshMessages(selectedContact.id, { forceScroll: true });
   }, [selectedContact?.id, refreshMessages]);
 
