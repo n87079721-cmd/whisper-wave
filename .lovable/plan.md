@@ -1,32 +1,55 @@
 
 
-## Fix Contacts: Load All WhatsApp Contacts + Add Save & Message Options
+# Per-Chat Memory, Directives, and AI Toggle
 
-### Problem
-- Contacts page loads only 200 contacts (API limit), but dashboard shows 1950+
-- Search only works within those 200 (client-side filtering)
-- No quick "message" action on individual contacts
-- Need ability to save new contacts manually
+## Features
 
-### Plan
+1. **Per-chat memory** — Persistent notes about a contact (unlimited length, clearable)
+2. **Per-chat directive** — Temporary behavior instruction with optional expiry (clearable)
+3. **Per-chat AI toggle** — Disable/enable AI auto-reply for specific contacts
 
-#### 1. Backend: Raise limit & improve search (`backend/src/api.js`)
-- Increase max limit from 1000 to 5000
-- Add `jid` column to the search filter so LID-only contacts can be found by name or JID
-- Return a `total` count alongside results so the frontend knows how many exist
+## Technical Plan
 
-#### 2. Frontend: Server-side search + load all (`src/pages/ContactsPage.tsx`)
-- Fetch contacts with `limit: 5000` to load all WhatsApp contacts at once
-- Move search to server-side with debounce (300ms) — calls `api.getContacts({ search, limit: 200 })` so it searches the full database
-- Show total count from API response (e.g. "1950 contacts synced")
-- Add a "Message" button on each contact row that opens the Send Message page or chat with that contact pre-filled
-- Keep the existing "Add" button for saving new contacts manually
+### 1. Database: Add columns to `contacts` (`backend/src/db.js`)
+Add migration in `ensureCurrentTables` for 4 new columns:
+- `memory TEXT` — persistent notes
+- `active_directive TEXT` — current behavior instruction
+- `directive_expires TEXT` — optional expiry datetime
+- `ai_enabled INTEGER DEFAULT 1` — per-chat AI toggle (1 = on, 0 = off)
 
-#### 3. Frontend API type update (`src/lib/api.ts`)
-- Update `getContacts` return type to handle the new `{ contacts, total }` response shape (or keep flat array if we just raise the limit)
+### 2. Backend API: New endpoints (`backend/src/api.js`)
+- `PUT /contacts/:id/memory` — save or clear memory (empty string = clear)
+- `PUT /contacts/:id/directive` — save or clear directive + optional expiry
+- `GET /contacts/:id/memory` — fetch memory + directive + ai_enabled
+- `PUT /contacts/:id/ai-toggle` — toggle AI on/off for this contact
 
-### Files to Change
-- **`backend/src/api.js`** — Raise max limit to 5000, add `jid` to search, optionally return total count
-- **`src/pages/ContactsPage.tsx`** — Load with higher limit, debounced server-side search, add Message button per contact
-- **`src/lib/api.ts`** — Minor adjustment if response shape changes
+### 3. AI Integration (`backend/src/whatsapp.js`)
+- In `handleAutoReply` (~line 2136), after the archived check, add: if `ai_enabled = 0` on the contact, skip with debug log `skip_ai_disabled_for_contact`
+- In `executeAutoReply` (~line 2207), after building the system prompt, append memory and active directive (if not expired) to the prompt
+
+### 4. Frontend API (`src/lib/api.ts`)
+Add methods:
+- `getContactMemory(id)` — returns `{ memory, active_directive, directive_expires, ai_enabled }`
+- `updateContactMemory(id, memory)`
+- `updateContactDirective(id, directive, expires?)`
+- `toggleContactAI(id, enabled)`
+
+### 5. Chat UI (`src/pages/ConversationsPage.tsx`)
+- Add a **brain icon** (🧠) button in the chat header next to the persona picker
+- Clicking it opens a modal/panel with three sections:
+  - **Memory** — large expandable textarea + Save + Clear buttons
+  - **Active Directive** — textarea + date picker for expiry + Save + Clear buttons
+  - **AI Toggle** — switch to enable/disable AI for this chat
+- Small indicator dot on brain icon when memory or directive is set
+- Load memory/directive/ai_enabled when selecting a contact
+- Toast confirmations on save/clear actions
+
+### Files Changed
+| File | Change |
+|------|--------|
+| `backend/src/db.js` | Add 4 columns via ALTER TABLE migration |
+| `backend/src/api.js` | Add 4 endpoints |
+| `backend/src/whatsapp.js` | Skip if AI disabled; inject memory + directive into prompt |
+| `src/lib/api.ts` | Add 4 API methods |
+| `src/pages/ConversationsPage.tsx` | Add brain icon + memory/directive/AI panel UI |
 
