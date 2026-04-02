@@ -189,7 +189,9 @@ const AdminPage = () => {
 
   const formatTime = (ts: string) => {
     try {
-      return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      // Backend stores UTC timestamps - ensure proper UTC parsing even without 'Z' suffix
+      const normalized = ts.endsWith('Z') || ts.includes('+') || ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z';
+      return new Date(normalized).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch {
       return ts;
     }
