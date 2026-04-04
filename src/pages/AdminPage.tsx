@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap, Ban, ChevronDown, ChevronUp } from 'lucide-react';
+import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap, Ban, ChevronDown, ChevronUp, Send } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -31,7 +31,10 @@ const ACTION_CONFIG: Record<string, { icon: typeof Bot; color: string; label: st
   generating_ai_reply: { icon: Bot, color: 'text-purple-400', label: 'Generating reply' },
   reply_scheduled: { icon: Clock, color: 'text-emerald-400', label: 'Reply scheduled' },
   typing_started: { icon: MessageSquare, color: 'text-cyan-400', label: 'Typing...' },
-  auto_reply_sent: { icon: CheckCircle2, color: 'text-green-400', label: 'Reply sent' },
+  sending_reply: { icon: Send, color: 'text-blue-300', label: 'Sending...' },
+  auto_reply_sent: { icon: CheckCircle2, color: 'text-green-400', label: 'Reply sent ✓' },
+  auto_reply_failed: { icon: AlertTriangle, color: 'text-red-500', label: 'Send failed ✗' },
+  reply_queued_for_retry: { icon: RefreshCw, color: 'text-yellow-500', label: 'Queued for retry' },
   skip_cooldown: { icon: XCircle, color: 'text-red-400', label: 'Skipped (cooldown)' },
   skip_reply_chance: { icon: XCircle, color: 'text-orange-400', label: 'Skipped (chance)' },
   skip_no_api_key: { icon: XCircle, color: 'text-red-500', label: 'Skipped (no API key)' },
