@@ -17,6 +17,12 @@ const LoginPage = forwardRef<HTMLDivElement>((_, ref) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password) return;
+    // Save backend URL if provided
+    if (backendUrl.trim()) {
+      localStorage.setItem('wa_api_url', backendUrl.trim().replace(/\/$/, ''));
+    } else {
+      localStorage.removeItem('wa_api_url');
+    }
     setLoading(true);
     try {
       if (isRegister) {
