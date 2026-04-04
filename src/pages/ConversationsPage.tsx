@@ -77,6 +77,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [contactDirective, setContactDirective] = useState('');
   const [contactDirectiveExpires, setContactDirectiveExpires] = useState('');
   const [contactAiEnabled, setContactAiEnabled] = useState(true);
+  const [contactAutoInitiate, setContactAutoInitiate] = useState(false);
   const [savingMemory, setSavingMemory] = useState(false);
   selectedContactRef.current = selectedContact;
 
