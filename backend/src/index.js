@@ -42,6 +42,23 @@ const server = app.listen(PORT, () => {
   console.log(`🚀 WA Controller running on port ${PORT}`);
   // Auto-reconnect saved sessions gradually so multiple restores do not fight each other
   setTimeout(() => autoReconnectAll(db), 3000);
+
+  // Start Telegram bot polling and conversation starters for all users
+  setTimeout(() => {
+    try {
+      const users = db.prepare('SELECT id, username FROM users').all();
+      for (const user of users) {
+        if (isTelegramConfigured(db, user.id)) {
+          const handlers = getTelegramCallbackHandlers(user.id, db);
+          startTelegramPolling(db, user.id, handlers);
+          console.log(`🤖 Telegram bot started for ${user.username}`);
+        }
+        startConversationStarterLoop(user.id, db);
+      }
+    } catch (err) {
+      console.error('Telegram/starter init error:', err?.message);
+    }
+  }, 5000);
 });
 
 let isShuttingDown = false;
