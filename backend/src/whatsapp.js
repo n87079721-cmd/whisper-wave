@@ -2209,6 +2209,22 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     return;
   }
 
+  // ── Sensitive topic detection ──
+  const sensitiveEnabled = getConfigValue(db, userId, 'sensitive_topic_detection', 'true');
+  if (sensitiveEnabled === 'true') {
+    const msgText = latestResolvedContent || latestOriginalMsg?.body || '';
+    try {
+      const sensitive = await detectSensitiveTopic(keyRow.value, msgText);
+      if (sensitive?.isSensitive) {
+        debugLog(db, userId, 'skip_sensitive_topic', { contact: contactName || phone, topic: sensitive.topic, reason: sensitive.reason });
+        await sendSensitiveAlert(db, userId, contactName || phone, sensitive.topic, msgText);
+        return;
+      }
+    } catch (err) {
+      console.error(`[${userId}] Sensitive topic check failed:`, err?.message);
+    }
+  }
+
   // Per-contact prompt: check if contact has an assigned persona
   let systemPrompt = '';
   let contactMemory = '';
