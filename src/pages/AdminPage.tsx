@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap, Ban, ChevronDown, ChevronUp } from 'lucide-react';
+import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap, Ban, ChevronDown, ChevronUp, Send } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
