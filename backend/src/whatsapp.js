@@ -6,7 +6,8 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
-import { generateReply, shouldReact, shouldAlsoReplyAfterReaction } from './ai.js';
+import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary } from './ai.js';
+import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured } from './telegram.js';
 import { transcribeAudio } from './elevenlabs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
