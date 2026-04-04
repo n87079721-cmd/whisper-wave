@@ -1,0 +1,212 @@
+/**
+ * Telegram Bot module — Reply Preview, Sensitive Topic Alerts
+ * Uses polling (getUpdates) to receive callback queries and text responses.
+ * No external Telegram library — raw HTTP via fetch.
+ */
+
+const TELEGRAM_API = 'https://api.telegram.org/bot';
+
+// Per-user bot state
+const botInstances = new Map(); // userId -> { polling, offset, awaitingCustom: Map<jid, true> }
+
+function getBotConfig(db, userId) {
+  const tokenRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'telegram_bot_token'").get(userId);
+  const chatIdRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'telegram_chat_id'").get(userId);
+  return {
+    token: tokenRow?.value || null,
+    chatId: chatIdRow?.value || null,
+  };
+}
+
+function getBotState(userId) {
+  if (!botInstances.has(userId)) {
+    botInstances.set(userId, { polling: false, offset: 0, awaitingCustom: new Map() });
+  }
+  return botInstances.get(userId);
+}
+
+async function telegramRequest(token, method, body = {}) {
+  const res = await fetch(`${TELEGRAM_API}${token}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!data.ok) {
+    console.error(`Telegram API error [${method}]:`, data.description);
+  }
+  return data;
+}
+
+/**
+ * Send a reply preview to the user's Telegram with Cancel/Rewrite/Custom buttons.
+ */
+export async function sendReplyPreview(db, userId, contactName, replyText, jid) {
+  const { token, chatId } = getBotConfig(db, userId);
+  if (!token || !chatId) return;
+
+  const text = `💬 Reply to *${escapeMarkdown(contactName)}*:\n\n${escapeMarkdown(replyText)}`;
+  const keyboard = {
+    inline_keyboard: [[
+      { text: '❌ Cancel', callback_data: `cancel_${jid}` },
+      { text: '🔄 Rewrite', callback_data: `rewrite_${jid}` },
+      { text: '✏️ Custom', callback_data: `custom_${jid}` },
+    ]],
+  };
+
+  try {
+    await telegramRequest(token, 'sendMessage', {
+      chat_id: chatId,
+      text,
+      parse_mode: 'Markdown',
+      reply_markup: keyboard,
+    });
+  } catch (err) {
+    console.error(`[${userId}] Failed to send Telegram preview:`, err?.message);
+  }
+}
+
+/**
+ * Send a sensitive topic alert to the user's Telegram.
+ */
+export async function sendSensitiveAlert(db, userId, contactName, topic, messagePreview) {
+  const { token, chatId } = getBotConfig(db, userId);
+  if (!token || !chatId) return;
+
+  const text = `🚨 *Sensitive Topic Detected*\n\nFrom: *${escapeMarkdown(contactName)}*\nTopic: ${escapeMarkdown(topic)}\n\nMessage: _${escapeMarkdown(messagePreview.slice(0, 200))}_\n\nAI reply has been paused. Please respond manually.`;
+
+  try {
+    await telegramRequest(token, 'sendMessage', {
+      chat_id: chatId,
+      text,
+      parse_mode: 'Markdown',
+    });
+  } catch (err) {
+    console.error(`[${userId}] Failed to send Telegram sensitive alert:`, err?.message);
+  }
+}
+
+/**
+ * Send a test message to verify the bot token and chat ID.
+ */
+export async function sendTestMessage(token, chatId) {
+  const result = await telegramRequest(token, 'sendMessage', {
+    chat_id: chatId,
+    text: '✅ Telegram bot connected successfully! You will receive AI reply previews and sensitive topic alerts here.',
+  });
+  return result.ok;
+}
+
+function escapeMarkdown(text) {
+  if (!text) return '';
+  return text.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+}
+
+/**
+ * Start polling for Telegram callback queries and messages for a user.
+ * Calls the provided handlers when actions are received.
+ */
+export function startTelegramPolling(db, userId, handlers) {
+  const { token, chatId } = getBotConfig(db, userId);
+  if (!token || !chatId) return;
+
+  const state = getBotState(userId);
+  if (state.polling) return; // Already polling
+  state.polling = true;
+
+  console.log(`🤖 [${userId}] Starting Telegram bot polling`);
+
+  const poll = async () => {
+    if (!state.polling) return;
+    try {
+      const data = await telegramRequest(token, 'getUpdates', {
+        offset: state.offset,
+        timeout: 30,
+        allowed_updates: ['callback_query', 'message'],
+      });
+
+      if (data.ok && data.result?.length > 0) {
+        for (const update of data.result) {
+          state.offset = update.update_id + 1;
+
+          // Handle callback queries (button presses)
+          if (update.callback_query) {
+            const cbData = update.callback_query.data;
+            const [action, ...jidParts] = cbData.split('_');
+            const jid = jidParts.join('_');
+
+            // Acknowledge the callback
+            await telegramRequest(token, 'answerCallbackQuery', {
+              callback_query_id: update.callback_query.id,
+            });
+
+            if (action === 'cancel' && handlers.onCancel) {
+              await handlers.onCancel(jid);
+              await telegramRequest(token, 'sendMessage', {
+                chat_id: chatId,
+                text: `✅ Reply cancelled.`,
+              });
+            } else if (action === 'rewrite' && handlers.onRewrite) {
+              await handlers.onRewrite(jid);
+              await telegramRequest(token, 'sendMessage', {
+                chat_id: chatId,
+                text: `🔄 Generating new reply...`,
+              });
+            } else if (action === 'custom') {
+              state.awaitingCustom.set(jid, true);
+              // Cancel the current reply while waiting for custom instructions
+              if (handlers.onCancel) await handlers.onCancel(jid);
+              await telegramRequest(token, 'sendMessage', {
+                chat_id: chatId,
+                text: `✏️ Tell me how you want to respond:`,
+              });
+            }
+          }
+
+          // Handle text messages (custom reply instructions)
+          if (update.message?.text && !update.message.text.startsWith('/')) {
+            // Check if we're awaiting custom instructions for any jid
+            const awaitingEntries = [...state.awaitingCustom.entries()];
+            if (awaitingEntries.length > 0 && handlers.onCustom) {
+              const [jid] = awaitingEntries[awaitingEntries.length - 1]; // Most recent
+              state.awaitingCustom.delete(jid);
+              await handlers.onCustom(jid, update.message.text);
+              await telegramRequest(token, 'sendMessage', {
+                chat_id: chatId,
+                text: `✅ Custom reply being generated...`,
+              });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`[${userId}] Telegram polling error:`, err?.message);
+    }
+
+    // Continue polling
+    if (state.polling) {
+      setTimeout(poll, 1000);
+    }
+  };
+
+  poll();
+}
+
+/**
+ * Stop polling for a user.
+ */
+export function stopTelegramPolling(userId) {
+  const state = botInstances.get(userId);
+  if (state) {
+    state.polling = false;
+    state.awaitingCustom.clear();
+  }
+}
+
+/**
+ * Check if Telegram bot is configured for a user.
+ */
+export function isTelegramConfigured(db, userId) {
+  const { token, chatId } = getBotConfig(db, userId);
+  return !!(token && chatId);
+}
