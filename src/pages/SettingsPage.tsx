@@ -88,7 +88,21 @@ const SettingsPage = () => {
       if (data.exists) setActiveTimezone(data.value || 'America/New_York');
     }).catch(() => {});
     api.getPrompts().then(setPrompts).catch(() => {});
-  }, []);
+    api.getConfig('telegram_bot_token').then(data => {
+      if (data.exists) setTelegramTokenExists(true);
+    }).catch(() => {});
+    api.getConfig('telegram_chat_id').then(data => {
+      if (data.exists) setTelegramChatIdExists(true);
+    }).catch(() => {});
+    api.getConfig('sensitive_topic_detection').then(data => {
+      setSensitiveTopicEnabled(data.exists ? data.value !== 'false' : true);
+    }).catch(() => {});
+    api.getConfig('conversation_starters').then(data => {
+      setConversationStartersEnabled(data.value === 'true');
+    }).catch(() => {});
+    api.getConfig('auto_summarize').then(data => {
+      setAutoSummarizeEnabled(data.exists ? data.value !== 'false' : true);
+    }).catch(() => {});
 
   const handleSaveKey = async () => {
     if (!elevenLabsKey) return;
