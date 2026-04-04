@@ -72,7 +72,7 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
         setPairingMode('qr');
       }
       setPairingError(message);
-      toast.error('Phone pairing failed — see details below');
+      toast.error(message);
     }
     finally { setRequestingCode(false); }
   };
