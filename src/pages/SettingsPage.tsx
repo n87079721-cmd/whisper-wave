@@ -37,6 +37,19 @@ const SettingsPage = () => {
   const [promptContent, setPromptContent] = useState('');
   const [savingNewPrompt, setSavingNewPrompt] = useState(false);
 
+  // Telegram Bot
+  const [telegramToken, setTelegramToken] = useState('');
+  const [telegramChatId, setTelegramChatId] = useState('');
+  const [telegramTokenExists, setTelegramTokenExists] = useState(false);
+  const [telegramChatIdExists, setTelegramChatIdExists] = useState(false);
+  const [savingTelegram, setSavingTelegram] = useState(false);
+  const [testingTelegram, setTestingTelegram] = useState(false);
+
+  // Feature toggles
+  const [sensitiveTopicEnabled, setSensitiveTopicEnabled] = useState(true);
+  const [conversationStartersEnabled, setConversationStartersEnabled] = useState(false);
+  const [autoSummarizeEnabled, setAutoSummarizeEnabled] = useState(true);
+
   // Availability settings
   const [replyChance, setReplyChance] = useState(70);
   const [responseSpeed, setResponseSpeed] = useState('normal');
