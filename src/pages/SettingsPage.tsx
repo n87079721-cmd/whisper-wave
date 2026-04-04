@@ -103,6 +103,7 @@ const SettingsPage = () => {
     api.getConfig('auto_summarize').then(data => {
       setAutoSummarizeEnabled(data.exists ? data.value !== 'false' : true);
     }).catch(() => {});
+  }, []);
 
   const handleSaveKey = async () => {
     if (!elevenLabsKey) return;
