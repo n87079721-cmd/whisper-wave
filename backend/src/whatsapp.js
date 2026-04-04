@@ -6,7 +6,8 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
-import { generateReply, shouldReact, shouldAlsoReplyAfterReaction } from './ai.js';
+import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary } from './ai.js';
+import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured } from './telegram.js';
 import { transcribeAudio } from './elevenlabs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -2208,6 +2209,22 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     return;
   }
 
+  // ── Sensitive topic detection ──
+  const sensitiveEnabled = getConfigValue(db, userId, 'sensitive_topic_detection', 'true');
+  if (sensitiveEnabled === 'true') {
+    const msgText = latestResolvedContent || latestOriginalMsg?.body || '';
+    try {
+      const sensitive = await detectSensitiveTopic(keyRow.value, msgText);
+      if (sensitive?.isSensitive) {
+        debugLog(db, userId, 'skip_sensitive_topic', { contact: contactName || phone, topic: sensitive.topic, reason: sensitive.reason });
+        await sendSensitiveAlert(db, userId, contactName || phone, sensitive.topic, msgText);
+        return;
+      }
+    } catch (err) {
+      console.error(`[${userId}] Sensitive topic check failed:`, err?.message);
+    }
+  }
+
   // Per-contact prompt: check if contact has an assigned persona
   let systemPrompt = '';
   let contactMemory = '';
@@ -2333,6 +2350,11 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   clearPendingAutoReply(userId, jid);
 
+  // ── Send Telegram preview (non-blocking) ──
+  if (isTelegramConfigured(db, userId)) {
+    sendReplyPreview(db, userId, contactName || phone, replyText, jid).catch(() => {});
+  }
+
   const pendingReply = {
     delayTimer: null,
     typingTimer: null,
@@ -2391,6 +2413,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             const postReplyDelay = Math.floor(Math.random() * 5000) + 3000;
             setTimeout(() => sendReaction(userId, jid, pendingReaction.msg, pendingReaction.emoji), postReplyDelay);
           }
+
+          // ── Conversation summary trigger ──
+          triggerConversationSummary(userId, db, contactId, jid, contactName || phone, keyRow.value).catch(() => {});
         } catch (err) {
           console.error('Failed to send auto-reply:', err?.message || err);
           debugLog(db, userId, 'auto_reply_failed', { contact: contactName || phone, error: err?.message || String(err), replyPreview: replyText.slice(0, 80) });
@@ -2955,4 +2980,282 @@ export async function markChatRead(userId, db, contactId) {
 
   db.prepare("UPDATE contacts SET unread_count = 0 WHERE id = ? AND user_id = ?").run(contactId, userId);
   return { success: true };
+}
+
+// ── Conversation Summary (auto-trigger after 20+ messages) ──
+
+async function triggerConversationSummary(userId, db, contactId, jid, contactName, apiKey) {
+  const autoSummarize = getConfigValue(db, userId, 'auto_summarize', 'true');
+  if (autoSummarize !== 'true') return;
+
+  try {
+    const contactRow = db.prepare('SELECT memory, last_summary_at FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+    const lastSummaryAt = contactRow?.last_summary_at ? new Date(contactRow.last_summary_at) : null;
+
+    // Count messages since last summary
+    let countQuery = 'SELECT COUNT(*) as c FROM messages WHERE contact_id = ? AND user_id = ?';
+    const params = [contactId, userId];
+    if (lastSummaryAt) {
+      countQuery += ' AND timestamp > ?';
+      params.push(lastSummaryAt.toISOString());
+    }
+    const count = db.prepare(countQuery).get(...params)?.c || 0;
+
+    if (count < 20) return;
+
+    // Get recent messages for summary
+    const messages = db.prepare(`
+      SELECT content, direction, type FROM messages
+      WHERE contact_id = ? AND user_id = ? AND content IS NOT NULL AND content != ''
+      ORDER BY timestamp DESC LIMIT 40
+    `).all(contactId, userId).reverse();
+
+    if (messages.length < 10) return;
+
+    const summary = await generateConversationSummary(apiKey, messages, contactName, contactRow?.memory || '');
+    if (!summary) return;
+
+    // Append summary to memory
+    const existingMemory = contactRow?.memory || '';
+    const newMemory = existingMemory
+      ? `${existingMemory}\n\n${summary}`
+      : summary;
+
+    db.prepare("UPDATE contacts SET memory = ?, last_summary_at = datetime('now') WHERE id = ? AND user_id = ?")
+      .run(newMemory, contactId, userId);
+
+    debugLog(db, userId, 'conversation_summarized', { contact: contactName, summaryPreview: summary.slice(0, 100) });
+  } catch (err) {
+    console.error(`[${userId}] Conversation summary failed:`, err?.message);
+  }
+}
+
+// ── Conversation Starter Loop ──
+
+const starterIntervals = new Map(); // userId -> timer
+
+export function startConversationStarterLoop(userId, db) {
+  stopConversationStarterLoop(userId);
+
+  const run = async () => {
+    try {
+      const enabled = getConfigValue(db, userId, 'conversation_starters', 'false');
+      if (enabled !== 'true') return;
+
+      const inst = getInstance(userId);
+      if (inst.connectionStatus !== 'connected') return;
+
+      if (!isWithinActiveHours(db, userId)) return;
+
+      const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
+      if (!keyRow?.value) return;
+
+      // Find contacts with auto_initiate enabled whose last message was 1+ days ago
+      const contacts = db.prepare(`
+        SELECT c.id, c.jid, c.name, c.phone, c.memory,
+          (SELECT MAX(m.timestamp) FROM messages m WHERE m.contact_id = c.id AND m.user_id = ?) as last_msg_time
+        FROM contacts c
+        WHERE c.user_id = ? AND c.auto_initiate = 1 AND c.is_group = 0 AND c.ai_enabled = 1
+      `).all(userId, userId);
+
+      let sentToday = 0;
+      const maxPerDay = 2;
+
+      for (const contact of contacts) {
+        if (sentToday >= maxPerDay) break;
+
+        // Check if last message was more than 24 hours ago
+        if (contact.last_msg_time) {
+          const lastMsg = new Date(contact.last_msg_time);
+          if (Date.now() - lastMsg.getTime() < 24 * 60 * 60 * 1000) continue;
+        }
+
+        const contactName = contact.name || contact.phone || 'Unknown';
+        try {
+          // Get last conversation summary from memory
+          const lastSummary = (contact.memory || '').split('\n\n').pop() || '';
+          const starter = await generateConversationStarter(keyRow.value, contactName, contact.memory, lastSummary);
+          if (!starter) continue;
+
+          // Send with a natural delay
+          const delay = Math.floor(Math.random() * 10000) + 5000;
+          await new Promise(r => setTimeout(r, delay));
+
+          if (inst.connectionStatus !== 'connected') break;
+
+          const sent = await sendTextMessage(userId, contact.jid, starter);
+          const msgId = sent?.id?._serialized || uuid();
+
+          db.prepare(`
+            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
+            VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent')
+          `).run(msgId, userId, contact.id, contact.jid, starter);
+
+          debugLog(db, userId, 'conversation_started', { contact: contactName, message: starter.slice(0, 80) });
+          emit(userId, 'message', { contactId: contact.id, msgId });
+          sentToday++;
+        } catch (err) {
+          console.error(`[${userId}] Conversation starter failed for ${contactName}:`, err?.message);
+        }
+      }
+    } catch (err) {
+      console.error(`[${userId}] Conversation starter loop error:`, err?.message);
+    }
+  };
+
+  // Run every 2 hours
+  const interval = setInterval(run, 2 * 60 * 60 * 1000);
+  starterIntervals.set(userId, interval);
+
+  // Also run once after 5 minutes
+  setTimeout(run, 5 * 60 * 1000);
+}
+
+export function stopConversationStarterLoop(userId) {
+  const timer = starterIntervals.get(userId);
+  if (timer) {
+    clearInterval(timer);
+    starterIntervals.delete(userId);
+  }
+}
+
+// ── Telegram callback handlers for reply preview ──
+
+export function getTelegramCallbackHandlers(userId, db) {
+  return {
+    onCancel: (jid) => {
+      clearPendingAutoReply(userId, jid);
+      debugLog(db, userId, 'telegram_cancel', { jid });
+    },
+    onRewrite: async (jid) => {
+      clearPendingAutoReply(userId, jid);
+      // Find the contact and re-trigger auto reply
+      const contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+      if (!contact) return;
+
+      const messages = db.prepare(`
+        SELECT content, direction, type, media_path FROM messages
+        WHERE contact_id = ? AND user_id = ? AND type IN ('text', 'image', 'voice') AND (content IS NOT NULL OR (type = 'image' AND media_path IS NOT NULL))
+        ORDER BY timestamp DESC LIMIT 50
+      `).all(contact.id, userId).reverse();
+
+      if (messages.length === 0) return;
+
+      const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
+      if (!keyRow?.value) return;
+
+      let systemPrompt = '';
+      try {
+        const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires FROM contacts WHERE id = ? AND user_id = ?").get(contact.id, userId);
+        if (contactRow?.prompt_id) {
+          const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
+          systemPrompt = promptRow?.content || '';
+        }
+        if (!systemPrompt) {
+          const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
+          systemPrompt = globalRow?.value || '';
+        }
+        if (contactRow?.memory) systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON:\n${contactRow.memory}`;
+        if (contactRow?.active_directive) {
+          const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
+          if (notExpired) systemPrompt += `\n\nCURRENT BEHAVIOR INSTRUCTION:\n${contactRow.active_directive}`;
+        }
+      } catch {}
+
+      const contactName = contact.name || contact.phone || 'Unknown';
+      const { generateReply } = await import('./ai.js');
+      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName);
+      replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+
+      // Re-schedule with telegram preview
+      executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
+    },
+    onCustom: async (jid, instructions) => {
+      clearPendingAutoReply(userId, jid);
+      const contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+      if (!contact) return;
+
+      const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
+      if (!keyRow?.value) return;
+
+      const messages = db.prepare(`
+        SELECT content, direction, type, media_path FROM messages
+        WHERE contact_id = ? AND user_id = ? AND type IN ('text', 'image', 'voice') AND (content IS NOT NULL OR (type = 'image' AND media_path IS NOT NULL))
+        ORDER BY timestamp DESC LIMIT 50
+      `).all(contact.id, userId).reverse();
+
+      const contactName = contact.name || contact.phone || 'Unknown';
+      const { generateReply } = await import('./ai.js');
+      let replyText = await generateReply(
+        keyRow.value,
+        messages,
+        `You are the phone owner. Generate a reply based on these instructions from the owner: "${instructions}". Keep the texting style casual and natural.`,
+        contactName,
+      );
+      replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+
+      executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
+    },
+  };
+}
+
+/**
+ * Schedule sending a pre-generated reply text (used by Telegram rewrite/custom).
+ */
+function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactName, replyText }) {
+  const inst = getInstance(userId);
+  const speed = getConfigValue(db, userId, 'ai_response_speed', 'normal');
+  const delay = calculateDelay(replyText.length, speed);
+  const typingDuration = Math.min(Math.max(Math.floor(replyText.length / 10) * 1000, 2000), 12000) + Math.floor(Math.random() * 2000);
+
+  // Send telegram preview
+  if (isTelegramConfigured(db, userId)) {
+    sendReplyPreview(db, userId, contactName || phone, replyText, jid).catch(() => {});
+  }
+
+  clearPendingAutoReply(userId, jid);
+
+  const pendingReply = {
+    delayTimer: null, typingTimer: null,
+    jid, contactId, contactName, phone, replyText,
+    scheduledAt: Date.now(),
+  };
+
+  pendingReply.delayTimer = setTimeout(async () => {
+    if (pendingReply.aborted) return;
+    try {
+      const chatId = fromJid(jid);
+      try {
+        const chat = await inst.client.getChatById(chatId);
+        await chat.sendStateTyping();
+      } catch {}
+
+      pendingReply.typingTimer = setTimeout(async () => {
+        if (pendingReply.aborted) return;
+        try {
+          const sent = await sendTextMessage(userId, jid, replyText);
+          const replyId = sent?.id?._serialized || uuid();
+          await clearTypingState(userId, jid);
+
+          db.prepare(`
+            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
+            VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent')
+          `).run(replyId, userId, contactId, jid, replyText);
+
+          debugLog(db, userId, 'telegram_custom_reply_sent', { contact: contactName || phone, replyPreview: replyText.slice(0, 80) });
+          inst.autoReplyCooldowns.set(jid, Date.now());
+          inst.pendingAutoReplies.delete(jid);
+          emit(userId, 'message', { contactId, msgId: replyId });
+        } catch (err) {
+          console.error('Telegram custom reply failed:', err?.message);
+          inst.pendingAutoReplies.delete(jid);
+          await clearTypingState(userId, jid);
+        }
+      }, typingDuration);
+    } catch (err) {
+      inst.pendingAutoReplies.delete(jid);
+    }
+  }, Math.max(delay - typingDuration, 1000));
+
+  inst.pendingAutoReplies.set(jid, pendingReply);
 }

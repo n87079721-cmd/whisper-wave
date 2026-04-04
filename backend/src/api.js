@@ -1,4 +1,5 @@
 import express from 'express';
+import { sendTestMessage } from './telegram.js';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -1937,6 +1938,36 @@ RULES:
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // ── Telegram Bot Test ────────────────────────────────
+  router.post('/telegram/test', async (req, res) => {
+    try {
+      const token = getConfig(db, req.userId, 'telegram_bot_token');
+      const chatId = getConfig(db, req.userId, 'telegram_chat_id');
+      if (!token || !chatId) return res.status(400).json({ error: 'Telegram bot token and chat ID required' });
+      const success = await sendTestMessage(token, chatId);
+      if (!success) return res.status(400).json({ error: 'Failed to send test message — check your token and chat ID' });
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Auto-initiate toggle ────────────────────────────
+  router.put('/contacts/:id/auto-initiate', (req, res) => {
+    try {
+      const { enabled } = req.body;
+      db.prepare('UPDATE contacts SET auto_initiate = ? WHERE id = ? AND user_id = ?').run(enabled ? 1 : 0, req.params.id, req.userId);
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.get('/contacts/:id/auto-initiate', (req, res) => {
+    try {
+      const row = db.prepare('SELECT auto_initiate FROM contacts WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
+      res.json({ autoInitiate: row?.auto_initiate === 1 });
+    } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   return router;

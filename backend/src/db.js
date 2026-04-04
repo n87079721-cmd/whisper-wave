@@ -168,6 +168,12 @@ function ensureCurrentTables(db) {
     if (!cols.has('ai_enabled')) {
       db.exec("ALTER TABLE contacts ADD COLUMN ai_enabled INTEGER DEFAULT 1");
     }
+    if (!cols.has('auto_initiate')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN auto_initiate INTEGER DEFAULT 0");
+    }
+    if (!cols.has('last_summary_at')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN last_summary_at TEXT");
+    }
   } catch {}
 
   try {

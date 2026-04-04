@@ -77,6 +77,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [contactDirective, setContactDirective] = useState('');
   const [contactDirectiveExpires, setContactDirectiveExpires] = useState('');
   const [contactAiEnabled, setContactAiEnabled] = useState(true);
+  const [contactAutoInitiate, setContactAutoInitiate] = useState(false);
   const [savingMemory, setSavingMemory] = useState(false);
   selectedContactRef.current = selectedContact;
 
@@ -313,6 +314,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setContactDirectiveExpires('');
       setContactAiEnabled(true);
     });
+    api.getContactAutoInitiate(selectedContact.id).then(data => {
+      setContactAutoInitiate(data.autoInitiate);
+    }).catch(() => setContactAutoInitiate(false));
     refreshMessages(selectedContact.id, { forceScroll: true });
   }, [selectedContact?.id, refreshMessages]);
 
@@ -1219,6 +1223,25 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                         className={`w-11 h-6 rounded-full transition-colors relative ${contactAiEnabled ? 'bg-primary' : 'bg-muted'}`}
                       >
                         <span className={`block w-5 h-5 rounded-full bg-background shadow-sm transition-transform ${contactAiEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                      </button>
+                    </div>
+
+                    {/* Auto-Start Conversations */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Auto-Start Conversations</p>
+                        <p className="text-xs text-muted-foreground">AI initiates chats when you haven't talked in a while</p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const newVal = !contactAutoInitiate;
+                          setContactAutoInitiate(newVal);
+                          await api.toggleContactAutoInitiate(selectedContact.id, newVal);
+                          toast.success(newVal ? 'Auto-start enabled' : 'Auto-start disabled');
+                        }}
+                        className={`w-11 h-6 rounded-full transition-colors relative ${contactAutoInitiate ? 'bg-primary' : 'bg-muted'}`}
+                      >
+                        <span className={`block w-5 h-5 rounded-full bg-background shadow-sm transition-transform ${contactAutoInitiate ? 'translate-x-5' : 'translate-x-0.5'}`} />
                       </button>
                     </div>
 

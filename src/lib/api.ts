@@ -610,6 +610,24 @@ export const api = {
       body: JSON.stringify({ enabled }),
     });
   },
+
+  // Telegram Bot
+  testTelegram() {
+    return requestJson<{ success: boolean }>('/api/telegram/test', { method: 'POST' });
+  },
+
+  // Auto-initiate conversations
+  getContactAutoInitiate(contactId: string) {
+    return requestJson<{ autoInitiate: boolean }>(`/api/contacts/${contactId}/auto-initiate`);
+  },
+
+  toggleContactAutoInitiate(contactId: string, enabled: boolean) {
+    return requestJson<{ success: boolean }>(`/api/contacts/${contactId}/auto-initiate`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+  },
 };
 
 // Types

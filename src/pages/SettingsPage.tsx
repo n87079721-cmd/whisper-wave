@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Dice5, Gauge, RefreshCw, MessageSquare, AlertTriangle, Database, Plus, Trash2, Pencil, X, BookOpen } from 'lucide-react';
+import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Dice5, Gauge, RefreshCw, MessageSquare, AlertTriangle, Database, Plus, Trash2, Pencil, X, BookOpen, Send, Bot, Sparkles, MessageCircle } from 'lucide-react';
 import { api, type SyncDiagnostics, type Prompt } from '@/lib/api';
 import { toast } from 'sonner';
 import { Slider } from '@/components/ui/slider';
@@ -36,6 +36,19 @@ const SettingsPage = () => {
   const [promptName, setPromptName] = useState('');
   const [promptContent, setPromptContent] = useState('');
   const [savingNewPrompt, setSavingNewPrompt] = useState(false);
+
+  // Telegram Bot
+  const [telegramToken, setTelegramToken] = useState('');
+  const [telegramChatId, setTelegramChatId] = useState('');
+  const [telegramTokenExists, setTelegramTokenExists] = useState(false);
+  const [telegramChatIdExists, setTelegramChatIdExists] = useState(false);
+  const [savingTelegram, setSavingTelegram] = useState(false);
+  const [testingTelegram, setTestingTelegram] = useState(false);
+
+  // Feature toggles
+  const [sensitiveTopicEnabled, setSensitiveTopicEnabled] = useState(true);
+  const [conversationStartersEnabled, setConversationStartersEnabled] = useState(false);
+  const [autoSummarizeEnabled, setAutoSummarizeEnabled] = useState(true);
 
   // Availability settings
   const [replyChance, setReplyChance] = useState(70);
@@ -75,6 +88,21 @@ const SettingsPage = () => {
       if (data.exists) setActiveTimezone(data.value || 'America/New_York');
     }).catch(() => {});
     api.getPrompts().then(setPrompts).catch(() => {});
+    api.getConfig('telegram_bot_token').then(data => {
+      if (data.exists) setTelegramTokenExists(true);
+    }).catch(() => {});
+    api.getConfig('telegram_chat_id').then(data => {
+      if (data.exists) setTelegramChatIdExists(true);
+    }).catch(() => {});
+    api.getConfig('sensitive_topic_detection').then(data => {
+      setSensitiveTopicEnabled(data.exists ? data.value !== 'false' : true);
+    }).catch(() => {});
+    api.getConfig('conversation_starters').then(data => {
+      setConversationStartersEnabled(data.value === 'true');
+    }).catch(() => {});
+    api.getConfig('auto_summarize').then(data => {
+      setAutoSummarizeEnabled(data.exists ? data.value !== 'false' : true);
+    }).catch(() => {});
   }, []);
 
   const handleSaveKey = async () => {
@@ -522,6 +550,125 @@ const SettingsPage = () => {
             </motion.div>
           </AnimatePresence>
         )}
+      </motion.div>
+
+      {/* Telegram Bot */}
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }} className="glass rounded-xl p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center"><Bot className="w-5 h-5 text-primary" /></div>
+          <div>
+            <h3 className="font-semibold text-foreground text-sm">Telegram Bot</h3>
+            <p className="text-xs text-muted-foreground">Get reply previews and sensitive topic alerts on Telegram</p>
+          </div>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Bot Token (from @BotFather)</label>
+            <input type="password" value={telegramToken} onChange={(e) => setTelegramToken(e.target.value)}
+              placeholder={telegramTokenExists ? '••••••••••••••••' : '123456:ABC-DEF...'}
+              className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Chat ID (your personal chat ID)</label>
+            <input type="text" value={telegramChatId} onChange={(e) => setTelegramChatId(e.target.value)}
+              placeholder={telegramChatIdExists ? '••••••••' : '123456789'}
+              className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50" />
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={async () => {
+              if (!telegramToken && !telegramChatId) return;
+              setSavingTelegram(true);
+              try {
+                if (telegramToken) await api.setConfig('telegram_bot_token', telegramToken);
+                if (telegramChatId) await api.setConfig('telegram_chat_id', telegramChatId);
+                if (telegramToken) { setTelegramTokenExists(true); setTelegramToken(''); }
+                if (telegramChatId) { setTelegramChatIdExists(true); setTelegramChatId(''); }
+                toast.success('Telegram bot config saved');
+              } catch { toast.error('Failed to save'); }
+              finally { setSavingTelegram(false); }
+            }} disabled={(!telegramToken && !telegramChatId) || savingTelegram}
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40">
+              {savingTelegram ? 'Saving...' : 'Save'}
+            </button>
+            <button onClick={async () => {
+              setTestingTelegram(true);
+              try {
+                await api.testTelegram();
+                toast.success('Test message sent! Check your Telegram.');
+              } catch (err: any) { toast.error(err?.message || 'Test failed'); }
+              finally { setTestingTelegram(false); }
+            }} disabled={testingTelegram || (!telegramTokenExists && !telegramToken)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-secondary text-foreground text-sm font-medium hover:bg-secondary/80 transition-colors disabled:opacity-40">
+              {testingTelegram ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              Test
+            </button>
+          </div>
+          {(telegramTokenExists && telegramChatIdExists) && (
+            <p className="text-xs text-primary">✓ Telegram bot configured</p>
+          )}
+        </div>
+      </motion.div>
+
+      {/* AI Intelligence Features */}
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }} className="glass rounded-xl p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center"><Sparkles className="w-5 h-5 text-primary" /></div>
+          <div>
+            <h3 className="font-semibold text-foreground text-sm">AI Intelligence</h3>
+            <p className="text-xs text-muted-foreground">Advanced AI features for smarter conversations</p>
+          </div>
+        </div>
+
+        {/* Sensitive Topic Detection */}
+        <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 border border-border">
+          <div>
+            <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+              <AlertTriangle className="w-4 h-4 text-warning" /> Sensitive Topic Detection
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">Pause AI on serious topics (death, medical, money) and alert you via Telegram</p>
+          </div>
+          <button onClick={async () => {
+            const newVal = !sensitiveTopicEnabled;
+            setSensitiveTopicEnabled(newVal);
+            await api.setConfig('sensitive_topic_detection', String(newVal));
+          }} className={`w-11 h-6 rounded-full transition-colors relative ${sensitiveTopicEnabled ? 'bg-primary' : 'bg-muted'}`}>
+            <span className={`block w-5 h-5 rounded-full bg-background shadow-sm transition-transform ${sensitiveTopicEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </button>
+        </div>
+
+        {/* Conversation Starters */}
+        <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 border border-border">
+          <div>
+            <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+              <MessageCircle className="w-4 h-4 text-primary" /> Conversation Starters
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">AI initiates natural conversations with close contacts (max 2/day)</p>
+          </div>
+          <button onClick={async () => {
+            const newVal = !conversationStartersEnabled;
+            setConversationStartersEnabled(newVal);
+            await api.setConfig('conversation_starters', String(newVal));
+          }} className={`w-11 h-6 rounded-full transition-colors relative ${conversationStartersEnabled ? 'bg-primary' : 'bg-muted'}`}>
+            <span className={`block w-5 h-5 rounded-full bg-background shadow-sm transition-transform ${conversationStartersEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </button>
+        </div>
+
+        {/* Auto-Summarize */}
+        <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 border border-border">
+          <div>
+            <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+              <Brain className="w-4 h-4 text-primary" /> Auto-Summarize Conversations
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">Automatically summarize long conversations and save to contact memory</p>
+          </div>
+          <button onClick={async () => {
+            const newVal = !autoSummarizeEnabled;
+            setAutoSummarizeEnabled(newVal);
+            await api.setConfig('auto_summarize', String(newVal));
+          }} className={`w-11 h-6 rounded-full transition-colors relative ${autoSummarizeEnabled ? 'bg-primary' : 'bg-muted'}`}>
+            <span className={`block w-5 h-5 rounded-full bg-background shadow-sm transition-transform ${autoSummarizeEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </button>
+        </div>
       </motion.div>
     </div>
   );
