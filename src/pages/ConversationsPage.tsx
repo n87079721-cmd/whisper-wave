@@ -1226,6 +1226,25 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       </button>
                     </div>
 
+                    {/* Auto-Start Conversations */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Auto-Start Conversations</p>
+                        <p className="text-xs text-muted-foreground">AI initiates chats when you haven't talked in a while</p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const newVal = !contactAutoInitiate;
+                          setContactAutoInitiate(newVal);
+                          await api.toggleContactAutoInitiate(selectedContact.id, newVal);
+                          toast.success(newVal ? 'Auto-start enabled' : 'Auto-start disabled');
+                        }}
+                        className={`w-11 h-6 rounded-full transition-colors relative ${contactAutoInitiate ? 'bg-primary' : 'bg-muted'}`}
+                      >
+                        <span className={`block w-5 h-5 rounded-full bg-background shadow-sm transition-transform ${contactAutoInitiate ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                      </button>
+                    </div>
+
                     {/* Memory */}
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
