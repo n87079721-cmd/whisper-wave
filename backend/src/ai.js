@@ -250,9 +250,9 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
           else if (nyHour >= 21 && nyHour < 24) timeLabel = 'late night';
           else if (nyHour >= 0 && nyHour < 2) {
             timeLabel = 'middle of the night';
-            sleepyPrompt = `\n\nIt's past midnight. You're tired and winding down. Keep replies VERY short (a few words). Occasionally (not every time) wonder why they're still awake — like "why u still up lol", "bro go to sleep", "you not sleeping?". Be naturally sleepy. Yawn. Use "😴", "💤" energy.`;
+            sleepyPrompt = `\n\nIt's past midnight. You're tired and winding down. Keep replies VERY short (a few words). Occasionally (not every time) wonder why they're still awake — like "why u still up lol", "go to sleep 😭", "you not sleeping?". Be naturally sleepy. Yawn. Use "😴", "💤" energy.`;
             if (nyHour === 1 && parseInt(now.toLocaleString('en-US', { timeZone: 'America/New_York', minute: 'numeric' })) >= 45) {
-              sleepyPrompt += `\n\nIt's almost 2am. Wrap up the conversation naturally and say goodnight. You're about to knock out. Make it feel real — like "aight im done bro gn 😴", "ok im actually passing out now lol night".`;
+              sleepyPrompt += `\n\nIt's almost 2am. Wrap up the conversation naturally and say goodnight. You're about to knock out. Make it feel real — like "aight im done gn 😴", "ok im actually passing out now lol night".`;
             }
           }
           else timeLabel = 'middle of the night';
