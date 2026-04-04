@@ -287,3 +287,162 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
 
   return reply;
 }
+
+/**
+ * Detect sensitive topics in an incoming message.
+ * Returns { isSensitive, topic, reason } or null if not sensitive.
+ */
+export async function detectSensitiveTopic(apiKey, messageText) {
+  if (!apiKey || !messageText || messageText.trim().length < 5) return null;
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a message safety classifier. Analyze the message and determine if it contains sensitive topics that require a human response instead of an AI auto-reply.
+
+Sensitive topics include:
+- Death, grief, or loss of a loved one
+- Medical emergencies or serious health issues
+- Requests for money or financial help
+- Legal threats or legal issues
+- Suicidal thoughts or self-harm
+- Abuse (physical, emotional, sexual)
+- Explicit sexual content directed at the user
+- Serious emotional distress or crisis
+
+NOT sensitive (normal conversation):
+- Casual complaining about work/life
+- Minor health issues (headache, cold)
+- Jokes about death/money
+- General frustration
+- Flirting or casual romantic messages
+
+Respond ONLY with a JSON object: {"isSensitive": boolean, "topic": "string or null", "reason": "brief explanation or null"}`,
+          },
+          { role: 'user', content: messageText.slice(0, 500) },
+        ],
+        max_tokens: 100,
+        temperature: 0.1,
+        response_format: { type: 'json_object' },
+      }),
+    });
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    const result = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+    if (result.isSensitive) return result;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Generate a natural conversation starter for a contact.
+ */
+export async function generateConversationStarter(apiKey, contactName, memory, lastConvoSummary) {
+  if (!apiKey) throw new Error('OpenAI API key not configured');
+
+  const now = new Date();
+  const hour = parseInt(now.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }));
+  let timeContext = 'afternoon';
+  if (hour >= 5 && hour < 12) timeContext = 'morning';
+  else if (hour >= 12 && hour < 17) timeContext = 'afternoon';
+  else if (hour >= 17 && hour < 21) timeContext = 'evening';
+  else timeContext = 'late night';
+
+  let contextInfo = '';
+  if (memory) contextInfo += `\nThings you know about them: ${memory}`;
+  if (lastConvoSummary) contextInfo += `\nLast conversation summary: ${lastConvoSummary}`;
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a real person starting a casual conversation with a friend on WhatsApp. It's ${timeContext}.
+
+Rules:
+- Be casual, natural, short (1 sentence max)
+- NEVER say "Hey how are you?" or generic greetings
+- Reference something from memory or last conversation if possible
+- Use casual texting style (lowercase, slang ok)
+- Examples: "yo did you end up going to that thing?", "i just saw something that reminded me of you lol", "what happened with that thing you were telling me about"
+- If no memory context, use time-based openers: "wyd", "you up?", "bored af rn"
+- NEVER use gendered words like bro, man, dude, sis, girl, king, queen
+${contextInfo}
+
+Respond with ONLY the message text, nothing else.`,
+        },
+        { role: 'user', content: `Start a conversation with ${contactName}` },
+      ],
+      max_tokens: 100,
+      temperature: 1.0,
+    }),
+  });
+
+  if (!response.ok) throw new Error('Failed to generate conversation starter');
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content?.trim() || null;
+}
+
+/**
+ * Generate a conversation summary and extract key facts.
+ */
+export async function generateConversationSummary(apiKey, messages, contactName, existingMemory) {
+  if (!apiKey) throw new Error('OpenAI API key not configured');
+
+  const convoText = messages.map(m => {
+    const speaker = m.direction === 'sent' ? 'You' : contactName;
+    return `${speaker}: ${m.content || '(media)'}`;
+  }).join('\n');
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `Summarize this WhatsApp conversation in 2-3 sentences. Focus on:
+- Key topics discussed
+- Important decisions or plans made
+- Notable personal info shared
+- Emotional tone
+
+${existingMemory ? `Existing memory (don't repeat what's already known):\n${existingMemory}\n` : ''}
+Format: Start with today's date in brackets, then the summary.
+Example: [Apr 4] Talked about their new job at Google. They're excited but nervous about the commute. Planning to grab dinner next Friday.
+
+Respond with ONLY the summary, nothing else.`,
+        },
+        { role: 'user', content: convoText.slice(-4000) },
+      ],
+      max_tokens: 200,
+      temperature: 0.3,
+    }),
+  });
+
+  if (!response.ok) throw new Error('Failed to generate summary');
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content?.trim() || null;
+}
