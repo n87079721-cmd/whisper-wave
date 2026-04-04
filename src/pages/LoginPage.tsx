@@ -122,7 +122,7 @@ const LoginPage = forwardRef<HTMLDivElement>((_, ref) => {
             {loading ? 'Please wait...' : isRegister ? 'Create Account' : 'Sign In'}
           </button>
 
-          <div className="text-center">
+          <div className="text-center space-y-2">
             <button
               type="button"
               onClick={() => setIsRegister(!isRegister)}
@@ -130,10 +130,26 @@ const LoginPage = forwardRef<HTMLDivElement>((_, ref) => {
             >
               {isRegister ? 'Already have an account? Sign in' : "Don't have an account? Register"}
             </button>
+            <button
+              type="button"
+              onClick={() => setShowBackendUrl(!showBackendUrl)}
+              className="block mx-auto text-xs text-muted-foreground hover:text-foreground"
+            >
+              {showBackendUrl ? 'Hide server settings' : '⚙️ Configure server URL'}
+            </button>
+            {showBackendUrl && (
+              <div className="pt-2">
+                <input
+                  type="url"
+                  value={backendUrl}
+                  onChange={(e) => setBackendUrl(e.target.value)}
+                  placeholder="https://your-server.com"
+                  className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">Leave empty if frontend is served by the backend</p>
+              </div>
+            )}
           </div>
-        </form>
-      </motion.div>
-    </div>
   );
 });
 
