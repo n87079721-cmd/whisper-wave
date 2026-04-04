@@ -150,6 +150,9 @@ const LoginPage = forwardRef<HTMLDivElement>((_, ref) => {
               </div>
             )}
           </div>
+        </form>
+      </motion.div>
+    </div>
   );
 });
 
