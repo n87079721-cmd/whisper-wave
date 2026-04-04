@@ -314,6 +314,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setContactDirectiveExpires('');
       setContactAiEnabled(true);
     });
+    api.getContactAutoInitiate(selectedContact.id).then(data => {
+      setContactAutoInitiate(data.autoInitiate);
+    }).catch(() => setContactAutoInitiate(false));
     refreshMessages(selectedContact.id, { forceScroll: true });
   }, [selectedContact?.id, refreshMessages]);
 
