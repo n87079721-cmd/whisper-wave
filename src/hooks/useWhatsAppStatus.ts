@@ -34,6 +34,7 @@ const defaultSyncState: SyncState = {
 export function useWhatsAppStatus() {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [qr, setQr] = useState<string | null>(null);
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [stats, setStats] = useState({ messagesSent: 0, voiceSent: 0, messagesReceived: 0, activeContacts: 0 });
   const [syncState, setSyncState] = useState<SyncState>(defaultSyncState);
 
@@ -41,6 +42,7 @@ export function useWhatsAppStatus() {
     try {
       const data = await api.getStatus();
       setStatus(data.status);
+      setPairingCode(data.pairingCode ?? null);
       if (data.stats) setStats(data.stats);
       if (data.syncState) setSyncState(data.syncState);
       if (data.status === 'qr_waiting') {
@@ -50,12 +52,14 @@ export function useWhatsAppStatus() {
         } catch {}
       } else if (data.status === 'connected') {
         setQr(null);
+        setPairingCode(null);
       }
     } catch (err: any) {
       console.error('[WA Status] refresh error:', err);
       if (err?.message?.includes('Backend URL not configured')) {
         setStatus('disconnected');
         setQr(null);
+        setPairingCode(null);
         return;
       }
       // Don't change status on network errors — keep showing last known state
@@ -76,6 +80,7 @@ export function useWhatsAppStatus() {
     if (!isBackendConfigured()) {
       setStatus('disconnected');
       setQr(null);
+      setPairingCode(null);
       return;
     }
 
@@ -87,12 +92,21 @@ export function useWhatsAppStatus() {
       es.addEventListener('status', (e) => {
         const data = JSON.parse(e.data);
         setStatus(data.status);
-        if (data.status === 'connected') setQr(null);
+        if (data.status === 'connected') {
+          setQr(null);
+          setPairingCode(null);
+        }
       });
       es.addEventListener('qr', (e) => {
         const data = JSON.parse(e.data);
         setQr(data.qr);
         setStatus('qr_waiting');
+      });
+      es.addEventListener('pairing_code', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          setPairingCode(data.code ?? null);
+        } catch {}
       });
       es.addEventListener('message', () => {
         refresh();
@@ -110,6 +124,7 @@ export function useWhatsAppStatus() {
         if (!isBackendConfigured()) {
           setStatus('disconnected');
           setQr(null);
+          setPairingCode(null);
           return;
         }
         // Don't set status to reconnecting on SSE errors — just retry polling
@@ -134,5 +149,5 @@ export function useWhatsAppStatus() {
     return () => clearInterval(interval);
   }, [status]);
 
-  return { status, qr, stats, syncState, refresh };
+  return { status, qr, pairingCode, stats, syncState, refresh };
 }

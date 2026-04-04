@@ -13,16 +13,18 @@ interface DashboardPageProps {
 
 const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: DashboardPageProps) => {
   const backendReady = isBackendConfigured();
-  const { status, qr, stats, syncState, refresh } = useWhatsAppStatus();
+  const { status, qr, pairingCode: livePairingCode, stats, syncState, refresh } = useWhatsAppStatus();
   const [connecting, setConnecting] = useState(false);
   const [pairingMode, setPairingMode] = useState<'qr' | 'phone'>('qr');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [pairingError, setPairingError] = useState<string | null>(null);
   const [requestingCode, setRequestingCode] = useState(false);
 
   const isConnected = status === 'connected';
   const isWaiting = status === 'qr_waiting';
   const isReconnecting = status === 'reconnecting';
+  const displayPairingCode = pairingCode || livePairingCode || null;
 
   const statCards = [
     { label: 'Messages Sent', value: stats.messagesSent.toLocaleString(), icon: MessageSquare },
@@ -39,24 +41,38 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
   };
 
   const handleDisconnect = async () => {
-    try { await api.disconnect(); toast.success('Disconnected — session saved'); refresh(); } catch {}
+    try {
+      await api.disconnect();
+      setPairingCode(null);
+      setPairingError(null);
+      toast.success('Disconnected — session saved');
+      refresh();
+    } catch {}
   };
 
   const handleRequestPairingCode = async () => {
     if (!phoneNumber.trim()) { toast.error('Enter phone number with country code'); return; }
     setRequestingCode(true);
     setPairingCode(null);
+    setPairingError(null);
     try {
       if (status === 'disconnected') { await api.reconnect(); await new Promise(r => setTimeout(r, 2000)); }
       const result = await api.pairPhone(phoneNumber.trim());
-      setPairingCode(result.code);
-      toast.success('Pairing code generated!');
+      const nextCode = String(result?.code || '').trim();
+      if (nextCode) {
+        setPairingCode(nextCode);
+        toast.success('Pairing code generated!');
+      } else {
+        await refresh();
+        toast.success('Pairing request sent — waiting for code...');
+      }
     } catch (err: any) {
-      const message = err?.message || 'Failed';
+      const message = err?.message || 'Phone pairing failed';
       if (message.includes('temporarily unavailable')) {
         setPairingMode('qr');
       }
-      toast.error(message);
+      setPairingError(message);
+      toast.error('Phone pairing failed — see details below');
     }
     finally { setRequestingCode(false); }
   };
@@ -112,13 +128,13 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
             <div className="mt-5">
               <div className="flex items-center justify-center gap-1 mb-4 bg-secondary rounded-lg p-1 max-w-xs mx-auto">
                 <button
-                  onClick={() => { setPairingMode('qr'); setPairingCode(null); }}
+                  onClick={() => { setPairingMode('qr'); setPairingCode(null); setPairingError(null); }}
                   className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                     pairingMode === 'qr' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
                   }`}
                 ><QrCode className="w-3.5 h-3.5" /> QR Code</button>
                 <button
-                  onClick={() => setPairingMode('phone')}
+                  onClick={() => { setPairingMode('phone'); setPairingError(null); }}
                   className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                     pairingMode === 'phone' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
                   }`}
@@ -139,12 +155,12 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
 
               {pairingMode === 'phone' && (
                 <div className="max-w-xs mx-auto space-y-3">
-                  {pairingCode ? (
+                  {displayPairingCode ? (
                     <div className="rounded-lg bg-accent border-2 border-primary/30 p-5 text-center animate-in fade-in slide-in-from-bottom-2 duration-300">
                       <p className="text-xs text-muted-foreground mb-2">Enter this code on your phone</p>
-                      <p className="text-3xl font-mono font-bold tracking-[0.35em] text-foreground">{pairingCode}</p>
-                      <p className="text-xs text-muted-foreground mt-3">WhatsApp → Linked Devices → Link a Device</p>
-                      <button onClick={() => { setPairingCode(null); }} className="mt-3 text-xs text-primary hover:text-primary/80 underline">Try again</button>
+                      <p className="text-3xl font-mono font-bold tracking-[0.35em] text-foreground">{displayPairingCode}</p>
+                      <p className="text-xs text-muted-foreground mt-3">WhatsApp → Linked Devices → Link with phone number</p>
+                      <button onClick={() => { setPairingCode(null); setPairingError(null); }} className="mt-3 text-xs text-primary hover:text-primary/80 underline">Try again</button>
                     </div>
                   ) : (
                     <>
@@ -153,6 +169,12 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
                         className="w-full px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-60 flex items-center justify-center gap-2">
                         {requestingCode ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...</> : 'Get Code'}
                       </button>
+                      {pairingError && (
+                        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3">
+                          <p className="text-xs font-medium text-destructive">Phone pairing failed</p>
+                          <p className="mt-1 text-xs text-foreground break-words">{pairingError}</p>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
