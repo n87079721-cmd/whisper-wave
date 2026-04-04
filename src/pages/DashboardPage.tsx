@@ -139,17 +139,21 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
 
               {pairingMode === 'phone' && (
                 <div className="max-w-xs mx-auto space-y-3">
-                  <Input placeholder="e.g. +1 705 202 4615" value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} className="text-sm" />
-                  <button onClick={handleRequestPairingCode} disabled={requestingCode || !phoneNumber.trim()}
-                    className="w-full px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-60 flex items-center justify-center gap-2">
-                    {requestingCode ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...</> : 'Get Code'}
-                  </button>
-                  {pairingCode && (
-                    <div className="rounded-lg bg-accent border border-primary/20 p-4 text-center">
-                      <p className="text-xs text-muted-foreground mb-2">Enter on your phone</p>
-                      <p className="text-2xl font-mono font-bold tracking-[0.3em] text-foreground">{pairingCode}</p>
-                      <p className="text-xs text-muted-foreground mt-2">WhatsApp → Linked Devices → Link with phone number</p>
+                  {pairingCode ? (
+                    <div className="rounded-lg bg-accent border-2 border-primary/30 p-5 text-center animate-in fade-in slide-in-from-bottom-2 duration-300">
+                      <p className="text-xs text-muted-foreground mb-2">Enter this code on your phone</p>
+                      <p className="text-3xl font-mono font-bold tracking-[0.35em] text-foreground">{pairingCode}</p>
+                      <p className="text-xs text-muted-foreground mt-3">WhatsApp → Linked Devices → Link a Device</p>
+                      <button onClick={() => { setPairingCode(null); }} className="mt-3 text-xs text-primary hover:text-primary/80 underline">Try again</button>
                     </div>
+                  ) : (
+                    <>
+                      <Input placeholder="e.g. +1 705 202 4615" value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} className="text-sm" />
+                      <button onClick={handleRequestPairingCode} disabled={requestingCode || !phoneNumber.trim()}
+                        className="w-full px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-60 flex items-center justify-center gap-2">
+                        {requestingCode ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...</> : 'Get Code'}
+                      </button>
+                    </>
                   )}
                 </div>
               )}
