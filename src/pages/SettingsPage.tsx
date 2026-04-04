@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Dice5, Gauge, RefreshCw, MessageSquare, AlertTriangle, Database, Plus, Trash2, Pencil, X, BookOpen } from 'lucide-react';
+import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Dice5, Gauge, RefreshCw, MessageSquare, AlertTriangle, Database, Plus, Trash2, Pencil, X, BookOpen, Send, Bot, Sparkles, MessageCircle } from 'lucide-react';
 import { api, type SyncDiagnostics, type Prompt } from '@/lib/api';
 import { toast } from 'sonner';
 import { Slider } from '@/components/ui/slider';
