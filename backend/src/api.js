@@ -1,4 +1,5 @@
 import express from 'express';
+import { sendTestMessage } from './telegram.js';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
