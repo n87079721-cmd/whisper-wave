@@ -6,6 +6,8 @@ import { fileURLToPath } from 'url';
 import { initDatabase } from './db.js';
 import { createApiRouter } from './api.js';
 import { autoReconnectAll, shutdownAllWhatsAppClients } from './whatsapp.js';
+import { startTelegramPolling, isTelegramConfigured } from './telegram.js';
+import { getTelegramCallbackHandlers, startConversationStarterLoop } from './whatsapp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
