@@ -11,10 +11,18 @@ const LoginPage = forwardRef<HTMLDivElement>((_, ref) => {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showBackendUrl, setShowBackendUrl] = useState(false);
+  const [backendUrl, setBackendUrl] = useState(() => localStorage.getItem('wa_api_url') || '');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password) return;
+    // Save backend URL if provided
+    if (backendUrl.trim()) {
+      localStorage.setItem('wa_api_url', backendUrl.trim().replace(/\/$/, ''));
+    } else {
+      localStorage.removeItem('wa_api_url');
+    }
     setLoading(true);
     try {
       if (isRegister) {
@@ -114,7 +122,7 @@ const LoginPage = forwardRef<HTMLDivElement>((_, ref) => {
             {loading ? 'Please wait...' : isRegister ? 'Create Account' : 'Sign In'}
           </button>
 
-          <div className="text-center">
+          <div className="text-center space-y-2">
             <button
               type="button"
               onClick={() => setIsRegister(!isRegister)}
@@ -122,6 +130,25 @@ const LoginPage = forwardRef<HTMLDivElement>((_, ref) => {
             >
               {isRegister ? 'Already have an account? Sign in' : "Don't have an account? Register"}
             </button>
+            <button
+              type="button"
+              onClick={() => setShowBackendUrl(!showBackendUrl)}
+              className="block mx-auto text-xs text-muted-foreground hover:text-foreground"
+            >
+              {showBackendUrl ? 'Hide server settings' : '⚙️ Configure server URL'}
+            </button>
+            {showBackendUrl && (
+              <div className="pt-2">
+                <input
+                  type="url"
+                  value={backendUrl}
+                  onChange={(e) => setBackendUrl(e.target.value)}
+                  placeholder="https://your-server.com"
+                  className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">Leave empty if frontend is served by the backend</p>
+              </div>
+            )}
           </div>
         </form>
       </motion.div>
