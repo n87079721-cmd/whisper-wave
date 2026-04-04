@@ -2350,6 +2350,11 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   clearPendingAutoReply(userId, jid);
 
+  // ── Send Telegram preview (non-blocking) ──
+  if (isTelegramConfigured(db, userId)) {
+    sendReplyPreview(db, userId, contactName || phone, replyText, jid).catch(() => {});
+  }
+
   const pendingReply = {
     delayTimer: null,
     typingTimer: null,
@@ -2408,6 +2413,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             const postReplyDelay = Math.floor(Math.random() * 5000) + 3000;
             setTimeout(() => sendReaction(userId, jid, pendingReaction.msg, pendingReaction.emoji), postReplyDelay);
           }
+
+          // ── Conversation summary trigger ──
+          triggerConversationSummary(userId, db, contactId, jid, contactName || phone, keyRow.value).catch(() => {});
         } catch (err) {
           console.error('Failed to send auto-reply:', err?.message || err);
           debugLog(db, userId, 'auto_reply_failed', { contact: contactName || phone, error: err?.message || String(err), replyPreview: replyText.slice(0, 80) });
