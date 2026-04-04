@@ -643,13 +643,15 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
     return code;
   } catch (err) {
     inst.pairingCode = null;
-    const message = String(err?.message || err || 'Unknown error');
-    if (/onCodeReceivedEvent is not a function/i.test(message)) {
-      // Second attempt: try waiting for the client to be in a better state
-      console.warn(`[${userId}] onCodeReceivedEvent still missing after injection, falling back to QR`);
-      throw new Error('Phone pairing failed — please use QR code instead. Open WhatsApp on your phone → Linked Devices → Link a Device.');
+    const rawMessage = String(err?.message || err || 'Unknown error').trim();
+    const shortGarbageError = rawMessage.length <= 3 || /^[a-z]$/i.test(rawMessage);
+
+    if (/onCodeReceivedEvent is not a function/i.test(rawMessage) || shortGarbageError) {
+      console.warn(`[${userId}] Phone pairing unavailable, falling back to QR. Raw error: ${rawMessage || 'empty'}`);
+      throw new Error('Phone pairing is temporarily unavailable for this session. Please use QR code instead, or disconnect and reconnect before trying phone pairing again.');
     }
-    throw new Error(`Pairing code request failed: ${message}`);
+
+    throw new Error(`Pairing code request failed: ${rawMessage}`);
   }
 }
 
