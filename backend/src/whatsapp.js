@@ -2378,6 +2378,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       pendingReply.typingTimer = setTimeout(async () => {
         if (pendingReply.aborted) return;
         try {
+          debugLog(db, userId, 'sending_reply', { contact: contactName || phone, replyPreview: replyText.slice(0, 80) });
           const shouldQuote = Math.random() < 0.2;
           const sent = await sendTextMessage(userId, jid, replyText, { quotedMessageId: shouldQuote ? latestMessageId : null });
           const replyId = sent?.id?._serialized || uuid();
