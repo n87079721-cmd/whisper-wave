@@ -271,8 +271,8 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
       },
       ...chatMessages,
     ],
-    max_tokens: 500,
-    temperature: 0.9,
+    max_tokens: mode === 'custom' ? 800 : 500,
+    temperature: mode === 'rewrite' ? 1.2 : mode === 'custom' ? 1.0 : 0.9,
   };
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
