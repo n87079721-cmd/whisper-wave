@@ -3209,14 +3209,11 @@ export function getTelegramCallbackHandlers(userId, db) {
         }
       } catch {}
 
-      // Append the owner's custom instructions as a priority override
-      systemPrompt += `\n\nIMPORTANT INSTRUCTION FROM YOU (the phone owner): ${instructions}\nFollow this instruction carefully. Write a reply that fulfills what you asked for. Be detailed and natural, not just a short throwaway line. If the instruction says to tell them about something, actually elaborate on it like a real person would.`;
-
       debugLog(db, userId, 'telegram_custom', { jid, contact: contact.name || contact.phone || jid, instructions: instructions.slice(0, 200) });
 
       const contactName = contact.name || contact.phone || 'Unknown';
       const { generateReply } = await import('./ai.js');
-      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName);
+      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'custom', customInstructions: instructions });
       replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
       executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
