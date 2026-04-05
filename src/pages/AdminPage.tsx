@@ -45,6 +45,8 @@ const ACTION_CONFIG: Record<string, { icon: typeof Bot; color: string; label: st
   skip_still_too_similar: { icon: XCircle, color: 'text-red-400', label: 'Skipped (similar)' },
   reaction_sent_instead: { icon: Zap, color: 'text-pink-400', label: 'Reacted instead' },
   batch_auto_reply_error: { icon: AlertTriangle, color: 'text-red-500', label: 'Error' },
+  telegram_cancel: { icon: XCircle, color: 'text-orange-500', label: 'Cancelled (Telegram)' },
+  telegram_custom_reply_sent: { icon: Send, color: 'text-green-400', label: 'Custom reply sent ✓' },
 };
 
 // Live countdown component for scheduled replies
