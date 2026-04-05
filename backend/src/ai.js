@@ -174,7 +174,7 @@ export function shouldAlsoReplyAfterReaction(unrepliedCount = 0, messageText = '
  * @param {string} contactName - Name of the contact for context
  * @returns {Promise<string>} The generated reply text
  */
-export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount } = {}) {
+export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
 
   let prompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
@@ -182,6 +182,16 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
   // Hint the AI to address all unreplied messages when there are multiple
   if (unrepliedCount && unrepliedCount > 1) {
     prompt += `\n\nIMPORTANT: The contact sent ${unrepliedCount} messages since your last reply. Make sure your response addresses all of them naturally in one go, don't ignore any.`;
+  }
+
+  // For rewrites: explicitly ask for a DIFFERENT reply
+  if (mode === 'rewrite') {
+    prompt += `\n\nIMPORTANT: The phone owner rejected your previous reply and wants a COMPLETELY DIFFERENT one. Don't write something similar. Change the topic, angle, tone, or approach entirely. Be creative and varied. If the previous attempt was short, try something longer. If it was a question, try a statement. Switch it up.`;
+  }
+
+  // For custom instructions: override the "keep it short" default
+  if (mode === 'custom' && customInstructions) {
+    prompt += `\n\n⚠️ PRIORITY OVERRIDE — FOLLOW THIS INSTRUCTION ABOVE ALL ELSE:\nThe phone owner gave you this specific instruction: "${customInstructions}"\n\nThis OVERRIDES the "keep it short" rule. If the instruction asks you to tell them about something, elaborate naturally like a real person would — share details, stories, specifics. Write 3-6 sentences if needed. Still sound like yourself (casual, real texting style) but actually fulfill what was asked. Do NOT give a generic one-liner.`;
   }
 
   let hasImages = false;
