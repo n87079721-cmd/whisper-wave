@@ -3132,6 +3132,8 @@ export function getTelegramCallbackHandlers(userId, db) {
       debugLog(db, userId, 'telegram_cancel', { jid, contact: contact?.name || contact?.phone || jid });
     },
     onRewrite: async (jid) => {
+      const rewriteContact = db.prepare('SELECT name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+      debugLog(db, userId, 'telegram_rewrite', { jid, contact: rewriteContact?.name || rewriteContact?.phone || jid });
       clearPendingAutoReply(userId, jid);
       // Find the contact and re-trigger auto reply
       const contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);

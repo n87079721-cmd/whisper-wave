@@ -46,6 +46,8 @@ const ACTION_CONFIG: Record<string, { icon: typeof Bot; color: string; label: st
   reaction_sent_instead: { icon: Zap, color: 'text-pink-400', label: 'Reacted instead' },
   batch_auto_reply_error: { icon: AlertTriangle, color: 'text-red-500', label: 'Error' },
   telegram_cancel: { icon: XCircle, color: 'text-orange-500', label: 'Cancelled (Telegram)' },
+  telegram_rewrite: { icon: RefreshCw, color: 'text-blue-400', label: 'Rewriting (Telegram)' },
+  telegram_custom: { icon: MessageSquare, color: 'text-purple-400', label: 'Custom instructions' },
   telegram_custom_reply_sent: { icon: Send, color: 'text-green-400', label: 'Custom reply sent ✓' },
 };
 
