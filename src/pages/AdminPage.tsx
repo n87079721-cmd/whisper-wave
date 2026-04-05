@@ -119,7 +119,7 @@ const AdminPage = () => {
 
   const [debugLogs, setDebugLogs] = useState<DebugEntry[]>([]);
   const [debugLoading, setDebugLoading] = useState(false);
-  const [debugAutoRefresh, setDebugAutoRefresh] = useState(false);
+  const [debugAutoRefresh, setDebugAutoRefresh] = useState(true);
   const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
 
   const fetchUsers = useCallback(async () => {
