@@ -3188,14 +3188,33 @@ export function getTelegramCallbackHandlers(userId, db) {
         ORDER BY timestamp DESC LIMIT 50
       `).all(contact.id, userId).reverse();
 
+      // Build the full system prompt (same as normal auto-reply) + custom instructions
+      let systemPrompt = '';
+      try {
+        const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires FROM contacts WHERE id = ? AND user_id = ?").get(contact.id, userId);
+        if (contactRow?.prompt_id) {
+          const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
+          systemPrompt = promptRow?.content || '';
+        }
+        if (!systemPrompt) {
+          const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
+          systemPrompt = globalRow?.value || '';
+        }
+        if (contactRow?.memory) systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON:\n${contactRow.memory}`;
+        if (contactRow?.active_directive) {
+          const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
+          if (notExpired) systemPrompt += `\n\nCURRENT BEHAVIOR INSTRUCTION:\n${contactRow.active_directive}`;
+        }
+      } catch {}
+
+      // Append the owner's custom instructions as a priority override
+      systemPrompt += `\n\nIMPORTANT INSTRUCTION FROM YOU (the phone owner): ${instructions}\nFollow this instruction carefully. Write a reply that fulfills what you asked for. Be detailed and natural, not just a short throwaway line. If the instruction says to tell them about something, actually elaborate on it like a real person would.`;
+
+      debugLog(db, userId, 'telegram_custom', { jid, contact: contact.name || contact.phone || jid, instructions: instructions.slice(0, 200) });
+
       const contactName = contact.name || contact.phone || 'Unknown';
       const { generateReply } = await import('./ai.js');
-      let replyText = await generateReply(
-        keyRow.value,
-        messages,
-        `You are the phone owner. Generate a reply based on these instructions from the owner: "${instructions}". Keep the texting style casual and natural.`,
-        contactName,
-      );
+      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName);
       replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
       executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
