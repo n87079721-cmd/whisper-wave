@@ -267,6 +267,11 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
         })(),
       },
       ...chatMessages,
+      // Inject custom instructions as a final "instruction" message so it takes absolute priority
+      ...(mode === 'custom' && customInstructions ? [{
+        role: 'system',
+        content: `⚠️ STOP — READ THIS BEFORE REPLYING. The phone owner is telling YOU (the AI) exactly what to say. This is NOT part of the conversation. This is a direct instruction from the person whose phone you are controlling.\n\nINSTRUCTION: "${customInstructions}"\n\nYou MUST follow this instruction precisely. Forget the persona character — you are the PHONE OWNER right now. Address what was asked: if they said "ask about X", you ASK about X. If they said "tell them about Y", you TELL them about Y. Write 3-6 natural sentences. Use casual texting style but actually do what was instructed. Do NOT stay in character if the character would ignore this instruction. The phone owner's instructions ALWAYS override everything else.`
+      }] : []),
     ],
     max_tokens: mode === 'custom' ? 800 : 500,
     temperature: mode === 'rewrite' ? 1.2 : mode === 'custom' ? 1.0 : 0.9,
