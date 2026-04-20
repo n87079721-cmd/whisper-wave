@@ -12,6 +12,7 @@ import {
   CircleDot,
   Phone,
   Shield,
+  LogOut,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -40,7 +41,7 @@ const allMoreItems: { id: Page; label: string; icon: React.ElementType; adminOnl
 
 const MobileBottomNav = ({ activePage, onPageChange, theme, onToggleTheme }: MobileBottomNavProps) => {
   const [showMore, setShowMore] = useState(false);
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const moreItems = allMoreItems.filter((item) => !item.adminOnly || user?.isAdmin);
   const isMoreActive = moreItems.some(i => i.id === activePage);
 
@@ -81,6 +82,21 @@ const MobileBottomNav = ({ activePage, onPageChange, theme, onToggleTheme }: Mob
               {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
               <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
             </button>
+            {user && (
+              <>
+                <div className="my-1 h-px bg-border" />
+                <div className="px-3 pt-1 pb-1.5 text-[11px] text-muted-foreground truncate">
+                  Signed in as {user.username}
+                </div>
+                <button
+                  onClick={() => { setShowMore(false); logout(); }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                >
+                  <LogOut className="w-5 h-5" />
+                  <span>Sign out</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
