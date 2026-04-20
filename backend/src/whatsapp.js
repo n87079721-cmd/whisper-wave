@@ -2254,11 +2254,12 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
     systemPrompt = globalRow?.value || '';
   }
-  if (contactMemory) {
-    systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON:\n${contactMemory}`;
-  }
   if (contactDirective) {
-    systemPrompt += `\n\nCURRENT BEHAVIOR INSTRUCTION:\n${contactDirective}`;
+    // Directive goes FIRST so it frames the entire persona, then again at the end for reinforcement.
+    systemPrompt = `🎯 ACTIVE BEHAVIOR DIRECTIVE (must be followed on EVERY reply, no exceptions):\n${contactDirective}\n\n────────\n\n${systemPrompt}\n\n────────\n\n🎯 REMINDER — ACTIVE DIRECTIVE STILL APPLIES: ${contactDirective}`;
+  }
+  if (contactMemory) {
+    systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON (always reference when relevant):\n${contactMemory}`;
   }
   const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
 
