@@ -2263,37 +2263,22 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     }
   }
 
-  // Per-contact prompt: check if contact has an assigned persona
-  let systemPrompt = '';
-  let contactMemory = '';
-  let contactDirective = '';
+  // Per-contact prompt — use the shared helper so persona, memory, and active
+  // directive are assembled identically across auto-reply, rewrite, and custom paths.
+  const systemPrompt = buildContactSystemPrompt(db, userId, contactId);
+  // Debug visibility: confirm what was actually included for this contact.
   try {
-    const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
-    if (contactRow?.prompt_id) {
-      const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
-      systemPrompt = promptRow?.content || '';
-    }
-    if (contactRow?.memory) {
-      contactMemory = contactRow.memory;
-    }
-    if (contactRow?.active_directive) {
-      const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
-      if (notExpired) {
-        contactDirective = contactRow.active_directive;
-      }
-    }
+    const probe = db.prepare("SELECT prompt_id, active_directive, directive_expires, LENGTH(memory) AS mem_len FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    const directiveActive = !!(probe?.active_directive && (!probe.directive_expires || new Date() < new Date(probe.directive_expires)));
+    debugLog(db, userId, 'prompt_assembled', {
+      contact: contactName || phone,
+      hasPersona: !!probe?.prompt_id,
+      hasDirective: directiveActive,
+      memoryChars: probe?.mem_len || 0,
+      promptChars: systemPrompt.length,
+    });
   } catch {}
-  if (!systemPrompt) {
-    const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
-    systemPrompt = globalRow?.value || '';
-  }
-  if (contactDirective) {
-    // Directive goes FIRST so it frames the entire persona, then again at the end for reinforcement.
-    systemPrompt = `🎯 ACTIVE BEHAVIOR DIRECTIVE (must be followed on EVERY reply, no exceptions):\n${contactDirective}\n\n────────\n\n${systemPrompt}\n\n────────\n\n🎯 REMINDER — ACTIVE DIRECTIVE STILL APPLIES: ${contactDirective}`;
-  }
-  if (contactMemory) {
-    systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON (always reference when relevant):\n${contactMemory}`;
-  }
+
   const baseReplyChance = Math.max(0, Math.min(100, parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10)));
 
   // ── Ramp the reply chance based on how many unanswered messages we have ──
