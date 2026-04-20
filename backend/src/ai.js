@@ -261,8 +261,8 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
         role: 'system',
         content: (() => {
           const now = new Date();
-          const nyTime = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
-          const nyHour = parseInt(now.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }));
+          const nyTime = now.toLocaleString('en-US', { timeZone: tz });
+          const nyHour = parseInt(now.toLocaleString('en-US', { timeZone: tz, hour: 'numeric', hour12: false }));
           let timeLabel;
           let sleepyPrompt = '';
           if (nyHour >= 5 && nyHour < 9) timeLabel = 'early morning';
@@ -274,7 +274,7 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
           else if (nyHour >= 0 && nyHour < 2) {
             timeLabel = 'middle of the night';
             sleepyPrompt = `\n\nIt's past midnight. You're tired and winding down. Keep replies VERY short (a few words). Occasionally (not every time) wonder why they're still awake — like "why u still up lol", "go to sleep 😭", "you not sleeping?". Be naturally sleepy. Yawn. Use "😴", "💤" energy.`;
-            if (nyHour === 1 && parseInt(now.toLocaleString('en-US', { timeZone: 'America/New_York', minute: 'numeric' })) >= 45) {
+            if (nyHour === 1 && parseInt(now.toLocaleString('en-US', { timeZone: tz, minute: 'numeric' })) >= 45) {
               sleepyPrompt += `\n\nIt's almost 2am. Wrap up the conversation naturally and say goodnight. You're about to knock out. Make it feel real — like "aight im done gn 😴", "ok im actually passing out now lol night".`;
             }
           }
@@ -282,12 +282,12 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
           // Build an explicit, unambiguous "today" reference the model can reason about
           // when persona text mentions tour dates, deadlines, plans, etc.
           const todayFull = now.toLocaleDateString('en-US', {
-            timeZone: 'America/New_York',
+            timeZone: tz,
             weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
           });
-          const todayISO = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
-          const clockTime = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true });
-          const dateBlock = `\n\n📅 TODAY (use this for ANY date/time reasoning, including dates mentioned in the persona):\n• Today is ${todayFull}\n• ISO date: ${todayISO}\n• Local time now: ${clockTime} (${timeLabel}, America/New_York)\n• When the persona mentions a date (tour dates, gigs, trips, deadlines, birthdays), compare it to today's date above to know if it's in the past, today, or future. Do the math before replying.`;
+          const todayISO = now.toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
+          const clockTime = now.toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true });
+          const dateBlock = `\n\n📅 TODAY (use this for ANY date/time reasoning, including dates mentioned in the persona):\n• Today is ${todayFull}\n• ISO date: ${todayISO}\n• Local time now: ${clockTime} (${timeLabel}, ${tz})\n• When the persona mentions a date (tour dates, gigs, trips, deadlines, birthdays), compare it to today's date above to know if it's in the past, today, or future. Do the math before replying.`;
           // When a custom persona is set, keep only minimal context (time + photo handling) so we don't override the persona's voice.
           // When using the default prompt, append the full generic ruleset.
           const photoNote = `\n\nIf someone sends you a photo, react naturally like a real person would. Comment on what you see, ask about it, or react with genuine emotion. Don't describe the image formally or say "I can see an image of..." — just respond like you're looking at a friend's pic on your phone.`;
