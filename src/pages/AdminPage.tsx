@@ -130,6 +130,8 @@ const AdminPage = () => {
   const [debugLoading, setDebugLoading] = useState(false);
   const [debugAutoRefresh, setDebugAutoRefresh] = useState(true);
   const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
+  // Admin-only filter: which account's logs to view AND clear. '' = all accounts.
+  const [debugUserFilter, setDebugUserFilter] = useState<string>('');
 
   const fetchUsers = useCallback(async () => {
     if (!isAdmin) { setLoading(false); return; }
@@ -147,7 +149,7 @@ const AdminPage = () => {
     setDebugLoading(true);
     try {
       const data = (isAdmin
-        ? await api.adminGetDebugLogs(200)
+        ? await api.adminGetDebugLogs(200, debugUserFilter || undefined)
         : await api.getMyDebugLogs(200)) as DebugEntry[];
       setDebugLogs(data);
     } catch (err: any) {
@@ -155,12 +157,17 @@ const AdminPage = () => {
     } finally {
       setDebugLoading(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, debugUserFilter]);
 
   const clearDebugLogs = async () => {
     try {
       if (isAdmin) {
-        await api.adminClearDebugLogs();
+        const scope = debugUserFilter || 'all';
+        if (scope === 'all') {
+          const ok = window.confirm('Clear debug logs for ALL accounts? This cannot be undone. Tip: pick a specific account from the dropdown to scope this delete.');
+          if (!ok) return;
+        }
+        await api.adminClearDebugLogs(scope);
       } else {
         await api.clearMyDebugLogs();
       }
