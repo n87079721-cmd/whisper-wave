@@ -417,6 +417,21 @@ const AdminPage = () => {
           <span className="text-sm font-medium text-foreground flex-1">
             AI Debug Log ({debugLogs.length})
           </span>
+          {isAdmin && (
+            <select
+              value={debugUserFilter}
+              onChange={(e) => setDebugUserFilter(e.target.value)}
+              className="px-2 py-1 rounded-md text-[11px] bg-secondary text-foreground border border-border focus:outline-none focus:ring-1 focus:ring-primary max-w-[140px]"
+              title="Filter logs by account (also scopes the clear button)"
+            >
+              <option value="">All accounts</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.display_name || u.username}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             onClick={() => setDebugAutoRefresh(prev => !prev)}
             className={`px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${
@@ -435,7 +450,7 @@ const AdminPage = () => {
           <button
             onClick={clearDebugLogs}
             className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-            title="Clear all debug logs"
+            title={isAdmin ? (debugUserFilter ? 'Clear logs for selected account' : 'Clear logs for ALL accounts') : 'Clear my debug logs'}
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
