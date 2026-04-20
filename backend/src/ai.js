@@ -452,7 +452,7 @@ Respond with ONLY the message text, nothing else.`,
 /**
  * Generate a conversation summary and extract key facts.
  */
-export async function generateConversationSummary(apiKey, messages, contactName, existingMemory) {
+export async function generateConversationSummary(apiKey, messages, contactName, existingMemory, { timezone } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
 
   const convoText = messages.map(m => {
@@ -460,9 +460,10 @@ export async function generateConversationSummary(apiKey, messages, contactName,
     return `${speaker}: ${m.content || '(media)'}`;
   }).join('\n');
 
-  // Build today's date label in the phone owner's local TZ (server TZ is fine — same wall clock as logs)
+  // Build today's date label in the phone owner's configured timezone
+  const tz = timezone || 'America/New_York';
   const today = new Date();
-  const dateLabel = today.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const dateLabel = today.toLocaleDateString('en-US', { timeZone: tz, month: 'short', day: 'numeric', year: 'numeric' });
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
