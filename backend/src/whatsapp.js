@@ -1973,6 +1973,39 @@ function getConfigValue(db, userId, key, fallback) {
   return row?.value ?? fallback;
 }
 
+/**
+ * Build the full system prompt for a contact: persona (or global) + memory + active directive.
+ * Directive is wrapped at the top AND repeated at the bottom so the model can't drift away from it.
+ */
+function buildContactSystemPrompt(db, userId, contactId) {
+  let systemPrompt = '';
+  let memory = '';
+  let directive = '';
+  try {
+    const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    if (contactRow?.prompt_id) {
+      const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
+      systemPrompt = promptRow?.content || '';
+    }
+    if (contactRow?.memory) memory = contactRow.memory;
+    if (contactRow?.active_directive) {
+      const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
+      if (notExpired) directive = contactRow.active_directive;
+    }
+  } catch {}
+  if (!systemPrompt) {
+    const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
+    systemPrompt = globalRow?.value || '';
+  }
+  if (directive) {
+    systemPrompt = `🎯 ACTIVE BEHAVIOR DIRECTIVE (must be followed on EVERY reply, no exceptions):\n${directive}\n\n────────\n\n${systemPrompt}\n\n────────\n\n🎯 REMINDER — ACTIVE DIRECTIVE STILL APPLIES: ${directive}`;
+  }
+  if (memory) {
+    systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON (always reference when relevant):\n${memory}`;
+  }
+  return systemPrompt;
+}
+
 function isWithinActiveHours(db, userId) {
   const start = getConfigValue(db, userId, 'ai_active_hours_start', '09:00');
   const end = getConfigValue(db, userId, 'ai_active_hours_end', '02:00');
