@@ -13,6 +13,7 @@ import {
   Phone,
   Shield,
 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 type Page = 'dashboard' | 'contacts' | 'conversations' | 'voice' | 'settings' | 'status' | 'calls' | 'admin';
 
@@ -30,15 +31,17 @@ const primaryItems: { id: Page; label: string; icon: React.ElementType }[] = [
   { id: 'contacts', label: 'Contacts', icon: Users },
 ];
 
-const moreItems: { id: Page; label: string; icon: React.ElementType }[] = [
+const allMoreItems: { id: Page; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
   { id: 'calls', label: 'Calls', icon: Phone },
   { id: 'voice', label: 'Voice Studio', icon: Mic },
   { id: 'settings', label: 'Settings', icon: Settings },
-  { id: 'admin', label: 'Admin', icon: Shield },
+  { id: 'admin', label: 'Admin', icon: Shield, adminOnly: true },
 ];
 
 const MobileBottomNav = ({ activePage, onPageChange, theme, onToggleTheme }: MobileBottomNavProps) => {
   const [showMore, setShowMore] = useState(false);
+  const { user } = useAuth();
+  const moreItems = allMoreItems.filter((item) => !item.adminOnly || user?.isAdmin);
   const isMoreActive = moreItems.some(i => i.id === activePage);
 
   return (
