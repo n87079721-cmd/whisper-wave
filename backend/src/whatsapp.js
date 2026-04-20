@@ -3154,24 +3154,7 @@ export function getTelegramCallbackHandlers(userId, db) {
       const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
       if (!keyRow?.value) return;
 
-      let systemPrompt = '';
-      try {
-        const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires FROM contacts WHERE id = ? AND user_id = ?").get(contact.id, userId);
-        if (contactRow?.prompt_id) {
-          const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
-          systemPrompt = promptRow?.content || '';
-        }
-        if (!systemPrompt) {
-          const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
-          systemPrompt = globalRow?.value || '';
-        }
-        if (contactRow?.memory) systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON:\n${contactRow.memory}`;
-        if (contactRow?.active_directive) {
-          const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
-          if (notExpired) systemPrompt += `\n\nCURRENT BEHAVIOR INSTRUCTION:\n${contactRow.active_directive}`;
-        }
-      } catch {}
-
+      const systemPrompt = buildContactSystemPrompt(db, userId, contact.id);
       const contactName = contact.name || contact.phone || 'Unknown';
       const { generateReply } = await import('./ai.js');
       let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'rewrite' });
@@ -3195,23 +3178,7 @@ export function getTelegramCallbackHandlers(userId, db) {
       `).all(contact.id, userId).reverse();
 
       // Build the full system prompt (same as normal auto-reply) + custom instructions
-      let systemPrompt = '';
-      try {
-        const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires FROM contacts WHERE id = ? AND user_id = ?").get(contact.id, userId);
-        if (contactRow?.prompt_id) {
-          const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
-          systemPrompt = promptRow?.content || '';
-        }
-        if (!systemPrompt) {
-          const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
-          systemPrompt = globalRow?.value || '';
-        }
-        if (contactRow?.memory) systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON:\n${contactRow.memory}`;
-        if (contactRow?.active_directive) {
-          const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
-          if (notExpired) systemPrompt += `\n\nCURRENT BEHAVIOR INSTRUCTION:\n${contactRow.active_directive}`;
-        }
-      } catch {}
+      const systemPrompt = buildContactSystemPrompt(db, userId, contact.id);
 
       debugLog(db, userId, 'telegram_custom', { jid, contact: contact.name || contact.phone || jid, instructions: instructions.slice(0, 200) });
 
