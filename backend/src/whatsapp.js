@@ -3070,7 +3070,7 @@ async function triggerConversationSummary(userId, db, contactId, jid, contactNam
 
     if (messages.length < 10) return;
 
-    const summary = await generateConversationSummary(apiKey, messages, contactName, contactRow?.memory || '');
+    const summary = await generateConversationSummary(apiKey, messages, contactName, contactRow?.memory || '', { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
     if (!summary) return;
 
     // Append summary to memory
