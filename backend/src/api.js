@@ -49,7 +49,10 @@ export function createApiRouter(db) {
   });
 
   router.get('/auth/me', auth, (req, res) => {
+    // Silently refresh the token on every check-in so active sessions never expire
+    const refreshedToken = createToken(req.userId);
     res.json({
+      token: refreshedToken,
       user: {
         id: req.user.id,
         username: req.user.username,
