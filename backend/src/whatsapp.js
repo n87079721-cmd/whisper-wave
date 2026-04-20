@@ -2006,6 +2006,24 @@ function buildContactSystemPrompt(db, userId, contactId) {
   return systemPrompt;
 }
 
+/**
+ * Look up which persona (from the prompt library) is currently driving a contact's
+ * AI replies. Returns the persona name, or 'Default' when no library prompt is set
+ * (i.e. the global system prompt is in use). Returns null only on DB errors.
+ */
+function getActivePersonaName(db, userId, contactId) {
+  try {
+    const row = db.prepare("SELECT prompt_id FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    if (row?.prompt_id) {
+      const p = db.prepare("SELECT name FROM prompts WHERE id = ? AND user_id = ?").get(row.prompt_id, userId);
+      return p?.name || 'Default';
+    }
+    return 'Default';
+  } catch {
+    return null;
+  }
+}
+
 function isWithinActiveHours(db, userId) {
   const start = getConfigValue(db, userId, 'ai_active_hours_start', '09:00');
   const end = getConfigValue(db, userId, 'ai_active_hours_end', '02:00');
