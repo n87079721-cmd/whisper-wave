@@ -435,6 +435,10 @@ export async function generateConversationSummary(apiKey, messages, contactName,
     return `${speaker}: ${m.content || '(media)'}`;
   }).join('\n');
 
+  // Build today's date label in the phone owner's local TZ (server TZ is fine — same wall clock as logs)
+  const today = new Date();
+  const dateLabel = today.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -453,8 +457,9 @@ export async function generateConversationSummary(apiKey, messages, contactName,
 - Emotional tone
 
 ${existingMemory ? `Existing memory (don't repeat what's already known):\n${existingMemory}\n` : ''}
-Format: Start with today's date in brackets, then the summary.
-Example: [Apr 4] Talked about their new job at Google. They're excited but nervous about the commute. Planning to grab dinner next Friday.
+Format: Start with EXACTLY this date in brackets (do not change it, do not guess): [${dateLabel}]
+Then write the summary right after.
+Example: [${dateLabel}] Talked about their new job at Google. They're excited but nervous about the commute. Planning to grab dinner next Friday.
 
 Respond with ONLY the summary, nothing else.`,
         },
