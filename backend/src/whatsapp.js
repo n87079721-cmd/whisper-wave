@@ -2252,7 +2252,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   if (sensitiveEnabled === 'true') {
     const msgText = latestResolvedContent || latestOriginalMsg?.body || '';
     try {
-      const sensitive = await detectSensitiveTopic(keyRow.value, msgText);
+      const sensitive = await detectSensitiveTopic(keyRow.value, msgText, { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
       if (sensitive?.isSensitive) {
         debugLog(db, userId, 'skip_sensitive_topic', { contact: contactName || phone, topic: sensitive.topic, reason: sensitive.reason });
         await sendSensitiveAlert(db, userId, contactName || phone, sensitive.topic, msgText);
