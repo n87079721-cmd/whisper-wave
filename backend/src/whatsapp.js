@@ -2294,11 +2294,40 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   if (contactMemory) {
     systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON (always reference when relevant):\n${contactMemory}`;
   }
-  const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
+  const baseReplyChance = Math.max(0, Math.min(100, parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10)));
+
+  // ── Ramp the reply chance based on how many unanswered messages we have ──
+  // Each unanswered incoming message past the first nudges the effective chance
+  // up toward 100% — so if someone keeps sending and we keep skipping, we WILL
+  // eventually reply. This avoids the "feels too strict / ignored" problem.
+  // 1st msg = base, 2nd = +halfway-to-100, 3rd ≈ +75% of remainder, ... → 100%.
+  let unrepliedSoFar = 0;
+  try {
+    const recent = db.prepare(`
+      SELECT direction FROM messages
+      WHERE contact_id = ? AND user_id = ? AND type IN ('text','image','voice','sticker','video','audio','document')
+      ORDER BY timestamp DESC LIMIT 30
+    `).all(contactId, userId);
+    for (const r of recent) {
+      if (r.direction === 'sent') break;
+      if (r.direction === 'received') unrepliedSoFar++;
+    }
+  } catch {}
+  // Ramp: each extra unanswered message closes half the gap to 100.
+  // unrepliedSoFar=1 → base, =2 → base + (100-base)*0.5, =3 → +0.75 of gap, =4 → +0.875, ...
+  const extras = Math.max(0, unrepliedSoFar - 1);
+  const gapClosed = 1 - Math.pow(0.5, extras);
+  const effectiveChance = Math.min(100, baseReplyChance + (100 - baseReplyChance) * gapClosed);
 
   const roll = Math.random() * 100;
-  if (!forceReply && roll > replyChance) {
-    debugLog(db, userId, 'skip_reply_chance', { contact: contactName || phone, chance: replyChance + '%', rolled: Math.round(roll) });
+  if (!forceReply && roll > effectiveChance) {
+    debugLog(db, userId, 'skip_reply_chance', {
+      contact: contactName || phone,
+      chance: Math.round(effectiveChance) + '%',
+      baseChance: baseReplyChance + '%',
+      unreplied: unrepliedSoFar,
+      rolled: Math.round(roll),
+    });
     const msgText = latestResolvedContent || latestOriginalMsg?.body || '';
     const reactionEmoji = await shouldReact(keyRow.value, msgText);
     if (reactionEmoji && latestOriginalMsg) {
