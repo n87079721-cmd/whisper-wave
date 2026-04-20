@@ -179,7 +179,15 @@ export function shouldAlsoReplyAfterReaction(unrepliedCount = 0, messageText = '
 export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions, previousReply } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
 
-  let prompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  // Detect whether the caller passed an explicit per-contact persona/directive bundle.
+  // If so, that bundle is sacred — we wrap it with a high-priority preface and DO NOT
+  // dilute it with the generic "real person texting" block below.
+  const hasCustomPersona = !!(systemPrompt && systemPrompt.trim());
+  let prompt = hasCustomPersona ? systemPrompt : DEFAULT_SYSTEM_PROMPT;
+
+  if (hasCustomPersona) {
+    prompt = `🔒 PRIORITY PERSONA — FOLLOW THIS EXACTLY. This persona, memory, and behavior instruction OVERRIDE every other style guideline. If anything below contradicts these, the persona wins.\n\n${prompt}\n\n🔒 END PRIORITY PERSONA. Stay in character. Honor the memory. Obey the active behavior instruction (directive) above on every reply, not just the first one.`;
+  }
 
   // Hint the AI to address all unreplied messages when there are multiple
   if (unrepliedCount && unrepliedCount > 1) {
