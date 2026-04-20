@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
 import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary } from './ai.js';
-import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured } from './telegram.js';
+import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply } from './telegram.js';
 import { transcribeAudio } from './elevenlabs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -669,7 +669,7 @@ export function initWhatsApp(userId, db) {
     getSocket: () => getInstance(userId).client,
     getMessageById: (msgId) => getInstance(userId).client?.getMessageById(msgId),
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
-    triggerSync: () => recoverSync(userId, db),
+    triggerSync: (opts) => recoverSync(userId, db, opts || { force: true }),
   };
 }
 
@@ -700,7 +700,7 @@ export function getOrInitWhatsApp(userId, db) {
     getSocket: () => inst.client,
     getMessageById: (msgId) => inst.client?.getMessageById(msgId),
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
-    triggerSync: () => recoverSync(userId, db),
+    triggerSync: (opts) => recoverSync(userId, db, opts || { force: true }),
     getInstance: () => inst,
   };
 }
@@ -1711,7 +1711,7 @@ async function syncContacts(userId, db, options = {}) {
   }
 }
 
-async function syncChats(userId, db) {
+async function syncChats(userId, db, { force = false } = {}) {
   const inst = getInstance(userId);
   if (!inst.client || inst.connectionStatus !== 'connected') return;
   if (inst.historySyncInProgress) return;
@@ -1773,9 +1773,11 @@ async function syncChats(userId, db) {
             } catch {}
           }
 
-          // Check if we already have messages for this chat — skip if we do
+          // Check if we already have messages for this chat — skip if we do.
+          // When `force` is set (manual Recovery Sync), always fetch a fresh slice
+          // to catch any messages received while offline.
           const existingCount = db.prepare('SELECT COUNT(*) as c FROM messages WHERE contact_id = ? AND user_id = ?').get(contactId, userId)?.c || 0;
-          if (existingCount >= MSG_LIMIT_PER_CHAT) {
+          if (!force && existingCount >= MSG_LIMIT_PER_CHAT) {
             skippedChats++;
             continue;
           }
@@ -1873,7 +1875,7 @@ async function syncChats(userId, db) {
 
 // ── Recovery Sync ──
 
-async function recoverSync(userId, db) {
+async function recoverSync(userId, db, { force = false } = {}) {
   const inst = getInstance(userId);
   if (!inst.client || inst.connectionStatus !== 'connected') return;
   if (inst.historySyncInProgress) {
@@ -1885,7 +1887,7 @@ async function recoverSync(userId, db) {
   updateSyncState(userId, db, { phase: 'recovering' });
   emit(userId, 'sync_state', inst.syncState);
 
-  await syncChats(userId, db);
+  await syncChats(userId, db, { force });
 
   if (inst.connectionStatus === 'connected' && !inst.contactSyncInProgress) {
     syncContacts(userId, db, { skipChatSync: true }).catch(err => {
@@ -1896,6 +1898,7 @@ async function recoverSync(userId, db) {
   const phase = (inst.syncState.totalDbMessages > 10 && inst.syncState.totalDbContacts > 0) ? 'ready' : 'partial';
   updateSyncState(userId, db, { phase });
   console.log(`🔄 [${userId}] Recovery sync complete — phase: ${phase}`);
+  emit(userId, 'sync_state', inst.syncState);
 }
 
 // ── Recover single chat ──
@@ -3212,8 +3215,14 @@ export function getTelegramCallbackHandlers(userId, db) {
       debugLog(db, userId, 'telegram_custom', { jid, contact: contact.name || contact.phone || jid, instructions: instructions.slice(0, 200) });
 
       const contactName = contact.name || contact.phone || 'Unknown';
+      // Look up the previous AI draft so the AI can EDIT/EXTEND it instead of starting fresh
+      const previousReply = getLastPreviewedReply(userId, jid);
       const { generateReply } = await import('./ai.js');
-      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'custom', customInstructions: instructions });
+      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, {
+        mode: 'custom',
+        customInstructions: instructions,
+        previousReply,
+      });
       replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
       executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });

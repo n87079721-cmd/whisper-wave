@@ -520,11 +520,21 @@ export const api = {
       message_count: number;
       contact_count: number;
       is_current: boolean;
+      is_admin?: boolean;
+      isAdmin?: boolean;
     }>>('/api/admin/users');
   },
 
   adminDeleteUser(userId: string) {
     return requestJson<{ success: boolean }>(`/api/admin/users/${userId}`, { method: 'DELETE' });
+  },
+
+  adminSetUserAdmin(userId: string, isAdmin: boolean) {
+    return requestJson<{ success: boolean; isAdmin: boolean }>(`/api/admin/users/${userId}/admin`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isAdmin }),
+    });
   },
 
   adminGetDebugLogs(limit = 200, userId?: string) {

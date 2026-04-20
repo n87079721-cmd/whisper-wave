@@ -176,7 +176,7 @@ export function shouldAlsoReplyAfterReaction(unrepliedCount = 0, messageText = '
  * @param {string} contactName - Name of the contact for context
  * @returns {Promise<string>} The generated reply text
  */
-export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions } = {}) {
+export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions, previousReply } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
 
   let prompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
@@ -274,10 +274,14 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
         })(),
       },
       ...chatMessages,
-      // Inject custom instructions as a final "instruction" message so it takes absolute priority
+      // Inject custom instructions as a final "instruction" message so it takes absolute priority.
+      // If we have the previous AI draft, treat this as an EDIT: keep the spirit of the draft
+      // and weave in whatever the phone owner asked.
       ...(mode === 'custom' && customInstructions ? [{
         role: 'system',
-        content: `⚠️ STOP — READ THIS BEFORE REPLYING. The phone owner is telling YOU (the AI) exactly what to say. This is NOT part of the conversation. This is a direct instruction from the person whose phone you are controlling.\n\nINSTRUCTION: "${customInstructions}"\n\nYou MUST follow this instruction precisely. Forget the persona character — you are the PHONE OWNER right now. Address what was asked: if they said "ask about X", you ASK about X. If they said "tell them about Y", you TELL them about Y. Write 3-6 natural sentences. Use casual texting style but actually do what was instructed. Do NOT stay in character if the character would ignore this instruction. The phone owner's instructions ALWAYS override everything else.`
+        content: previousReply
+          ? `⚠️ STOP — READ THIS BEFORE REPLYING. The phone owner reviewed your previous draft reply and wants to ADJUST it, not throw it out.\n\nYOUR PREVIOUS DRAFT:\n"""\n${previousReply}\n"""\n\nWHAT THE PHONE OWNER WANTS YOU TO ADD/CHANGE:\n"""\n${customInstructions}\n"""\n\nRewrite the previous draft so it KEEPS its meaning AND naturally incorporates the phone owner's instruction. Examples:\n- If the draft was "lol yeah that movie was wild" and the instruction is "also ask her about her day" → reply with something like "lol yeah that movie was wild, btw how was your day?"\n- If the draft was a story or excuse, keep that story AND add what was requested.\n- If the instruction CONTRADICTS the draft, prioritize the instruction.\n- Do NOT just paste the two together robotically — blend them into one natural-sounding WhatsApp message.\n- Match the casual texting style of the original draft (lowercase, slang, abbreviations).\n- Keep it to 1-4 short sentences unless the instruction explicitly asks for more.\n- The phone owner's instruction ALWAYS wins over the persona/character constraints.`
+          : `⚠️ STOP — READ THIS BEFORE REPLYING. The phone owner is telling YOU (the AI) exactly what to say. This is NOT part of the conversation. This is a direct instruction from the person whose phone you are controlling.\n\nINSTRUCTION: "${customInstructions}"\n\nYou MUST follow this instruction precisely. Forget the persona character — you are the PHONE OWNER right now. Address what was asked: if they said "ask about X", you ASK about X. If they said "tell them about Y", you TELL them about Y. Write 1-4 natural sentences. Use casual texting style but actually do what was instructed. Do NOT stay in character if the character would ignore this instruction. The phone owner's instructions ALWAYS override everything else.`
       }] : []),
     ],
     max_tokens: mode === 'custom' ? 800 : 500,

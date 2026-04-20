@@ -13,6 +13,8 @@ interface UserAccount {
   message_count: number;
   contact_count: number;
   is_current: boolean;
+  is_admin?: boolean;
+  isAdmin?: boolean;
 }
 
 interface DebugEntry {
@@ -118,6 +120,7 @@ const AdminPage = () => {
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [adminTogglingId, setAdminTogglingId] = useState<string | null>(null);
 
   const [debugLogs, setDebugLogs] = useState<DebugEntry[]>([]);
   const [debugLoading, setDebugLoading] = useState(false);
@@ -183,6 +186,24 @@ const AdminPage = () => {
       toast.error(err.message || 'Failed to delete account');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleToggleAdmin = async (target: UserAccount) => {
+    if (target.is_current) {
+      toast.error("You can't change admin on your own account");
+      return;
+    }
+    const next = !(target.is_admin || target.isAdmin);
+    setAdminTogglingId(target.id);
+    try {
+      await api.adminSetUserAdmin(target.id, next);
+      toast.success(next ? `${target.display_name || target.username} is now an admin` : `Admin removed from ${target.display_name || target.username}`);
+      setUsers((prev) => prev.map((u) => (u.id === target.id ? { ...u, is_admin: next, isAdmin: next } : u)));
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update admin');
+    } finally {
+      setAdminTogglingId(null);
     }
   };
 
@@ -303,12 +324,31 @@ const AdminPage = () => {
                     {u.is_current && (
                       <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-medium">You</span>
                     )}
+                    {(u.is_admin || u.isAdmin) && (
+                      <span className="text-[10px] bg-amber-500/15 text-amber-500 px-1.5 py-0.5 rounded-full font-medium flex items-center gap-0.5">
+                        <Shield className="w-2.5 h-2.5" /> Admin
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     @{u.username} • Joined {formatDate(u.created_at)} • {u.contact_count} contacts • {u.message_count} msgs
                   </p>
                 </div>
-                <div className="flex-shrink-0">
+                <div className="flex-shrink-0 flex items-center gap-1">
+                  {!u.is_current && (
+                    <button
+                      onClick={() => handleToggleAdmin(u)}
+                      disabled={adminTogglingId === u.id}
+                      className={`p-2 rounded-lg transition-colors disabled:opacity-40 ${
+                        (u.is_admin || u.isAdmin)
+                          ? 'text-amber-500 hover:bg-amber-500/10'
+                          : 'text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10'
+                      }`}
+                      title={(u.is_admin || u.isAdmin) ? 'Revoke admin' : 'Grant admin'}
+                    >
+                      {adminTogglingId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+                    </button>
+                  )}
                   {confirmDeleteId === u.id ? (
                     <div className="flex items-center gap-1.5">
                       <button
