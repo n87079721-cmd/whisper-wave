@@ -2006,6 +2006,24 @@ function buildContactSystemPrompt(db, userId, contactId) {
   return systemPrompt;
 }
 
+/**
+ * Look up which persona (from the prompt library) is currently driving a contact's
+ * AI replies. Returns the persona name, or 'Default' when no library prompt is set
+ * (i.e. the global system prompt is in use). Returns null only on DB errors.
+ */
+function getActivePersonaName(db, userId, contactId) {
+  try {
+    const row = db.prepare("SELECT prompt_id FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    if (row?.prompt_id) {
+      const p = db.prepare("SELECT name FROM prompts WHERE id = ? AND user_id = ?").get(row.prompt_id, userId);
+      return p?.name || 'Default';
+    }
+    return 'Default';
+  } catch {
+    return null;
+  }
+}
+
 function isWithinActiveHours(db, userId) {
   const start = getConfigValue(db, userId, 'ai_active_hours_start', '09:00');
   const end = getConfigValue(db, userId, 'ai_active_hours_end', '02:00');
@@ -2377,7 +2395,8 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     pendingReaction = { emoji: reactionEmoji, msg: latestOriginalMsg };
   }
 
-  debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, historyLength: messages.length, unrepliedCount });
+  const personaName = getActivePersonaName(db, userId, contactId);
+  debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, persona: personaName, historyLength: messages.length, unrepliedCount });
   let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone, { unrepliedCount, timezone: tz });
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
@@ -2406,6 +2425,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   debugLog(db, userId, 'reply_scheduled', {
     contact: contactName || phone,
+    persona: personaName,
     replyPreview: replyText,
     replyLength: replyText.length,
     delayMs: delay,
@@ -2418,7 +2438,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   // ── Send Telegram preview (non-blocking) ──
   if (isTelegramConfigured(db, userId)) {
-    sendReplyPreview(db, userId, contactName || phone, replyText, jid).catch(() => {});
+    sendReplyPreview(db, userId, contactName || phone, replyText, jid, { persona: personaName }).catch(() => {});
   }
 
   const pendingReply = {
@@ -3268,8 +3288,10 @@ function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactNa
   const delay = calculateDelay(replyText.length, speed);
   const typingDuration = Math.min(Math.max(Math.floor(replyText.length / 10) * 1000, 2000), 12000) + Math.floor(Math.random() * 2000);
 
+  const personaName = getActivePersonaName(db, userId, contactId);
   debugLog(db, userId, 'reply_scheduled', {
     contact: contactName || phone,
+    persona: personaName,
     replyPreview: replyText.slice(0, 120),
     replyLength: replyText.length,
     delayMs: delay,
@@ -3281,7 +3303,7 @@ function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactNa
 
   // Send telegram preview
   if (isTelegramConfigured(db, userId)) {
-    sendReplyPreview(db, userId, contactName || phone, replyText, jid).catch(() => {});
+    sendReplyPreview(db, userId, contactName || phone, replyText, jid, { persona: personaName }).catch(() => {});
   }
 
   clearPendingAutoReply(userId, jid);

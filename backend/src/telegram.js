@@ -68,7 +68,7 @@ async function telegramRequest(token, method, body = {}) {
 /**
  * Send a reply preview to the user's Telegram with Cancel/Rewrite/Custom buttons.
  */
-export async function sendReplyPreview(db, userId, contactName, replyText, jid) {
+export async function sendReplyPreview(db, userId, contactName, replyText, jid, { persona } = {}) {
   const { token, chatIds } = getBotConfig(db, userId);
   if (!token || chatIds.length === 0) return;
 
@@ -76,7 +76,10 @@ export async function sendReplyPreview(db, userId, contactName, replyText, jid) 
   const state = getBotState(userId);
   state.lastReplies.set(jid, replyText);
 
-  const text = `💬 Reply to *${escapeMarkdown(contactName)}*:\n\n${escapeMarkdown(replyText)}`;
+  // Show which persona produced this reply so the user can verify the right
+  // character/prompt is active for this contact.
+  const personaLine = persona ? `🎭 _${escapeMarkdown(persona)}_\n` : '';
+  const text = `💬 Reply to *${escapeMarkdown(contactName)}*:\n${personaLine}\n${escapeMarkdown(replyText)}`;
   const keyboard = {
     inline_keyboard: [[
       { text: '❌ Cancel', callback_data: `cancel_${jid}` },
