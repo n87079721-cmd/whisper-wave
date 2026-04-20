@@ -2252,7 +2252,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   if (sensitiveEnabled === 'true') {
     const msgText = latestResolvedContent || latestOriginalMsg?.body || '';
     try {
-      const sensitive = await detectSensitiveTopic(keyRow.value, msgText);
+      const sensitive = await detectSensitiveTopic(keyRow.value, msgText, { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
       if (sensitive?.isSensitive) {
         debugLog(db, userId, 'skip_sensitive_topic', { contact: contactName || phone, topic: sensitive.topic, reason: sensitive.reason });
         await sendSensitiveAlert(db, userId, contactName || phone, sensitive.topic, msgText);
@@ -2266,6 +2266,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   // Per-contact prompt — use the shared helper so persona, memory, and active
   // directive are assembled identically across auto-reply, rewrite, and custom paths.
   const systemPrompt = buildContactSystemPrompt(db, userId, contactId);
+  // Per-account timezone — every AI call below uses this so date/time reasoning,
+  // late-night sleepy mode, and "today" date all reflect the user's local time.
+  const tz = getConfigValue(db, userId, 'ai_timezone', 'America/New_York');
   // Debug visibility: confirm what was actually included for this contact.
   try {
     const probe = db.prepare("SELECT prompt_id, active_directive, directive_expires, LENGTH(memory) AS mem_len FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
@@ -2314,7 +2317,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       rolled: Math.round(roll),
     });
     const msgText = latestResolvedContent || latestOriginalMsg?.body || '';
-    const reactionEmoji = await shouldReact(keyRow.value, msgText);
+    const reactionEmoji = await shouldReact(keyRow.value, msgText, { timezone: tz });
     if (reactionEmoji && latestOriginalMsg) {
       const reactDelay = Math.floor(Math.random() * 5000) + 2000;
       setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
@@ -2350,7 +2353,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     if (messages[i].direction === 'received') unrepliedCount++;
   }
 
-  const reactionEmoji = await shouldReact(keyRow.value, latestMsgText);
+  const reactionEmoji = await shouldReact(keyRow.value, latestMsgText, { timezone: tz });
   let pendingReaction = null;
   if (reactionEmoji && latestOriginalMsg) {
     if (!shouldAlsoReplyAfterReaction(unrepliedCount, latestMsgText) && !forceReply) {
@@ -2366,7 +2369,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   }
 
   debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, historyLength: messages.length, unrepliedCount });
-  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone, { unrepliedCount });
+  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone, { unrepliedCount, timezone: tz });
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
   if (isReplyTooSimilar(replyText, recentOutgoing)) {
@@ -2376,6 +2379,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       messages,
       `${systemPrompt}\n\nIMPORTANT: Do not repeat or closely paraphrase any recent outgoing reply. Make the next reply clearly different in wording and energy.`,
       contactName || phone,
+      { timezone: tz },
     );
     replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
   }
@@ -3066,7 +3070,7 @@ async function triggerConversationSummary(userId, db, contactId, jid, contactNam
 
     if (messages.length < 10) return;
 
-    const summary = await generateConversationSummary(apiKey, messages, contactName, contactRow?.memory || '');
+    const summary = await generateConversationSummary(apiKey, messages, contactName, contactRow?.memory || '', { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
     if (!summary) return;
 
     // Append summary to memory
@@ -3128,7 +3132,7 @@ export function startConversationStarterLoop(userId, db) {
         try {
           // Get last conversation summary from memory
           const lastSummary = (contact.memory || '').split('\n\n').pop() || '';
-          const starter = await generateConversationStarter(keyRow.value, contactName, contact.memory, lastSummary);
+          const starter = await generateConversationStarter(keyRow.value, contactName, contact.memory, lastSummary, { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
           if (!starter) continue;
 
           // Send with a natural delay
@@ -3204,7 +3208,7 @@ export function getTelegramCallbackHandlers(userId, db) {
       const systemPrompt = buildContactSystemPrompt(db, userId, contact.id);
       const contactName = contact.name || contact.phone || 'Unknown';
       const { generateReply } = await import('./ai.js');
-      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'rewrite' });
+      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'rewrite', timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
       replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
       // Re-schedule with telegram preview
@@ -3237,6 +3241,7 @@ export function getTelegramCallbackHandlers(userId, db) {
         mode: 'custom',
         customInstructions: instructions,
         previousReply,
+        timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
       });
       replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 

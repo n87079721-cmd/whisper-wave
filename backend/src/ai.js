@@ -78,7 +78,7 @@ const REACTION_EMOJIS = ['😂', '💀', '🔥', '❤️', '👀', '😭', '💯
  * Now context-aware: picks an appropriate emoji based on the message content.
  * Returns the emoji to react with, or null.
  */
-export async function shouldReact(apiKey, messageText) {
+export async function shouldReact(apiKey, messageText, { timezone } = {}) {
   // ~30% chance to react with an emoji
   if (Math.random() >= 0.30) return null;
   
@@ -176,8 +176,9 @@ export function shouldAlsoReplyAfterReaction(unrepliedCount = 0, messageText = '
  * @param {string} contactName - Name of the contact for context
  * @returns {Promise<string>} The generated reply text
  */
-export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions, previousReply } = {}) {
+export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions, previousReply, timezone } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
+  const tz = timezone || 'America/New_York';
 
   // Detect whether the caller passed an explicit per-contact persona/directive bundle.
   // If so, that bundle is sacred — we wrap it with a high-priority preface and DO NOT
@@ -260,8 +261,8 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
         role: 'system',
         content: (() => {
           const now = new Date();
-          const nyTime = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
-          const nyHour = parseInt(now.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }));
+          const nyTime = now.toLocaleString('en-US', { timeZone: tz });
+          const nyHour = parseInt(now.toLocaleString('en-US', { timeZone: tz, hour: 'numeric', hour12: false }));
           let timeLabel;
           let sleepyPrompt = '';
           if (nyHour >= 5 && nyHour < 9) timeLabel = 'early morning';
@@ -273,7 +274,7 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
           else if (nyHour >= 0 && nyHour < 2) {
             timeLabel = 'middle of the night';
             sleepyPrompt = `\n\nIt's past midnight. You're tired and winding down. Keep replies VERY short (a few words). Occasionally (not every time) wonder why they're still awake — like "why u still up lol", "go to sleep 😭", "you not sleeping?". Be naturally sleepy. Yawn. Use "😴", "💤" energy.`;
-            if (nyHour === 1 && parseInt(now.toLocaleString('en-US', { timeZone: 'America/New_York', minute: 'numeric' })) >= 45) {
+            if (nyHour === 1 && parseInt(now.toLocaleString('en-US', { timeZone: tz, minute: 'numeric' })) >= 45) {
               sleepyPrompt += `\n\nIt's almost 2am. Wrap up the conversation naturally and say goodnight. You're about to knock out. Make it feel real — like "aight im done gn 😴", "ok im actually passing out now lol night".`;
             }
           }
@@ -281,12 +282,12 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
           // Build an explicit, unambiguous "today" reference the model can reason about
           // when persona text mentions tour dates, deadlines, plans, etc.
           const todayFull = now.toLocaleDateString('en-US', {
-            timeZone: 'America/New_York',
+            timeZone: tz,
             weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
           });
-          const todayISO = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
-          const clockTime = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true });
-          const dateBlock = `\n\n📅 TODAY (use this for ANY date/time reasoning, including dates mentioned in the persona):\n• Today is ${todayFull}\n• ISO date: ${todayISO}\n• Local time now: ${clockTime} (${timeLabel}, America/New_York)\n• When the persona mentions a date (tour dates, gigs, trips, deadlines, birthdays), compare it to today's date above to know if it's in the past, today, or future. Do the math before replying.`;
+          const todayISO = now.toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
+          const clockTime = now.toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true });
+          const dateBlock = `\n\n📅 TODAY (use this for ANY date/time reasoning, including dates mentioned in the persona):\n• Today is ${todayFull}\n• ISO date: ${todayISO}\n• Local time now: ${clockTime} (${timeLabel}, ${tz})\n• When the persona mentions a date (tour dates, gigs, trips, deadlines, birthdays), compare it to today's date above to know if it's in the past, today, or future. Do the math before replying.`;
           // When a custom persona is set, keep only minimal context (time + photo handling) so we don't override the persona's voice.
           // When using the default prompt, append the full generic ruleset.
           const photoNote = `\n\nIf someone sends you a photo, react naturally like a real person would. Comment on what you see, ask about it, or react with genuine emotion. Don't describe the image formally or say "I can see an image of..." — just respond like you're looking at a friend's pic on your phone.`;
@@ -339,7 +340,7 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
  * Detect sensitive topics in an incoming message.
  * Returns { isSensitive, topic, reason } or null if not sensitive.
  */
-export async function detectSensitiveTopic(apiKey, messageText) {
+export async function detectSensitiveTopic(apiKey, messageText, { timezone } = {}) {
   if (!apiKey || !messageText || messageText.trim().length < 5) return null;
 
   try {
@@ -396,11 +397,11 @@ Respond ONLY with a JSON object: {"isSensitive": boolean, "topic": "string or nu
 /**
  * Generate a natural conversation starter for a contact.
  */
-export async function generateConversationStarter(apiKey, contactName, memory, lastConvoSummary) {
+export async function generateConversationStarter(apiKey, contactName, memory, lastConvoSummary, { timezone } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
-
+  const tz = timezone || 'America/New_York';
   const now = new Date();
-  const hour = parseInt(now.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }));
+  const hour = parseInt(now.toLocaleString('en-US', { timeZone: tz, hour: 'numeric', hour12: false }));
   let timeContext = 'afternoon';
   if (hour >= 5 && hour < 12) timeContext = 'morning';
   else if (hour >= 12 && hour < 17) timeContext = 'afternoon';
@@ -451,7 +452,7 @@ Respond with ONLY the message text, nothing else.`,
 /**
  * Generate a conversation summary and extract key facts.
  */
-export async function generateConversationSummary(apiKey, messages, contactName, existingMemory) {
+export async function generateConversationSummary(apiKey, messages, contactName, existingMemory, { timezone } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
 
   const convoText = messages.map(m => {
@@ -459,9 +460,10 @@ export async function generateConversationSummary(apiKey, messages, contactName,
     return `${speaker}: ${m.content || '(media)'}`;
   }).join('\n');
 
-  // Build today's date label in the phone owner's local TZ (server TZ is fine — same wall clock as logs)
+  // Build today's date label in the phone owner's configured timezone
+  const tz = timezone || 'America/New_York';
   const today = new Date();
-  const dateLabel = today.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const dateLabel = today.toLocaleDateString('en-US', { timeZone: tz, month: 'short', day: 'numeric', year: 'numeric' });
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
