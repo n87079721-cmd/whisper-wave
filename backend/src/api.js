@@ -1779,10 +1779,16 @@ RULES:
       const users = db.prepare(`
         SELECT u.id, u.username, u.display_name, u.created_at, u.is_admin,
           COALESCE(mc.msg_count, 0) as message_count,
-          COALESCE(cc.contact_count, 0) as contact_count
+          COALESCE(cc.contact_count, 0) as contact_count,
+          COALESCE(mem.memory_count, 0) as memory_count,
+          COALESCE(dir.directive_count, 0) as directive_count,
+          COALESCE(per.persona_count, 0) as persona_count
         FROM users u
         LEFT JOIN (SELECT user_id, COUNT(*) as msg_count FROM messages GROUP BY user_id) mc ON mc.user_id = u.id
         LEFT JOIN (SELECT user_id, COUNT(*) as contact_count FROM contacts WHERE is_group = 0 GROUP BY user_id) cc ON cc.user_id = u.id
+        LEFT JOIN (SELECT user_id, COUNT(*) as memory_count FROM contacts WHERE memory IS NOT NULL AND memory != '' GROUP BY user_id) mem ON mem.user_id = u.id
+        LEFT JOIN (SELECT user_id, COUNT(*) as directive_count FROM contacts WHERE active_directive IS NOT NULL AND active_directive != '' GROUP BY user_id) dir ON dir.user_id = u.id
+        LEFT JOIN (SELECT user_id, COUNT(*) as persona_count FROM prompts GROUP BY user_id) per ON per.user_id = u.id
         ORDER BY u.created_at ASC
       `).all();
 
