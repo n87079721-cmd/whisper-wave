@@ -1846,6 +1846,28 @@ RULES:
     }
   });
 
+  // ── Admin: Grant or revoke admin rights ──────────────
+  router.put('/admin/users/:userId/admin', (req, res) => {
+    try {
+      if (!req.isAdmin) {
+        return res.status(403).json({ error: 'Admin access required' });
+      }
+      const { isAdmin } = req.body;
+      const targetId = req.params.userId;
+      const target = db.prepare('SELECT id FROM users WHERE id = ?').get(targetId);
+      if (!target) return res.status(404).json({ error: 'User not found' });
+
+      // Prevent removing your own admin (avoid lockout)
+      if (targetId === req.userId && isAdmin === false) {
+        return res.status(400).json({ error: "Can't remove admin from your own account" });
+      }
+      db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(isAdmin ? 1 : 0, targetId);
+      res.json({ success: true, isAdmin: !!isAdmin });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Admin: Debug logs ─────────────────────────────────
   router.get('/admin/debug-logs', (req, res) => {
     try {
