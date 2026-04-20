@@ -325,8 +325,8 @@ export function createApiRouter(db) {
 
     if (canonical && canonical.id !== contact.id) {
       const betterName = contact.name && !contact.name.includes('@') ? contact.name : canonical.name;
-      db.prepare("UPDATE contacts SET name = COALESCE(?, name), phone = COALESCE(?, phone), updated_at = datetime('now') WHERE id = ?")
-        .run(betterName, canonicalPhone, canonical.id);
+      db.prepare("UPDATE contacts SET name = COALESCE(?, name), phone = COALESCE(?, phone), updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+        .run(betterName, canonicalPhone, canonical.id, userId);
       mergeContactRows(userId, contact.id, canonical.id, canonicalJid);
       return { ...canonical, name: canonical.name || betterName, phone: canonical.phone || canonicalPhone };
     }
