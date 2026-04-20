@@ -1711,7 +1711,7 @@ async function syncContacts(userId, db, options = {}) {
   }
 }
 
-async function syncChats(userId, db) {
+async function syncChats(userId, db, { force = false } = {}) {
   const inst = getInstance(userId);
   if (!inst.client || inst.connectionStatus !== 'connected') return;
   if (inst.historySyncInProgress) return;
@@ -1773,9 +1773,11 @@ async function syncChats(userId, db) {
             } catch {}
           }
 
-          // Check if we already have messages for this chat — skip if we do
+          // Check if we already have messages for this chat — skip if we do.
+          // When `force` is set (manual Recovery Sync), always fetch a fresh slice
+          // to catch any messages received while offline.
           const existingCount = db.prepare('SELECT COUNT(*) as c FROM messages WHERE contact_id = ? AND user_id = ?').get(contactId, userId)?.c || 0;
-          if (existingCount >= MSG_LIMIT_PER_CHAT) {
+          if (!force && existingCount >= MSG_LIMIT_PER_CHAT) {
             skippedChats++;
             continue;
           }
@@ -1873,7 +1875,7 @@ async function syncChats(userId, db) {
 
 // ── Recovery Sync ──
 
-async function recoverSync(userId, db) {
+async function recoverSync(userId, db, { force = false } = {}) {
   const inst = getInstance(userId);
   if (!inst.client || inst.connectionStatus !== 'connected') return;
   if (inst.historySyncInProgress) {
@@ -1885,7 +1887,7 @@ async function recoverSync(userId, db) {
   updateSyncState(userId, db, { phase: 'recovering' });
   emit(userId, 'sync_state', inst.syncState);
 
-  await syncChats(userId, db);
+  await syncChats(userId, db, { force });
 
   if (inst.connectionStatus === 'connected' && !inst.contactSyncInProgress) {
     syncContacts(userId, db, { skipChatSync: true }).catch(err => {
@@ -1896,6 +1898,7 @@ async function recoverSync(userId, db) {
   const phase = (inst.syncState.totalDbMessages > 10 && inst.syncState.totalDbContacts > 0) ? 'ready' : 'partial';
   updateSyncState(userId, db, { phase });
   console.log(`🔄 [${userId}] Recovery sync complete — phase: ${phase}`);
+  emit(userId, 'sync_state', inst.syncState);
 }
 
 // ── Recover single chat ──
