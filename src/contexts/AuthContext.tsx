@@ -4,6 +4,7 @@ interface User {
   id: string;
   username: string;
   displayName: string;
+  isAdmin?: boolean;
 }
 
 interface AuthContextType {
@@ -31,6 +32,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (savedToken && savedUser) {
       setToken(savedToken);
       setUser(JSON.parse(savedUser));
+      // Refresh isAdmin from server (covers users who logged in before the column existed)
+      const base = (() => {
+        const stored = localStorage.getItem('wa_api_url');
+        return (stored ? stored.replace(/\/$/, '') : window.location.origin);
+      })();
+      fetch(`${base}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${savedToken}` },
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.user) {
+            const merged = { ...JSON.parse(savedUser), ...data.user, isAdmin: !!data.user.isAdmin };
+            localStorage.setItem(USER_KEY, JSON.stringify(merged));
+            setUser(merged);
+          }
+        })
+        .catch(() => {});
     }
     setIsLoading(false);
   }, []);

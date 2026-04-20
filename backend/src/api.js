@@ -29,7 +29,7 @@ export function createApiRouter(db) {
       if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
       const user = registerUser(db, username, password, displayName);
       const token = createToken(user.id);
-      res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName } });
+      res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, isAdmin: !!user.isAdmin } });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
@@ -42,14 +42,22 @@ export function createApiRouter(db) {
       const user = loginUser(db, username, password);
       const token = createToken(user.id);
       // Don't auto-start WhatsApp on login — user clicks Connect on dashboard
-      res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName } });
+      res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, isAdmin: !!user.isAdmin } });
     } catch (err) {
       res.status(401).json({ error: err.message });
     }
   });
 
   router.get('/auth/me', auth, (req, res) => {
-    res.json({ user: req.user });
+    res.json({
+      user: {
+        id: req.user.id,
+        username: req.user.username,
+        display_name: req.user.display_name,
+        displayName: req.user.display_name,
+        isAdmin: !!req.user.isAdmin,
+      },
+    });
   });
 
   // ── All routes below require auth ────────────────────────
@@ -1761,13 +1769,12 @@ RULES:
   router.get('/admin/users', (req, res) => {
     try {
       // Only first registered user (by created_at) is admin
-      const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
-      if (!firstUser || firstUser.id !== req.userId) {
+      if (!req.isAdmin) {
         return res.status(403).json({ error: 'Admin access required' });
       }
 
       const users = db.prepare(`
-        SELECT u.id, u.username, u.display_name, u.created_at,
+        SELECT u.id, u.username, u.display_name, u.created_at, u.is_admin,
           COALESCE(mc.msg_count, 0) as message_count,
           COALESCE(cc.contact_count, 0) as contact_count
         FROM users u
@@ -1776,7 +1783,7 @@ RULES:
         ORDER BY u.created_at ASC
       `).all();
 
-      res.json(users.map(u => ({ ...u, is_current: u.id === req.userId })));
+      res.json(users.map(u => ({ ...u, is_admin: !!u.is_admin, isAdmin: !!u.is_admin, is_current: u.id === req.userId })));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1785,8 +1792,7 @@ RULES:
   // ── Admin: Delete a user ───────────────────────────────
   router.delete('/admin/users/:userId', async (req, res) => {
     try {
-      const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
-      if (!firstUser || firstUser.id !== req.userId) {
+      if (!req.isAdmin) {
         return res.status(403).json({ error: 'Admin access required' });
       }
 
@@ -1840,11 +1846,32 @@ RULES:
     }
   });
 
+  // ── Admin: Grant or revoke admin rights ──────────────
+  router.put('/admin/users/:userId/admin', (req, res) => {
+    try {
+      if (!req.isAdmin) {
+        return res.status(403).json({ error: 'Admin access required' });
+      }
+      const { isAdmin } = req.body;
+      const targetId = req.params.userId;
+      const target = db.prepare('SELECT id FROM users WHERE id = ?').get(targetId);
+      if (!target) return res.status(404).json({ error: 'User not found' });
+
+      // Prevent removing your own admin (avoid lockout)
+      if (targetId === req.userId && isAdmin === false) {
+        return res.status(400).json({ error: "Can't remove admin from your own account" });
+      }
+      db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(isAdmin ? 1 : 0, targetId);
+      res.json({ success: true, isAdmin: !!isAdmin });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Admin: Debug logs ─────────────────────────────────
   router.get('/admin/debug-logs', (req, res) => {
     try {
-      const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
-      if (!firstUser || firstUser.id !== req.userId) {
+      if (!req.isAdmin) {
         return res.status(403).json({ error: 'Admin access required' });
       }
 
@@ -1929,8 +1956,7 @@ RULES:
   // ── Admin: Clear debug logs ───────────────────────────
   router.delete('/admin/debug-logs', (req, res) => {
     try {
-      const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
-      if (!firstUser || firstUser.id !== req.userId) {
+      if (!req.isAdmin) {
         return res.status(403).json({ error: 'Admin access required' });
       }
       db.prepare(`DELETE FROM stats WHERE event = 'debug_log'`).run();

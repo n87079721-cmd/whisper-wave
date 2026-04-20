@@ -26,7 +26,7 @@ interface DashboardSidebarProps {
   onToggleTheme: () => void;
 }
 
-const navItems: { id: Page; label: string; icon: React.ElementType }[] = [
+const allNavItems: { id: Page; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'conversations', label: 'Chats', icon: MessageSquare },
   { id: 'status', label: 'Status', icon: CircleDot },
@@ -34,12 +34,13 @@ const navItems: { id: Page; label: string; icon: React.ElementType }[] = [
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'voice', label: 'Voice Studio', icon: Mic },
   { id: 'settings', label: 'Settings', icon: Settings },
-  { id: 'admin', label: 'Admin', icon: Shield },
+  { id: 'admin', label: 'Admin', icon: Shield, adminOnly: true },
 ];
 
 const DashboardSidebar = ({ activePage, onPageChange, theme, onToggleTheme }: DashboardSidebarProps) => {
   const [collapsed, setCollapsed] = useState(false);
   const { user, logout } = useAuth();
+  const navItems = allNavItems.filter((item) => !item.adminOnly || user?.isAdmin);
 
   return (
     <aside

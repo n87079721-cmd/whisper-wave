@@ -39,6 +39,17 @@ function ensureUsersTable(db) {
       created_at TEXT DEFAULT (datetime('now'))
     );
   `);
+
+  // Migration: add is_admin column if missing
+  if (!hasColumn(db, 'users', 'is_admin')) {
+    db.exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0`);
+  }
+
+  // Ensure the oldest user is admin (legacy upgrade path)
+  const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC, id ASC LIMIT 1').get();
+  if (firstUser) {
+    db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(firstUser.id);
+  }
 }
 
 function ensureCurrentTables(db) {
