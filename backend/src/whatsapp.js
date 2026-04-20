@@ -2369,7 +2369,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   }
 
   debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, historyLength: messages.length, unrepliedCount });
-  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone, { unrepliedCount });
+  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone, { unrepliedCount, timezone: tz });
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
   if (isReplyTooSimilar(replyText, recentOutgoing)) {
@@ -2379,6 +2379,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       messages,
       `${systemPrompt}\n\nIMPORTANT: Do not repeat or closely paraphrase any recent outgoing reply. Make the next reply clearly different in wording and energy.`,
       contactName || phone,
+      { timezone: tz },
     );
     replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
   }
