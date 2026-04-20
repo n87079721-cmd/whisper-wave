@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
 import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary } from './ai.js';
-import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured } from './telegram.js';
+import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply } from './telegram.js';
 import { transcribeAudio } from './elevenlabs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -3215,8 +3215,14 @@ export function getTelegramCallbackHandlers(userId, db) {
       debugLog(db, userId, 'telegram_custom', { jid, contact: contact.name || contact.phone || jid, instructions: instructions.slice(0, 200) });
 
       const contactName = contact.name || contact.phone || 'Unknown';
+      // Look up the previous AI draft so the AI can EDIT/EXTEND it instead of starting fresh
+      const previousReply = getLastPreviewedReply(userId, jid);
       const { generateReply } = await import('./ai.js');
-      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'custom', customInstructions: instructions });
+      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, {
+        mode: 'custom',
+        customInstructions: instructions,
+        previousReply,
+      });
       replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
       executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
