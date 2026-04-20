@@ -397,11 +397,11 @@ Respond ONLY with a JSON object: {"isSensitive": boolean, "topic": "string or nu
 /**
  * Generate a natural conversation starter for a contact.
  */
-export async function generateConversationStarter(apiKey, contactName, memory, lastConvoSummary) {
+export async function generateConversationStarter(apiKey, contactName, memory, lastConvoSummary, { timezone } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
-
+  const tz = timezone || 'America/New_York';
   const now = new Date();
-  const hour = parseInt(now.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }));
+  const hour = parseInt(now.toLocaleString('en-US', { timeZone: tz, hour: 'numeric', hour12: false }));
   let timeContext = 'afternoon';
   if (hour >= 5 && hour < 12) timeContext = 'morning';
   else if (hour >= 12 && hour < 17) timeContext = 'afternoon';
