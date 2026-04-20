@@ -669,7 +669,7 @@ export function initWhatsApp(userId, db) {
     getSocket: () => getInstance(userId).client,
     getMessageById: (msgId) => getInstance(userId).client?.getMessageById(msgId),
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
-    triggerSync: () => recoverSync(userId, db),
+    triggerSync: (opts) => recoverSync(userId, db, opts || { force: true }),
   };
 }
 
@@ -700,7 +700,7 @@ export function getOrInitWhatsApp(userId, db) {
     getSocket: () => inst.client,
     getMessageById: (msgId) => inst.client?.getMessageById(msgId),
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
-    triggerSync: () => recoverSync(userId, db),
+    triggerSync: (opts) => recoverSync(userId, db, opts || { force: true }),
     getInstance: () => inst,
   };
 }
