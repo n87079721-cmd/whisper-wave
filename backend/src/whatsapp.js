@@ -3288,8 +3288,10 @@ function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactNa
   const delay = calculateDelay(replyText.length, speed);
   const typingDuration = Math.min(Math.max(Math.floor(replyText.length / 10) * 1000, 2000), 12000) + Math.floor(Math.random() * 2000);
 
+  const personaName = getActivePersonaName(db, userId, contactId);
   debugLog(db, userId, 'reply_scheduled', {
     contact: contactName || phone,
+    persona: personaName,
     replyPreview: replyText.slice(0, 120),
     replyLength: replyText.length,
     delayMs: delay,
@@ -3301,7 +3303,7 @@ function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactNa
 
   // Send telegram preview
   if (isTelegramConfigured(db, userId)) {
-    sendReplyPreview(db, userId, contactName || phone, replyText, jid).catch(() => {});
+    sendReplyPreview(db, userId, contactName || phone, replyText, jid, { persona: personaName }).catch(() => {});
   }
 
   clearPendingAutoReply(userId, jid);
