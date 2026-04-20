@@ -325,8 +325,8 @@ export function createApiRouter(db) {
 
     if (canonical && canonical.id !== contact.id) {
       const betterName = contact.name && !contact.name.includes('@') ? contact.name : canonical.name;
-      db.prepare("UPDATE contacts SET name = COALESCE(?, name), phone = COALESCE(?, phone), updated_at = datetime('now') WHERE id = ?")
-        .run(betterName, canonicalPhone, canonical.id);
+      db.prepare("UPDATE contacts SET name = COALESCE(?, name), phone = COALESCE(?, phone), updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+        .run(betterName, canonicalPhone, canonical.id, userId);
       mergeContactRows(userId, contact.id, canonical.id, canonicalJid);
       return { ...canonical, name: canonical.name || betterName, phone: canonical.phone || canonicalPhone };
     }
@@ -609,7 +609,7 @@ export function createApiRouter(db) {
       if (existing) {
         // Update name if provided
         if (name?.trim()) {
-          db.prepare("UPDATE contacts SET name = ?, updated_at = datetime('now') WHERE id = ?").run(contactName, existing.id);
+          db.prepare("UPDATE contacts SET name = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?").run(contactName, existing.id, req.userId);
         }
         return res.json({ id: existing.id, updated: true });
       }
@@ -860,7 +860,7 @@ export function createApiRouter(db) {
           replyToContent = (quotedRow.content || '').slice(0, 200);
           replyToSender = quotedRow.direction === 'sent' ? 'You' : null;
           if (!replyToSender) {
-            const c = db.prepare('SELECT name, phone FROM contacts WHERE id = ?').get(quotedRow.contact_id);
+            const c = db.prepare('SELECT name, phone FROM contacts WHERE id = ? AND user_id = ?').get(quotedRow.contact_id, req.userId);
             replyToSender = c?.name || c?.phone || null;
           }
         }
@@ -1032,7 +1032,7 @@ export function createApiRouter(db) {
           if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
             // Clear media_path in DB so it doesn't try to serve a deleted file
-            db.prepare(`UPDATE messages SET media_path = NULL WHERE id = ?`).run(msgId);
+            db.prepare(`UPDATE messages SET media_path = NULL WHERE id = ? AND user_id = ?`).run(msgId, req.userId);
             console.log(`🗑️ Auto-deleted audio file after send: ${savedMedia.mediaPath}`);
           }
         } catch (delErr) {
