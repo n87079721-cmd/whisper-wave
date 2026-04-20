@@ -579,10 +579,13 @@ const SettingsPage = () => {
               className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50" />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Chat ID (your personal chat ID)</label>
+            <label className="text-xs text-muted-foreground mb-1 block">Chat ID(s) — separate multiple with commas</label>
             <input type="text" value={telegramChatId} onChange={(e) => setTelegramChatId(e.target.value)}
-              placeholder={telegramChatIdExists ? '••••••••' : '123456789'}
+              placeholder={telegramChatIdExists ? '••••••••' : '123456789, 987654321'}
               className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50" />
+            <p className="text-[11px] text-muted-foreground/80 mt-1">
+              All listed chats receive previews & alerts. Cancel/Rewrite/Custom buttons work from any of them.
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={async () => {
