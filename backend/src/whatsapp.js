@@ -3208,7 +3208,7 @@ export function getTelegramCallbackHandlers(userId, db) {
       const systemPrompt = buildContactSystemPrompt(db, userId, contact.id);
       const contactName = contact.name || contact.phone || 'Unknown';
       const { generateReply } = await import('./ai.js');
-      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'rewrite' });
+      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'rewrite', timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
       replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
       // Re-schedule with telegram preview
@@ -3241,6 +3241,7 @@ export function getTelegramCallbackHandlers(userId, db) {
         mode: 'custom',
         customInstructions: instructions,
         previousReply,
+        timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
       });
       replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
