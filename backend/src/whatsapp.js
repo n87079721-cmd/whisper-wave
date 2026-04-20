@@ -2317,7 +2317,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       rolled: Math.round(roll),
     });
     const msgText = latestResolvedContent || latestOriginalMsg?.body || '';
-    const reactionEmoji = await shouldReact(keyRow.value, msgText);
+    const reactionEmoji = await shouldReact(keyRow.value, msgText, { timezone: tz });
     if (reactionEmoji && latestOriginalMsg) {
       const reactDelay = Math.floor(Math.random() * 5000) + 2000;
       setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, reactionEmoji), reactDelay);
@@ -2353,7 +2353,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     if (messages[i].direction === 'received') unrepliedCount++;
   }
 
-  const reactionEmoji = await shouldReact(keyRow.value, latestMsgText);
+  const reactionEmoji = await shouldReact(keyRow.value, latestMsgText, { timezone: tz });
   let pendingReaction = null;
   if (reactionEmoji && latestOriginalMsg) {
     if (!shouldAlsoReplyAfterReaction(unrepliedCount, latestMsgText) && !forceReply) {
