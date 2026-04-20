@@ -340,7 +340,7 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
  * Detect sensitive topics in an incoming message.
  * Returns { isSensitive, topic, reason } or null if not sensitive.
  */
-export async function detectSensitiveTopic(apiKey, messageText) {
+export async function detectSensitiveTopic(apiKey, messageText, { timezone } = {}) {
   if (!apiKey || !messageText || messageText.trim().length < 5) return null;
 
   try {
