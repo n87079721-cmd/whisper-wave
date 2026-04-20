@@ -1630,8 +1630,8 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
       : null;
 
     if (phoneMatchCandidate && shouldReplaceName(phoneMatchCandidate, existing.name, existingComparisonPhone)) {
-      db.prepare("UPDATE contacts SET name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = datetime('now') WHERE id = ?")
-        .run(phoneMatch.name, safePhone, isGroup ? 1 : 0, existing.id);
+      db.prepare("UPDATE contacts SET name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+        .run(phoneMatch.name, safePhone, isGroup ? 1 : 0, existing.id, userId);
     }
 
     mergeContactRecords(db, userId, phoneMatch.id, existing.id, jid);
@@ -1644,8 +1644,8 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
     const shouldUpdateName = shouldReplaceName(candidate, target.name, comparisonPhone);
     const nextName = shouldUpdateName ? resolvedName : target.name;
 
-    db.prepare("UPDATE contacts SET jid = ?, name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = COALESCE(?, datetime('now')) WHERE id = ?")
-      .run(jid, nextName, safePhone, isGroup ? 1 : 0, activityAt, target.id);
+    db.prepare("UPDATE contacts SET jid = ?, name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = COALESCE(?, datetime('now')) WHERE id = ? AND user_id = ?")
+      .run(jid, nextName, safePhone, isGroup ? 1 : 0, activityAt, target.id, userId);
 
     if (target.jid !== jid) {
       db.prepare('UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?')
