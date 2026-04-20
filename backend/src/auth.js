@@ -64,7 +64,14 @@ export function authMiddleware(db) {
       return res.status(401).json({ error: 'User not found' });
     }
     req.userId = userId;
-    req.user = user;
+    // Pull is_admin separately so older code paths still work even if column was just added
+    let isAdmin = 0;
+    try {
+      const adminRow = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
+      isAdmin = adminRow?.is_admin ? 1 : 0;
+    } catch {}
+    req.user = { ...user, is_admin: isAdmin, isAdmin: !!isAdmin };
+    req.isAdmin = !!isAdmin;
     next();
   };
 }
@@ -85,18 +92,33 @@ export function registerUser(db, username, password, displayName) {
     if (userCount === 1) {
       db.prepare('UPDATE users SET username = ?, password_hash = ?, display_name = ? WHERE id = ?')
         .run(username, hash, nextDisplayName, legacyUser.id);
-      return { id: legacyUser.id, username, displayName: nextDisplayName };
+      // Legacy single-user account becomes admin
+      try { db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(legacyUser.id); } catch {}
+      return { id: legacyUser.id, username, displayName: nextDisplayName, isAdmin: true };
     }
   }
 
   const id = uuid();
   db.prepare('INSERT INTO users (id, username, password_hash, display_name) VALUES (?, ?, ?, ?)').run(id, username, hash, nextDisplayName);
-  return { id, username, displayName: nextDisplayName };
+
+  // First-ever real user becomes admin automatically
+  let isAdmin = false;
+  try {
+    const realUserCount = db.prepare(
+      "SELECT COUNT(*) as count FROM users WHERE username != ?"
+    ).get(LEGACY_USERNAME).count;
+    if (realUserCount === 1) {
+      db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(id);
+      isAdmin = true;
+    }
+  } catch {}
+
+  return { id, username, displayName: nextDisplayName, isAdmin };
 }
 
 export function loginUser(db, username, password) {
-  const user = db.prepare('SELECT id, username, password_hash, display_name FROM users WHERE username = ?').get(username);
+  const user = db.prepare('SELECT id, username, password_hash, display_name, is_admin FROM users WHERE username = ?').get(username);
   if (!user) throw new Error('Invalid credentials');
   if (!verifyPassword(password, user.password_hash)) throw new Error('Invalid credentials');
-  return { id: user.id, username: user.username, displayName: user.display_name };
+  return { id: user.id, username: user.username, displayName: user.display_name, isAdmin: !!user.is_admin };
 }
