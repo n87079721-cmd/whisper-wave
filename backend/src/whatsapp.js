@@ -2395,7 +2395,8 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     pendingReaction = { emoji: reactionEmoji, msg: latestOriginalMsg };
   }
 
-  debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, historyLength: messages.length, unrepliedCount });
+  const personaName = getActivePersonaName(db, userId, contactId);
+  debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, persona: personaName, historyLength: messages.length, unrepliedCount });
   let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone, { unrepliedCount, timezone: tz });
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
@@ -2424,6 +2425,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   debugLog(db, userId, 'reply_scheduled', {
     contact: contactName || phone,
+    persona: personaName,
     replyPreview: replyText,
     replyLength: replyText.length,
     delayMs: delay,
@@ -2436,7 +2438,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   // ── Send Telegram preview (non-blocking) ──
   if (isTelegramConfigured(db, userId)) {
-    sendReplyPreview(db, userId, contactName || phone, replyText, jid).catch(() => {});
+    sendReplyPreview(db, userId, contactName || phone, replyText, jid, { persona: personaName }).catch(() => {});
   }
 
   const pendingReply = {
