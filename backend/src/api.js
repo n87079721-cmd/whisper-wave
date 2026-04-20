@@ -1032,7 +1032,7 @@ export function createApiRouter(db) {
           if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
             // Clear media_path in DB so it doesn't try to serve a deleted file
-            db.prepare(`UPDATE messages SET media_path = NULL WHERE id = ?`).run(msgId);
+            db.prepare(`UPDATE messages SET media_path = NULL WHERE id = ? AND user_id = ?`).run(msgId, req.userId);
             console.log(`🗑️ Auto-deleted audio file after send: ${savedMedia.mediaPath}`);
           }
         } catch (delErr) {
