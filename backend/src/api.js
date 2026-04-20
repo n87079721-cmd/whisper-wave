@@ -1769,13 +1769,12 @@ RULES:
   router.get('/admin/users', (req, res) => {
     try {
       // Only first registered user (by created_at) is admin
-      const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
-      if (!firstUser || firstUser.id !== req.userId) {
+      if (!req.isAdmin) {
         return res.status(403).json({ error: 'Admin access required' });
       }
 
       const users = db.prepare(`
-        SELECT u.id, u.username, u.display_name, u.created_at,
+        SELECT u.id, u.username, u.display_name, u.created_at, u.is_admin,
           COALESCE(mc.msg_count, 0) as message_count,
           COALESCE(cc.contact_count, 0) as contact_count
         FROM users u
@@ -1784,7 +1783,7 @@ RULES:
         ORDER BY u.created_at ASC
       `).all();
 
-      res.json(users.map(u => ({ ...u, is_current: u.id === req.userId })));
+      res.json(users.map(u => ({ ...u, is_admin: !!u.is_admin, isAdmin: !!u.is_admin, is_current: u.id === req.userId })));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1793,8 +1792,7 @@ RULES:
   // ── Admin: Delete a user ───────────────────────────────
   router.delete('/admin/users/:userId', async (req, res) => {
     try {
-      const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
-      if (!firstUser || firstUser.id !== req.userId) {
+      if (!req.isAdmin) {
         return res.status(403).json({ error: 'Admin access required' });
       }
 
@@ -1851,8 +1849,7 @@ RULES:
   // ── Admin: Debug logs ─────────────────────────────────
   router.get('/admin/debug-logs', (req, res) => {
     try {
-      const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
-      if (!firstUser || firstUser.id !== req.userId) {
+      if (!req.isAdmin) {
         return res.status(403).json({ error: 'Admin access required' });
       }
 
@@ -1937,8 +1934,7 @@ RULES:
   // ── Admin: Clear debug logs ───────────────────────────
   router.delete('/admin/debug-logs', (req, res) => {
     try {
-      const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
-      if (!firstUser || firstUser.id !== req.userId) {
+      if (!req.isAdmin) {
         return res.status(403).json({ error: 'Admin access required' });
       }
       db.prepare(`DELETE FROM stats WHERE event = 'debug_log'`).run();
