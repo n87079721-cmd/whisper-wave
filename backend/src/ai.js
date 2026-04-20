@@ -78,7 +78,7 @@ const REACTION_EMOJIS = ['😂', '💀', '🔥', '❤️', '👀', '😭', '💯
  * Now context-aware: picks an appropriate emoji based on the message content.
  * Returns the emoji to react with, or null.
  */
-export async function shouldReact(apiKey, messageText) {
+export async function shouldReact(apiKey, messageText, { timezone } = {}) {
   // ~30% chance to react with an emoji
   if (Math.random() >= 0.30) return null;
   
