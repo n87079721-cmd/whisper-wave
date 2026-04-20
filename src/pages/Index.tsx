@@ -66,7 +66,9 @@ const Index = () => {
         <DashboardSidebar activePage={activePage} onPageChange={setActivePage} theme={theme} onToggleTheme={toggleTheme} />
       </div>
       <main className="flex-1 flex flex-col min-w-0 min-h-0">
-        <div className="flex-1 overflow-y-auto px-2 pb-[4.5rem] pt-2 sm:px-3 sm:pt-3 md:px-6 md:pb-6 md:pt-5">
+        {/* Mobile bottom padding clears the fixed bottom nav (~64px) + iOS safe-area inset + breathing room
+            so action buttons (Voice Studio Send, etc.) are never hidden behind the nav. */}
+        <div className="flex-1 overflow-y-auto px-2 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-2 sm:px-3 sm:pt-3 md:px-6 md:pb-6 md:pt-5">
           <div className="mx-auto w-full max-w-7xl h-full">
             {renderPage()}
           </div>
