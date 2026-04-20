@@ -36,7 +36,7 @@ export function getLastPreviewedReply(userId, jid) {
   const state = botInstances.get(userId);
   if (!state?.lastReplies) return null;
   return state.lastReplies.get(jid) || null;
-  }
+}
 
 async function telegramRequest(token, method, body = {}) {
   const res = await fetch(`${TELEGRAM_API}${token}/${method}`, {
@@ -57,6 +57,10 @@ async function telegramRequest(token, method, body = {}) {
 export async function sendReplyPreview(db, userId, contactName, replyText, jid) {
   const { token, chatId } = getBotConfig(db, userId);
   if (!token || !chatId) return;
+
+  // Remember this draft so /custom can edit/extend it later
+  const state = getBotState(userId);
+  state.lastReplies.set(jid, replyText);
 
   const text = `💬 Reply to *${escapeMarkdown(contactName)}*:\n\n${escapeMarkdown(replyText)}`;
   const keyboard = {
