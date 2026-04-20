@@ -550,6 +550,15 @@ export const api = {
     return requestJson<{ success: boolean }>('/api/admin/debug-logs', { method: 'DELETE' });
   },
 
+  // Per-user debug logs (available to all signed-in users, scoped to their own data)
+  getMyDebugLogs(limit = 200) {
+    return requestJson<Array<Record<string, any>>>(`/api/my/debug-logs?limit=${limit}`);
+  },
+
+  clearMyDebugLogs() {
+    return requestJson<{ success: boolean }>('/api/my/debug-logs', { method: 'DELETE' });
+  },
+
   cancelPendingReply(contact: string) {
     return requestJson<{ success: boolean; cancelled: boolean }>('/api/cancel-reply', {
       method: 'POST',

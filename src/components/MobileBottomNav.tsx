@@ -32,17 +32,19 @@ const primaryItems: { id: Page; label: string; icon: React.ElementType }[] = [
   { id: 'contacts', label: 'Contacts', icon: Users },
 ];
 
-const allMoreItems: { id: Page; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
+const allMoreItems: { id: Page; label: string; icon: React.ElementType; adminOnly?: boolean; nonAdminLabel?: string }[] = [
   { id: 'calls', label: 'Calls', icon: Phone },
   { id: 'voice', label: 'Voice Studio', icon: Mic },
   { id: 'settings', label: 'Settings', icon: Settings },
-  { id: 'admin', label: 'Admin', icon: Shield, adminOnly: true },
+  { id: 'admin', label: 'Admin', icon: Shield, nonAdminLabel: 'AI Activity' },
 ];
 
 const MobileBottomNav = ({ activePage, onPageChange, theme, onToggleTheme }: MobileBottomNavProps) => {
   const [showMore, setShowMore] = useState(false);
   const { user, logout } = useAuth();
-  const moreItems = allMoreItems.filter((item) => !item.adminOnly || user?.isAdmin);
+  const moreItems = allMoreItems
+    .filter((item) => !item.adminOnly || user?.isAdmin)
+    .map((item) => (!user?.isAdmin && item.nonAdminLabel ? { ...item, label: item.nonAdminLabel } : item));
   const isMoreActive = moreItems.some(i => i.id === activePage);
 
   return (

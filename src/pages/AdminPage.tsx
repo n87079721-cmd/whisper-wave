@@ -119,6 +119,7 @@ const Countdown = ({ scheduledAt, delayMs, delaySec, contact, onCancelled }: { s
 
 const AdminPage = () => {
   const { user } = useAuth();
+  const isAdmin = !!user?.isAdmin;
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -131,6 +132,7 @@ const AdminPage = () => {
   const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
 
   const fetchUsers = useCallback(async () => {
+    if (!isAdmin) { setLoading(false); return; }
     try {
       const data = await api.adminListUsers();
       setUsers(data);
@@ -139,23 +141,29 @@ const AdminPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   const fetchDebugLogs = useCallback(async () => {
     setDebugLoading(true);
     try {
-      const data = await api.adminGetDebugLogs(200) as DebugEntry[];
+      const data = (isAdmin
+        ? await api.adminGetDebugLogs(200)
+        : await api.getMyDebugLogs(200)) as DebugEntry[];
       setDebugLogs(data);
     } catch (err: any) {
       toast.error(err.message || 'Failed to load debug logs');
     } finally {
       setDebugLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   const clearDebugLogs = async () => {
     try {
-      await api.adminClearDebugLogs();
+      if (isAdmin) {
+        await api.adminClearDebugLogs();
+      } else {
+        await api.clearMyDebugLogs();
+      }
       setDebugLogs([]);
       toast.success('Debug logs cleared');
     } catch (err: any) {
@@ -277,11 +285,11 @@ const AdminPage = () => {
       >
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Shield className="w-5 h-5 text-primary" />
+            {isAdmin ? <Shield className="w-5 h-5 text-primary" /> : <Bug className="w-5 h-5 text-primary" />}
           </div>
           <div>
-            <h1 className="text-xl font-bold text-foreground">Admin Panel</h1>
-            <p className="text-xs text-muted-foreground">Manage accounts & monitor AI</p>
+            <h1 className="text-xl font-bold text-foreground">{isAdmin ? 'Admin Panel' : 'AI Activity'}</h1>
+            <p className="text-xs text-muted-foreground">{isAdmin ? 'Manage accounts & monitor AI' : 'Live AI activity for your account'}</p>
           </div>
           <button
             onClick={() => { setLoading(true); fetchUsers(); }}
@@ -292,8 +300,8 @@ const AdminPage = () => {
         </div>
       </motion.div>
 
-      {/* Users Card */}
-      <motion.div
+      {/* Users Card — admin only */}
+      {isAdmin && (<motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05 }}
@@ -388,7 +396,7 @@ const AdminPage = () => {
             ))}
           </div>
         )}
-      </motion.div>
+      </motion.div>)}
 
       {/* AI Debug Logs Card */}
       <motion.div
@@ -469,8 +477,8 @@ const AdminPage = () => {
         )}
       </motion.div>
 
-      {/* Danger Zone */}
-      <motion.div
+      {/* Danger Zone — admin only */}
+      {isAdmin && (<motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
@@ -484,7 +492,7 @@ const AdminPage = () => {
           Deleting an account permanently removes all their messages, contacts, WhatsApp session, and configuration.
           This cannot be undone.
         </p>
-      </motion.div>
+      </motion.div>)}
     </div>
   );
 };
