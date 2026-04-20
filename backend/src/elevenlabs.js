@@ -101,12 +101,12 @@ function mixAudioWithBackground(ffmpeg, voicePath, bgPath, outputPath, outputFor
   if (outputFormat === 'ogg') {
     execSync(
       `${ffmpeg} -y -i "${voicePath}" -stream_loop -1 -i "${bgPath}" -filter_complex "[1:a]volume=${vol}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[out]" -map "[out]" -c:a libopus -b:a 64k -ar 48000 -ac 1 -application voip -vbr constrained -frame_duration 60 "${outputPath}"`,
-      { stdio: 'pipe' }
+      { stdio: 'pipe', timeout: 30000 }
     );
   } else {
     execSync(
       `${ffmpeg} -y -i "${voicePath}" -stream_loop -1 -i "${bgPath}" -filter_complex "[1:a]volume=${vol}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[out]" -map "[out]" -c:a libmp3lame -b:a 128k "${outputPath}"`,
-      { stdio: 'pipe' }
+      { stdio: 'pipe', timeout: 30000 }
     );
   }
 }
