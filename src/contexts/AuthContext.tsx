@@ -46,6 +46,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const merged = { ...JSON.parse(savedUser), ...data.user, isAdmin: !!data.user.isAdmin };
             localStorage.setItem(USER_KEY, JSON.stringify(merged));
             setUser(merged);
+            // Silently rotate the auth token to keep the session alive forever
+            if (data.token) {
+              localStorage.setItem(TOKEN_KEY, data.token);
+              setToken(data.token);
+            }
           }
         })
         .catch(() => {});
