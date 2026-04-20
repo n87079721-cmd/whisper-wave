@@ -29,7 +29,7 @@ export function createApiRouter(db) {
       if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
       const user = registerUser(db, username, password, displayName);
       const token = createToken(user.id);
-      res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName } });
+      res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, isAdmin: !!user.isAdmin } });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
