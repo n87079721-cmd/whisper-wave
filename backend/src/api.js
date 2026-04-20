@@ -860,7 +860,7 @@ export function createApiRouter(db) {
           replyToContent = (quotedRow.content || '').slice(0, 200);
           replyToSender = quotedRow.direction === 'sent' ? 'You' : null;
           if (!replyToSender) {
-            const c = db.prepare('SELECT name, phone FROM contacts WHERE id = ?').get(quotedRow.contact_id);
+            const c = db.prepare('SELECT name, phone FROM contacts WHERE id = ? AND user_id = ?').get(quotedRow.contact_id, req.userId);
             replyToSender = c?.name || c?.phone || null;
           }
         }
