@@ -143,9 +143,19 @@ const SettingsPage = () => {
     setSyncing(true);
     try {
       await api.triggerSync();
-      toast.success('Recovery sync started — fetching missing chats & contacts');
-    } catch { toast.error('Failed to start sync'); }
-    finally { setSyncing(false); }
+      toast.success('Recovery sync started — fetching latest chats & contacts');
+      // Poll diagnostics for ~20s so the user sees live updates
+      const pollUntil = Date.now() + 20000;
+      const tick = async () => {
+        try { setDiagnostics(await api.getSyncDiagnostics()); } catch {}
+        if (Date.now() < pollUntil) setTimeout(tick, 2500);
+        else setSyncing(false);
+      };
+      tick();
+    } catch {
+      toast.error('Failed to start sync');
+      setSyncing(false);
+    }
   };
 
   const handleLoadDiagnostics = async () => {
