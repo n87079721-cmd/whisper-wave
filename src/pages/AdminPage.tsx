@@ -396,7 +396,7 @@ const AdminPage = () => {
             ))}
           </div>
         )}
-      </motion.div>
+      </motion.div>)}
 
       {/* AI Debug Logs Card */}
       <motion.div
@@ -477,8 +477,8 @@ const AdminPage = () => {
         )}
       </motion.div>
 
-      {/* Danger Zone */}
-      <motion.div
+      {/* Danger Zone — admin only */}
+      {isAdmin && (<motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
@@ -492,7 +492,7 @@ const AdminPage = () => {
           Deleting an account permanently removes all their messages, contacts, WhatsApp session, and configuration.
           This cannot be undone.
         </p>
-      </motion.div>
+      </motion.div>)}
     </div>
   );
 };
