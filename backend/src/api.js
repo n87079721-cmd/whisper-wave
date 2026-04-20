@@ -1968,8 +1968,21 @@ RULES:
       if (!req.isAdmin) {
         return res.status(403).json({ error: 'Admin access required' });
       }
-      db.prepare(`DELETE FROM stats WHERE event = 'debug_log'`).run();
-      res.json({ success: true });
+      // Scope deletion to a specific account when userId is provided.
+      // Without it, refuse to wipe logs across ALL accounts (dangerous default).
+      const targetUserId = req.query.userId || null;
+      if (!targetUserId) {
+        return res.status(400).json({
+          error: 'userId query param required. To clear logs for a specific account pass ?userId=<id>. To clear ALL accounts pass ?userId=all explicitly.'
+        });
+      }
+      let result;
+      if (targetUserId === 'all') {
+        result = db.prepare(`DELETE FROM stats WHERE event = 'debug_log'`).run();
+      } else {
+        result = db.prepare(`DELETE FROM stats WHERE event = 'debug_log' AND user_id = ?`).run(targetUserId);
+      }
+      res.json({ success: true, deleted: result.changes, scope: targetUserId });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
