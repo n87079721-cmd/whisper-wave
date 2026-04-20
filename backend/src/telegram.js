@@ -7,7 +7,7 @@
 const TELEGRAM_API = 'https://api.telegram.org/bot';
 
 // Per-user bot state
-const botInstances = new Map(); // userId -> { polling, offset, awaitingCustom: Map<jid, true> }
+const botInstances = new Map(); // userId -> { polling, offset, awaitingCustom: Map<jid, true>, lastReplies: Map<jid, string> }
 
 function getBotConfig(db, userId) {
   const tokenRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'telegram_bot_token'").get(userId);
@@ -20,10 +20,23 @@ function getBotConfig(db, userId) {
 
 function getBotState(userId) {
   if (!botInstances.has(userId)) {
-    botInstances.set(userId, { polling: false, offset: 0, awaitingCustom: new Map() });
+    botInstances.set(userId, { polling: false, offset: 0, awaitingCustom: new Map(), lastReplies: new Map() });
   }
-  return botInstances.get(userId);
+  const inst = botInstances.get(userId);
+  if (!inst.lastReplies) inst.lastReplies = new Map();
+  if (!inst.awaitingCustom) inst.awaitingCustom = new Map();
+  return inst;
 }
+
+/**
+ * Look up the most recently previewed AI reply for a jid (used by custom mode
+ * so the AI can EDIT the previous draft rather than write a fresh one).
+ */
+export function getLastPreviewedReply(userId, jid) {
+  const state = botInstances.get(userId);
+  if (!state?.lastReplies) return null;
+  return state.lastReplies.get(jid) || null;
+  }
 
 async function telegramRequest(token, method, body = {}) {
   const res = await fetch(`${TELEGRAM_API}${token}/${method}`, {
