@@ -519,6 +519,9 @@ export const api = {
       created_at: string;
       message_count: number;
       contact_count: number;
+      memory_count?: number;
+      directive_count?: number;
+      persona_count?: number;
       is_current: boolean;
       is_admin?: boolean;
       isAdmin?: boolean;
