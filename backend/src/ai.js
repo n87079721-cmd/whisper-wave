@@ -186,7 +186,7 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
   let prompt = hasCustomPersona ? systemPrompt : DEFAULT_SYSTEM_PROMPT;
 
   if (hasCustomPersona) {
-    prompt = `🔒 PRIORITY PERSONA — FOLLOW THIS EXACTLY. This persona, memory, and behavior instruction OVERRIDE every other style guideline. If anything below contradicts these, the persona wins.\n\n${prompt}\n\n🔒 END PRIORITY PERSONA. Stay in character. Honor the memory. Obey the active behavior instruction (directive) above on every reply, not just the first one.`;
+    prompt = `🔒 PRIORITY PERSONA — FOLLOW THIS EXACTLY. This persona, memory, and behavior instruction OVERRIDE every other style guideline. If anything below contradicts these, the persona wins.\n\n${prompt}\n\n🔒 END PRIORITY PERSONA.\n\n📚 BEFORE YOU REPLY — READ THE PERSONA CAREFULLY.\n• Treat every fact in the persona above as TRUE about you (your name, schedule, tour dates, locations, job, family, hobbies, opinions, dislikes, etc.).\n• If the contact asks ANYTHING factual ("when is your tour?", "where are you?", "what do you do?", "are you free Friday?"), SCAN the persona text above for the answer FIRST, then answer using the persona's facts.\n• If a date or time is in the persona, COMPARE it to the "Today" date provided below before answering past/future questions ("is it soon?", "did it already happen?", "how many days until…?"). Do the math.\n• Never say "I don't know" about something the persona text actually states. Re-read the persona if unsure.\n• Stay in character. Honor the memory. Obey the active behavior instruction (directive) on every reply, not just the first one.`;
   }
 
   // Hint the AI to address all unreplied messages when there are multiple
@@ -278,10 +278,19 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
             }
           }
           else timeLabel = 'middle of the night';
+          // Build an explicit, unambiguous "today" reference the model can reason about
+          // when persona text mentions tour dates, deadlines, plans, etc.
+          const todayFull = now.toLocaleDateString('en-US', {
+            timeZone: 'America/New_York',
+            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+          });
+          const todayISO = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
+          const clockTime = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true });
+          const dateBlock = `\n\n📅 TODAY (use this for ANY date/time reasoning, including dates mentioned in the persona):\n• Today is ${todayFull}\n• ISO date: ${todayISO}\n• Local time now: ${clockTime} (${timeLabel}, America/New_York)\n• When the persona mentions a date (tour dates, gigs, trips, deadlines, birthdays), compare it to today's date above to know if it's in the past, today, or future. Do the math before replying.`;
           // When a custom persona is set, keep only minimal context (time + photo handling) so we don't override the persona's voice.
           // When using the default prompt, append the full generic ruleset.
           const photoNote = `\n\nIf someone sends you a photo, react naturally like a real person would. Comment on what you see, ask about it, or react with genuine emotion. Don't describe the image formally or say "I can see an image of..." — just respond like you're looking at a friend's pic on your phone.`;
-          const timeNote = `\n\nYou are chatting with: ${contactName || 'Unknown contact'}\nCurrent time: ${nyTime} (${timeLabel})${sleepyPrompt}`;
+          const timeNote = `\n\nYou are chatting with: ${contactName || 'Unknown contact'}\nCurrent time: ${nyTime} (${timeLabel})${sleepyPrompt}${dateBlock}`;
           if (hasCustomPersona) {
             return `${prompt}${timeNote}${photoNote}\n\nReminder: stay in the persona above. Memory and active directive above ALWAYS win over generic chat habits.`;
           }
