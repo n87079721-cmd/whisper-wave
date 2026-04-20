@@ -198,7 +198,7 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgrou
       // Use voip application mode + constrained VBR for maximum WhatsApp compatibility
       execSync(
         `${ffmpeg} -y -i "${mp3Path}" -c:a libopus -b:a 64k -ar 48000 -ac 1 -application voip -vbr constrained -frame_duration 60 "${oggPath}"`,
-        { stdio: 'pipe' }
+        { stdio: 'pipe', timeout: 30_000 }
       );
       const oggBuffer = fs.readFileSync(oggPath);
       // Validate output is non-trivial

@@ -183,7 +183,12 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
 
   // Hint the AI to address all unreplied messages when there are multiple
   if (unrepliedCount && unrepliedCount > 1) {
-    prompt += `\n\nIMPORTANT: The contact sent ${unrepliedCount} messages since your last reply. Make sure your response addresses all of them naturally in one go, don't ignore any.`;
+    prompt += `\n\nIMPORTANT: The contact sent ${unrepliedCount} messages in a row since your last reply. Read ALL of them carefully — don't just respond to the latest one. Mentally summarize what they're saying across those messages and address the key points naturally in one reply. If they covered multiple topics, you can briefly touch on each. Do NOT ignore any of them.`;
+  }
+
+  // Reinforce reading the full chat history (the model sees up to 80 recent messages)
+  if (messages && messages.length >= 20) {
+    prompt += `\n\nYou have the last ${messages.length} messages from this conversation as context. USE THEM. Reference earlier topics, inside jokes, plans, or details they mentioned before — that's how a real friend would text. Don't reply like you just walked into the chat.`;
   }
 
   // For rewrites: explicitly ask for a DIFFERENT reply
