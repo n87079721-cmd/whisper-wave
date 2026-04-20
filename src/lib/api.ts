@@ -546,8 +546,13 @@ export const api = {
     return requestJson<Array<Record<string, any>>>(`/api/admin/debug-logs?${params}`);
   },
 
-  adminClearDebugLogs() {
-    return requestJson<{ success: boolean }>('/api/admin/debug-logs', { method: 'DELETE' });
+  adminClearDebugLogs(userId: string) {
+    // userId is REQUIRED — pass a specific user id, or 'all' to wipe across every account.
+    const params = new URLSearchParams({ userId });
+    return requestJson<{ success: boolean; deleted: number; scope: string }>(
+      `/api/admin/debug-logs?${params}`,
+      { method: 'DELETE' }
+    );
   },
 
   // Per-user debug logs (available to all signed-in users, scoped to their own data)

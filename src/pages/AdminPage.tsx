@@ -130,6 +130,8 @@ const AdminPage = () => {
   const [debugLoading, setDebugLoading] = useState(false);
   const [debugAutoRefresh, setDebugAutoRefresh] = useState(true);
   const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
+  // Admin-only filter: which account's logs to view AND clear. '' = all accounts.
+  const [debugUserFilter, setDebugUserFilter] = useState<string>('');
 
   const fetchUsers = useCallback(async () => {
     if (!isAdmin) { setLoading(false); return; }
@@ -147,7 +149,7 @@ const AdminPage = () => {
     setDebugLoading(true);
     try {
       const data = (isAdmin
-        ? await api.adminGetDebugLogs(200)
+        ? await api.adminGetDebugLogs(200, debugUserFilter || undefined)
         : await api.getMyDebugLogs(200)) as DebugEntry[];
       setDebugLogs(data);
     } catch (err: any) {
@@ -155,12 +157,17 @@ const AdminPage = () => {
     } finally {
       setDebugLoading(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, debugUserFilter]);
 
   const clearDebugLogs = async () => {
     try {
       if (isAdmin) {
-        await api.adminClearDebugLogs();
+        const scope = debugUserFilter || 'all';
+        if (scope === 'all') {
+          const ok = window.confirm('Clear debug logs for ALL accounts? This cannot be undone. Tip: pick a specific account from the dropdown to scope this delete.');
+          if (!ok) return;
+        }
+        await api.adminClearDebugLogs(scope);
       } else {
         await api.clearMyDebugLogs();
       }
@@ -410,6 +417,21 @@ const AdminPage = () => {
           <span className="text-sm font-medium text-foreground flex-1">
             AI Debug Log ({debugLogs.length})
           </span>
+          {isAdmin && (
+            <select
+              value={debugUserFilter}
+              onChange={(e) => setDebugUserFilter(e.target.value)}
+              className="px-2 py-1 rounded-md text-[11px] bg-secondary text-foreground border border-border focus:outline-none focus:ring-1 focus:ring-primary max-w-[140px]"
+              title="Filter logs by account (also scopes the clear button)"
+            >
+              <option value="">All accounts</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.display_name || u.username}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             onClick={() => setDebugAutoRefresh(prev => !prev)}
             className={`px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${
@@ -428,7 +450,7 @@ const AdminPage = () => {
           <button
             onClick={clearDebugLogs}
             className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-            title="Clear all debug logs"
+            title={isAdmin ? (debugUserFilter ? 'Clear logs for selected account' : 'Clear logs for ALL accounts') : 'Clear my debug logs'}
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
