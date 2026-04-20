@@ -1973,6 +1973,39 @@ function getConfigValue(db, userId, key, fallback) {
   return row?.value ?? fallback;
 }
 
+/**
+ * Build the full system prompt for a contact: persona (or global) + memory + active directive.
+ * Directive is wrapped at the top AND repeated at the bottom so the model can't drift away from it.
+ */
+function buildContactSystemPrompt(db, userId, contactId) {
+  let systemPrompt = '';
+  let memory = '';
+  let directive = '';
+  try {
+    const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    if (contactRow?.prompt_id) {
+      const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
+      systemPrompt = promptRow?.content || '';
+    }
+    if (contactRow?.memory) memory = contactRow.memory;
+    if (contactRow?.active_directive) {
+      const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
+      if (notExpired) directive = contactRow.active_directive;
+    }
+  } catch {}
+  if (!systemPrompt) {
+    const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
+    systemPrompt = globalRow?.value || '';
+  }
+  if (directive) {
+    systemPrompt = `🎯 ACTIVE BEHAVIOR DIRECTIVE (must be followed on EVERY reply, no exceptions):\n${directive}\n\n────────\n\n${systemPrompt}\n\n────────\n\n🎯 REMINDER — ACTIVE DIRECTIVE STILL APPLIES: ${directive}`;
+  }
+  if (memory) {
+    systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON (always reference when relevant):\n${memory}`;
+  }
+  return systemPrompt;
+}
+
 function isWithinActiveHours(db, userId) {
   const start = getConfigValue(db, userId, 'ai_active_hours_start', '09:00');
   const end = getConfigValue(db, userId, 'ai_active_hours_end', '02:00');
@@ -2254,11 +2287,12 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
     systemPrompt = globalRow?.value || '';
   }
-  if (contactMemory) {
-    systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON:\n${contactMemory}`;
-  }
   if (contactDirective) {
-    systemPrompt += `\n\nCURRENT BEHAVIOR INSTRUCTION:\n${contactDirective}`;
+    // Directive goes FIRST so it frames the entire persona, then again at the end for reinforcement.
+    systemPrompt = `🎯 ACTIVE BEHAVIOR DIRECTIVE (must be followed on EVERY reply, no exceptions):\n${contactDirective}\n\n────────\n\n${systemPrompt}\n\n────────\n\n🎯 REMINDER — ACTIVE DIRECTIVE STILL APPLIES: ${contactDirective}`;
+  }
+  if (contactMemory) {
+    systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON (always reference when relevant):\n${contactMemory}`;
   }
   const replyChance = parseInt(getConfigValue(db, userId, 'ai_reply_chance', '70'), 10);
 
@@ -3153,24 +3187,7 @@ export function getTelegramCallbackHandlers(userId, db) {
       const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
       if (!keyRow?.value) return;
 
-      let systemPrompt = '';
-      try {
-        const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires FROM contacts WHERE id = ? AND user_id = ?").get(contact.id, userId);
-        if (contactRow?.prompt_id) {
-          const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
-          systemPrompt = promptRow?.content || '';
-        }
-        if (!systemPrompt) {
-          const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
-          systemPrompt = globalRow?.value || '';
-        }
-        if (contactRow?.memory) systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON:\n${contactRow.memory}`;
-        if (contactRow?.active_directive) {
-          const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
-          if (notExpired) systemPrompt += `\n\nCURRENT BEHAVIOR INSTRUCTION:\n${contactRow.active_directive}`;
-        }
-      } catch {}
-
+      const systemPrompt = buildContactSystemPrompt(db, userId, contact.id);
       const contactName = contact.name || contact.phone || 'Unknown';
       const { generateReply } = await import('./ai.js');
       let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'rewrite' });
@@ -3194,23 +3211,7 @@ export function getTelegramCallbackHandlers(userId, db) {
       `).all(contact.id, userId).reverse();
 
       // Build the full system prompt (same as normal auto-reply) + custom instructions
-      let systemPrompt = '';
-      try {
-        const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires FROM contacts WHERE id = ? AND user_id = ?").get(contact.id, userId);
-        if (contactRow?.prompt_id) {
-          const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
-          systemPrompt = promptRow?.content || '';
-        }
-        if (!systemPrompt) {
-          const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
-          systemPrompt = globalRow?.value || '';
-        }
-        if (contactRow?.memory) systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON:\n${contactRow.memory}`;
-        if (contactRow?.active_directive) {
-          const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
-          if (notExpired) systemPrompt += `\n\nCURRENT BEHAVIOR INSTRUCTION:\n${contactRow.active_directive}`;
-        }
-      } catch {}
+      const systemPrompt = buildContactSystemPrompt(db, userId, contact.id);
 
       debugLog(db, userId, 'telegram_custom', { jid, contact: contact.name || contact.phone || jid, instructions: instructions.slice(0, 200) });
 

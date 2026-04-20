@@ -12,6 +12,9 @@ interface UserAccount {
   created_at: string;
   message_count: number;
   contact_count: number;
+  memory_count?: number;
+  directive_count?: number;
+  persona_count?: number;
   is_current: boolean;
   is_admin?: boolean;
   isAdmin?: boolean;
@@ -333,6 +336,11 @@ const AdminPage = () => {
                   <p className="text-xs text-muted-foreground">
                     @{u.username} • Joined {formatDate(u.created_at)} • {u.contact_count} contacts • {u.message_count} msgs
                   </p>
+                  {(u.memory_count || u.directive_count || u.persona_count) ? (
+                    <p className="text-[11px] text-muted-foreground/80 mt-0.5">
+                      🧠 {u.memory_count || 0} memories • 🎯 {u.directive_count || 0} directives • 🎭 {u.persona_count || 0} personas
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex-shrink-0 flex items-center gap-1">
                   {!u.is_current && (

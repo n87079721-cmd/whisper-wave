@@ -179,7 +179,15 @@ export function shouldAlsoReplyAfterReaction(unrepliedCount = 0, messageText = '
 export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions, previousReply } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
 
-  let prompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  // Detect whether the caller passed an explicit per-contact persona/directive bundle.
+  // If so, that bundle is sacred — we wrap it with a high-priority preface and DO NOT
+  // dilute it with the generic "real person texting" block below.
+  const hasCustomPersona = !!(systemPrompt && systemPrompt.trim());
+  let prompt = hasCustomPersona ? systemPrompt : DEFAULT_SYSTEM_PROMPT;
+
+  if (hasCustomPersona) {
+    prompt = `🔒 PRIORITY PERSONA — FOLLOW THIS EXACTLY. This persona, memory, and behavior instruction OVERRIDE every other style guideline. If anything below contradicts these, the persona wins.\n\n${prompt}\n\n🔒 END PRIORITY PERSONA. Stay in character. Honor the memory. Obey the active behavior instruction (directive) above on every reply, not just the first one.`;
+  }
 
   // Hint the AI to address all unreplied messages when there are multiple
   if (unrepliedCount && unrepliedCount > 1) {
@@ -270,7 +278,14 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
             }
           }
           else timeLabel = 'middle of the night';
-          return `${prompt}\n\nYou are chatting with: ${contactName || 'Unknown contact'}\nCurrent time: ${nyTime} (${timeLabel})\n\nMatch your energy and greetings to the time of day naturally — say good morning in the morning, be chill/sleepy late at night, etc. Behave like a real person who is aware of what time it is.${sleepyPrompt}\n\nIf someone sends you a photo, react naturally like a real person would. Comment on what you see, ask about it, or react with genuine emotion. Don't describe the image formally or say "I can see an image of..." — just respond like you're looking at a friend's pic on your phone.\n\nCRITICAL RULES FOR TEXTING:\n- You are a REAL PERSON texting on WhatsApp. NOT an AI assistant.\n- Do NOT ask multiple questions in one message. Real people rarely do that.\n- Do NOT be overly helpful, enthusiastic, or eager. That's a dead giveaway you're AI.\n- Do NOT use phrases like "How are you doing?", "What's on your mind?", "Tell me more!", "That sounds amazing!" back-to-back.\n- Sometimes just react. Say "lol", "damn", "that's crazy", "fr", "nah" — short and real.\n- Not every message needs a question. Sometimes just make a statement or share a thought.\n- Keep most replies SHORT — 1-2 sentences max. Only go longer when the topic genuinely calls for it.\n- Use lowercase, casual grammar, abbreviations naturally. No perfect punctuation.\n- Mirror the other person's energy — if they send short texts, you send short texts.\n- If you have nothing meaningful to add, just react briefly. Don't force conversation.\n- NEVER sound like a therapist, life coach, or customer service rep.`;
+          // When a custom persona is set, keep only minimal context (time + photo handling) so we don't override the persona's voice.
+          // When using the default prompt, append the full generic ruleset.
+          const photoNote = `\n\nIf someone sends you a photo, react naturally like a real person would. Comment on what you see, ask about it, or react with genuine emotion. Don't describe the image formally or say "I can see an image of..." — just respond like you're looking at a friend's pic on your phone.`;
+          const timeNote = `\n\nYou are chatting with: ${contactName || 'Unknown contact'}\nCurrent time: ${nyTime} (${timeLabel})${sleepyPrompt}`;
+          if (hasCustomPersona) {
+            return `${prompt}${timeNote}${photoNote}\n\nReminder: stay in the persona above. Memory and active directive above ALWAYS win over generic chat habits.`;
+          }
+          return `${prompt}${timeNote}\n\nMatch your energy and greetings to the time of day naturally — say good morning in the morning, be chill/sleepy late at night, etc. Behave like a real person who is aware of what time it is.${photoNote}\n\nCRITICAL RULES FOR TEXTING:\n- You are a REAL PERSON texting on WhatsApp. NOT an AI assistant.\n- Do NOT ask multiple questions in one message. Real people rarely do that.\n- Do NOT be overly helpful, enthusiastic, or eager. That's a dead giveaway you're AI.\n- Do NOT use phrases like "How are you doing?", "What's on your mind?", "Tell me more!", "That sounds amazing!" back-to-back.\n- Sometimes just react. Say "lol", "damn", "that's crazy", "fr", "nah" — short and real.\n- Not every message needs a question. Sometimes just make a statement or share a thought.\n- Keep most replies SHORT — 1-2 sentences max. Only go longer when the topic genuinely calls for it.\n- Use lowercase, casual grammar, abbreviations naturally. No perfect punctuation.\n- Mirror the other person's energy — if they send short texts, you send short texts.\n- If you have nothing meaningful to add, just react briefly. Don't force conversation.\n- NEVER sound like a therapist, life coach, or customer service rep.`;
         })(),
       },
       ...chatMessages,
@@ -435,6 +450,10 @@ export async function generateConversationSummary(apiKey, messages, contactName,
     return `${speaker}: ${m.content || '(media)'}`;
   }).join('\n');
 
+  // Build today's date label in the phone owner's local TZ (server TZ is fine — same wall clock as logs)
+  const today = new Date();
+  const dateLabel = today.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -453,8 +472,9 @@ export async function generateConversationSummary(apiKey, messages, contactName,
 - Emotional tone
 
 ${existingMemory ? `Existing memory (don't repeat what's already known):\n${existingMemory}\n` : ''}
-Format: Start with today's date in brackets, then the summary.
-Example: [Apr 4] Talked about their new job at Google. They're excited but nervous about the commute. Planning to grab dinner next Friday.
+Format: Start with EXACTLY this date in brackets (do not change it, do not guess): [${dateLabel}]
+Then write the summary right after.
+Example: [${dateLabel}] Talked about their new job at Google. They're excited but nervous about the commute. Planning to grab dinner next Friday.
 
 Respond with ONLY the summary, nothing else.`,
         },
