@@ -2272,10 +2272,19 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   // Debug visibility: confirm what was actually included for this contact.
   try {
     const probe = db.prepare("SELECT prompt_id, active_directive, directive_expires, LENGTH(memory) AS mem_len FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    let personaName = null;
+    let personaChars = 0;
+    if (probe?.prompt_id) {
+      const p = db.prepare("SELECT name, LENGTH(content) AS len FROM prompts WHERE id = ? AND user_id = ?").get(probe.prompt_id, userId);
+      personaName = p?.name || null;
+      personaChars = p?.len || 0;
+    }
     const directiveActive = !!(probe?.active_directive && (!probe.directive_expires || new Date() < new Date(probe.directive_expires)));
     debugLog(db, userId, 'prompt_assembled', {
       contact: contactName || phone,
       hasPersona: !!probe?.prompt_id,
+      personaName,
+      personaChars,
       hasDirective: directiveActive,
       memoryChars: probe?.mem_len || 0,
       promptChars: systemPrompt.length,
