@@ -609,7 +609,7 @@ export function createApiRouter(db) {
       if (existing) {
         // Update name if provided
         if (name?.trim()) {
-          db.prepare("UPDATE contacts SET name = ?, updated_at = datetime('now') WHERE id = ?").run(contactName, existing.id);
+          db.prepare("UPDATE contacts SET name = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?").run(contactName, existing.id, req.userId);
         }
         return res.json({ id: existing.id, updated: true });
       }
