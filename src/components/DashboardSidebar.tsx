@@ -26,7 +26,7 @@ interface DashboardSidebarProps {
   onToggleTheme: () => void;
 }
 
-const allNavItems: { id: Page; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
+const allNavItems: { id: Page; label: string; icon: React.ElementType; adminOnly?: boolean; nonAdminLabel?: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'conversations', label: 'Chats', icon: MessageSquare },
   { id: 'status', label: 'Status', icon: CircleDot },
@@ -34,13 +34,15 @@ const allNavItems: { id: Page; label: string; icon: React.ElementType; adminOnly
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'voice', label: 'Voice Studio', icon: Mic },
   { id: 'settings', label: 'Settings', icon: Settings },
-  { id: 'admin', label: 'Admin', icon: Shield, adminOnly: true },
+  { id: 'admin', label: 'Admin', icon: Shield, nonAdminLabel: 'AI Activity' },
 ];
 
 const DashboardSidebar = ({ activePage, onPageChange, theme, onToggleTheme }: DashboardSidebarProps) => {
   const [collapsed, setCollapsed] = useState(false);
   const { user, logout } = useAuth();
-  const navItems = allNavItems.filter((item) => !item.adminOnly || user?.isAdmin);
+  const navItems = allNavItems
+    .filter((item) => !item.adminOnly || user?.isAdmin)
+    .map((item) => (!user?.isAdmin && item.nonAdminLabel ? { ...item, label: item.nonAdminLabel } : item));
 
   return (
     <aside

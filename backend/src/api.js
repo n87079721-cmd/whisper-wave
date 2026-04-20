@@ -1975,6 +1975,35 @@ RULES:
     }
   });
 
+  // ── Per-user: Get own debug logs (no admin required) ──
+  router.get('/my/debug-logs', (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit) || 200, 500);
+      const rows = db.prepare(
+        `SELECT id, user_id, data, created_at FROM stats
+         WHERE event = 'debug_log' AND user_id = ?
+         ORDER BY id DESC LIMIT ?`
+      ).all(req.userId, limit);
+      res.json(rows.map(r => {
+        let parsed = {};
+        try { parsed = JSON.parse(r.data || '{}'); } catch {}
+        return { id: r.id, userId: r.user_id, ...parsed, created_at: r.created_at };
+      }));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Per-user: Clear own debug logs ────────────────────
+  router.delete('/my/debug-logs', (req, res) => {
+    try {
+      db.prepare(`DELETE FROM stats WHERE event = 'debug_log' AND user_id = ?`).run(req.userId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Telegram Bot Test ────────────────────────────────
   router.post('/telegram/test', async (req, res) => {
     try {
