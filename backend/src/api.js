@@ -42,14 +42,22 @@ export function createApiRouter(db) {
       const user = loginUser(db, username, password);
       const token = createToken(user.id);
       // Don't auto-start WhatsApp on login — user clicks Connect on dashboard
-      res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName } });
+      res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, isAdmin: !!user.isAdmin } });
     } catch (err) {
       res.status(401).json({ error: err.message });
     }
   });
 
   router.get('/auth/me', auth, (req, res) => {
-    res.json({ user: req.user });
+    res.json({
+      user: {
+        id: req.user.id,
+        username: req.user.username,
+        display_name: req.user.display_name,
+        displayName: req.user.display_name,
+        isAdmin: !!req.user.isAdmin,
+      },
+    });
   });
 
   // ── All routes below require auth ────────────────────────
