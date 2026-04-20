@@ -3132,7 +3132,7 @@ export function startConversationStarterLoop(userId, db) {
         try {
           // Get last conversation summary from memory
           const lastSummary = (contact.memory || '').split('\n\n').pop() || '';
-          const starter = await generateConversationStarter(keyRow.value, contactName, contact.memory, lastSummary);
+          const starter = await generateConversationStarter(keyRow.value, contactName, contact.memory, lastSummary, { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
           if (!starter) continue;
 
           // Send with a natural delay
