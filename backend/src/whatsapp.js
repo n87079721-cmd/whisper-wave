@@ -2266,6 +2266,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   // Per-contact prompt — use the shared helper so persona, memory, and active
   // directive are assembled identically across auto-reply, rewrite, and custom paths.
   const systemPrompt = buildContactSystemPrompt(db, userId, contactId);
+  // Per-account timezone — every AI call below uses this so date/time reasoning,
+  // late-night sleepy mode, and "today" date all reflect the user's local time.
+  const tz = getConfigValue(db, userId, 'ai_timezone', 'America/New_York');
   // Debug visibility: confirm what was actually included for this contact.
   try {
     const probe = db.prepare("SELECT prompt_id, active_directive, directive_expires, LENGTH(memory) AS mem_len FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
