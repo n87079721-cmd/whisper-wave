@@ -176,8 +176,9 @@ export function shouldAlsoReplyAfterReaction(unrepliedCount = 0, messageText = '
  * @param {string} contactName - Name of the contact for context
  * @returns {Promise<string>} The generated reply text
  */
-export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions, previousReply } = {}) {
+export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions, previousReply, timezone } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
+  const tz = timezone || 'America/New_York';
 
   // Detect whether the caller passed an explicit per-contact persona/directive bundle.
   // If so, that bundle is sacred — we wrap it with a high-priority preface and DO NOT
