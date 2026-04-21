@@ -655,6 +655,35 @@ export const api = {
       body: JSON.stringify({ enabled }),
     });
   },
+
+  // ── AI Voice Notes ──
+  getVoiceSettings() {
+    return requestJson<{ enabled: boolean; chance: number; maxPerDay: number; bgVolume: number }>('/api/voice-settings');
+  },
+  updateVoiceSettings(payload: { enabled?: boolean; chance?: number; maxPerDay?: number; bgVolume?: number }) {
+    return requestJson<{ success: boolean }>('/api/voice-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+  getContactVoice(contactId: string) {
+    return requestJson<{ enabled: boolean; maxPerDay: number | null; bgSound: string; sentToday: number }>(`/api/contacts/${contactId}/voice`);
+  },
+  updateContactVoice(contactId: string, payload: { enabled?: boolean; maxPerDay?: number | null; bgSound?: string | null }) {
+    return requestJson<{ success: boolean }>(`/api/contacts/${contactId}/voice`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+  setPromptVoice(promptId: string, voiceId: string | null, modelId: string | null = null) {
+    return requestJson<{ success: boolean }>(`/api/prompts/${promptId}/voice`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voiceId, modelId }),
+    });
+  },
 };
 
 // Types
