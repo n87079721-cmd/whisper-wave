@@ -2108,7 +2108,12 @@ function decideVoiceNote(db, userId, contactId, replyText) {
 
   // Background sound: contact override → global default → none
   const globalBg = getConfigValue(db, userId, 'ai_voice_default_bg_sound', '') || 'none';
-  const bgSound = row.voice_bg_sound || globalBg || 'none';
+  let bgSound = row.voice_bg_sound || globalBg || 'none';
+  // Only allow user-extracted custom sounds (presets removed). Validate ownership.
+  if (bgSound && bgSound !== 'none') {
+    const owned = db.prepare('SELECT 1 FROM custom_sounds WHERE user_id = ? AND sound_id = ?').get(userId, bgSound);
+    if (!owned) bgSound = 'none';
+  }
 
   return {
     send: true,
