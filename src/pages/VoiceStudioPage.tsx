@@ -489,9 +489,9 @@ const VoiceStudioPage = () => {
                         setPreviewingSound(s.id);
                       }
                     }}
-                    className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center hover:bg-primary/30 shrink-0"
+                     className="w-9 h-9 rounded-full bg-primary/20 flex items-center justify-center hover:bg-primary/30 shrink-0 active:scale-95"
                   >
-                    {previewingSound === s.id ? <Pause className="w-3 h-3 text-primary" /> : <Play className="w-3 h-3 text-primary ml-0.5" />}
+                    {previewingSound === s.id ? <Pause className="w-4 h-4 text-primary" /> : <Play className="w-4 h-4 text-primary ml-0.5" />}
                   </button>
                   
                   {editingSoundId === s.dbId ? (
@@ -516,34 +516,34 @@ const VoiceStudioPage = () => {
                     <span className="flex-1 text-foreground truncate">🎵 {s.name} {s.duration ? <span className="text-muted-foreground">({s.duration}s)</span> : null}</span>
                   )}
                   
-                  {/* Trim/Crop */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setTrimSound(s);
-                      setTrimStart(0);
-                      setTrimEnd(s.duration || 30);
-                    }}
-                    className="text-muted-foreground hover:text-foreground"
-                    title="Trim / Crop"
-                  >
-                    <Scissors className="w-3 h-3" />
-                  </button>
-                  
-                  {/* Rename */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingSoundId(s.dbId ?? null);
-                      setEditingSoundName(s.name);
-                    }}
-                    className="text-muted-foreground hover:text-foreground"
-                    title="Rename"
-                  >
-                    <Pencil className="w-3 h-3" />
-                  </button>
+                   {/* Trim/Crop */}
+                   <button
+                     type="button"
+                     onClick={(e) => {
+                       e.stopPropagation();
+                       setTrimSound(s);
+                       setTrimStart(0);
+                       setTrimEnd(s.duration || 30);
+                     }}
+                     className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground active:scale-95 shrink-0"
+                     title="Trim / Crop"
+                   >
+                     <Scissors className="w-4 h-4" />
+                   </button>
+                   
+                   {/* Rename */}
+                   <button
+                     type="button"
+                     onClick={(e) => {
+                       e.stopPropagation();
+                       setEditingSoundId(s.dbId ?? null);
+                       setEditingSoundName(s.name);
+                     }}
+                     className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground active:scale-95 shrink-0"
+                     title="Rename"
+                   >
+                     <Pencil className="w-4 h-4" />
+                   </button>
                   
                   {/* Delete */}
                   <button
@@ -560,9 +560,9 @@ const VoiceStudioPage = () => {
                         toast.error(err.message || 'Failed to delete');
                       }
                     }}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <X className="w-3 h-3" />
+                     className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-destructive active:scale-95 shrink-0"
+                   >
+                     <X className="w-4 h-4" />
                   </button>
                 </div>
               ))}
