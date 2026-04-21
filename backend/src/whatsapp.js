@@ -2597,10 +2597,57 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       pendingReply.typingTimer = setTimeout(async () => {
         if (pendingReply.aborted) return;
         try {
-          debugLog(db, userId, 'sending_reply', { contact: contactName || phone, replyPreview: replyText.slice(0, 80) });
-          const shouldQuote = Math.random() < 0.2;
-          const sent = await sendTextMessage(userId, jid, replyText, { quotedMessageId: shouldQuote ? latestMessageId : null });
-          const replyId = sent?.id?._serialized || uuid();
+          // ── Decide: voice note vs text ──
+          const voiceDecision = decideVoiceNote(db, userId, contactId, replyText);
+          const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
+          let sentAsVoice = false;
+          let voiceMedia = null;
+          let sent;
+          let replyId;
+
+          if (voiceDecision.send && elKey) {
+            try {
+              debugLog(db, userId, 'voice_note_decision', {
+                contact: contactName || phone,
+                voiceId: voiceDecision.voiceId,
+                bgSound: voiceDecision.bgSound,
+                chance: voiceDecision.chance + '%',
+                sentToday: `${voiceDecision.sentToday}/${voiceDecision.maxPerDay}`,
+              });
+              const enhanced = await enhanceTextForVoice(keyRow.value, replyText);
+              const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
+              const audioBuffer = await generateVoiceNote(
+                elKey,
+                enhanced,
+                voiceDecision.voiceId,
+                voiceDecision.modelId,
+                voiceDecision.bgSound && voiceDecision.bgSound !== 'none' ? voiceDecision.bgSound : null,
+                Number.isFinite(bgVolume) ? bgVolume : 0.15,
+              );
+              debugLog(db, userId, 'sending_reply', { contact: contactName || phone, mode: 'voice', replyPreview: replyText.slice(0, 80) });
+              sent = await sendVoiceNote(userId, jid, audioBuffer);
+              replyId = sent?.id?._serialized || uuid();
+              voiceMedia = persistVoiceNoteBuffer(replyId, audioBuffer);
+              db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contactId);
+              sentAsVoice = true;
+            } catch (vErr) {
+              debugLog(db, userId, 'voice_note_failed_fallback_text', { contact: contactName || phone, error: vErr?.message || String(vErr) });
+              // Fall through to text path below
+            }
+          } else if (!voiceDecision.send) {
+            // Quiet log only when interesting (skip global_disabled to avoid noise)
+            if (voiceDecision.reason && voiceDecision.reason !== 'global_disabled' && voiceDecision.reason !== 'contact_disabled') {
+              debugLog(db, userId, 'voice_note_skipped', { contact: contactName || phone, reason: voiceDecision.reason });
+            }
+          }
+
+          let shouldQuote = false;
+          if (!sentAsVoice) {
+            debugLog(db, userId, 'sending_reply', { contact: contactName || phone, mode: 'text', replyPreview: replyText.slice(0, 80) });
+            shouldQuote = Math.random() < 0.2;
+            sent = await sendTextMessage(userId, jid, replyText, { quotedMessageId: shouldQuote ? latestMessageId : null });
+            replyId = sent?.id?._serialized || uuid();
+          }
 
           // Clear typing
           await clearTypingState(userId, jid);
@@ -2619,12 +2666,22 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             }
           }
 
-          db.prepare(`
-            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, reply_to_id, reply_to_content, reply_to_sender)
-            VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent', ?, ?, ?)
-          `).run(replyId, userId, contactId, jid, replyText, replyToId, replyToContent, replyToSender);
-          db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'auto_reply_sent', ?)`).run(userId, JSON.stringify({ contactId }));
-          debugLog(db, userId, 'auto_reply_sent', { contact: contactName || phone, replyPreview: replyText.slice(0, 80), replyLength: replyText.length, quoted: !!latestMessageId });
+          if (sentAsVoice && voiceMedia) {
+            db.prepare(`
+              INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
+              VALUES (?, ?, ?, ?, ?, 'voice', 'sent', datetime('now'), 'sent', ?, ?, ?)
+            `).run(replyId, userId, contactId, jid, replyText, voiceMedia.mediaPath, voiceMedia.mediaName, voiceMedia.mediaMime);
+            db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'auto_voice_sent', ?)`).run(userId, JSON.stringify({ contactId }));
+            db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(userId);
+            debugLog(db, userId, 'auto_reply_sent', { contact: contactName || phone, mode: 'voice', replyPreview: replyText.slice(0, 80), replyLength: replyText.length });
+          } else {
+            db.prepare(`
+              INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, reply_to_id, reply_to_content, reply_to_sender)
+              VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent', ?, ?, ?)
+            `).run(replyId, userId, contactId, jid, replyText, replyToId, replyToContent, replyToSender);
+            db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'auto_reply_sent', ?)`).run(userId, JSON.stringify({ contactId }));
+            debugLog(db, userId, 'auto_reply_sent', { contact: contactName || phone, mode: 'text', replyPreview: replyText.slice(0, 80), replyLength: replyText.length, quoted: !!latestMessageId });
+          }
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
           emit(userId, 'message', { contactId, msgId: replyId });
