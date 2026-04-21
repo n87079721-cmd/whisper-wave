@@ -8,7 +8,7 @@ import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
 import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary } from './ai.js';
 import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply } from './telegram.js';
-import { transcribeAudio } from './elevenlabs.js';
+import { transcribeAudio, generateVoiceNote } from './elevenlabs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -2052,6 +2052,111 @@ function getActivePersonaName(db, userId, contactId) {
   }
 }
 
+// ── AI Voice Note helpers ───────────────────────────
+// Returns { voiceId, modelId } from the contact's persona, or null if persona has no voice assigned.
+function getPersonaVoice(db, userId, contactId) {
+  try {
+    const row = db.prepare("SELECT prompt_id FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    if (!row?.prompt_id) return null;
+    const p = db.prepare("SELECT voice_id, model_id FROM prompts WHERE id = ? AND user_id = ?").get(row.prompt_id, userId);
+    if (!p?.voice_id) return null;
+    return { voiceId: p.voice_id, modelId: p.model_id || null };
+  } catch { return null; }
+}
+
+// Decide whether this auto-reply should be sent as a voice note.
+// Considers: master toggle, contact toggle, persona voice presence, daily cap, anti-spam (no 2 in a row),
+// random chance, and AI-judged suitability of the reply text (length/tone).
+function decideVoiceNote(db, userId, contactId, replyText) {
+  // Master + contact toggles
+  if (getConfigValue(db, userId, 'ai_voice_enabled', '0') !== '1') return { send: false, reason: 'global_disabled' };
+  const row = db.prepare("SELECT voice_enabled, voice_max_per_day, voice_bg_sound FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+  if (!row || row.voice_enabled !== 1) return { send: false, reason: 'contact_disabled' };
+
+  const personaVoice = getPersonaVoice(db, userId, contactId);
+  if (!personaVoice) return { send: false, reason: 'persona_voice_not_set' };
+
+  // Daily cap (per contact). Contact override wins, else global default, else 3.
+  const globalMax = parseInt(getConfigValue(db, userId, 'ai_voice_max_per_day', '3'), 10);
+  const maxPerDay = (row.voice_max_per_day == null) ? globalMax : row.voice_max_per_day;
+  if (maxPerDay <= 0) return { send: false, reason: 'cap_zero' };
+  const sentToday = db.prepare(
+    `SELECT COUNT(*) as c FROM voice_note_log WHERE user_id = ? AND contact_id = ? AND date(sent_at) = date('now')`
+  ).get(userId, contactId)?.c || 0;
+  if (sentToday >= maxPerDay) return { send: false, reason: 'daily_cap_hit', sentToday, maxPerDay };
+
+  // Anti-spam: never two voice notes in a row to the same contact.
+  const lastSent = db.prepare(
+    `SELECT type FROM messages WHERE user_id = ? AND contact_id = ? AND direction = 'sent' ORDER BY timestamp DESC LIMIT 1`
+  ).get(userId, contactId);
+  if (lastSent?.type === 'voice') return { send: false, reason: 'no_two_in_a_row' };
+
+  // AI judge — long replies (>= 80 chars) OR short emotional ones get voice.
+  const text = String(replyText || '').trim();
+  const len = text.length;
+  const emotional = /(haha|lmao|lol|omg|wow|aww|ugh|i miss|love|sorry|hate|amazing|crazy|insane|dying|literally)/i.test(text)
+    || /[!?]{2,}/.test(text)
+    || /\.\.\./.test(text);
+  const longish = len >= 80;
+  const aiSuitable = longish || emotional;
+  if (!aiSuitable) return { send: false, reason: 'reply_not_voice_suitable', len };
+
+  // Random chance — global %.
+  const chance = Math.max(0, Math.min(100, parseInt(getConfigValue(db, userId, 'ai_voice_chance', '20'), 10)));
+  const roll = Math.random() * 100;
+  if (roll > chance) return { send: false, reason: 'chance_skipped', chance, roll: Math.round(roll) };
+
+  return {
+    send: true,
+    voiceId: personaVoice.voiceId,
+    modelId: personaVoice.modelId,
+    bgSound: row.voice_bg_sound || 'none',
+    sentToday,
+    maxPerDay,
+    chance,
+  };
+}
+
+// Rewrite reply text via OpenAI to add ElevenLabs v3 expression tags (mirrors /enhance route).
+async function enhanceTextForVoice(openaiKey, text) {
+  const cleanedInput = String(text).replace(/\[[^\]\n]{1,40}\]/g, ' ').replace(/\s+/g, ' ').trim() || String(text).trim();
+  const wordCount = cleanedInput.split(/\s+/).length;
+  const tagRange = wordCount <= 15 ? '2-3' : wordCount <= 40 ? '4-6' : wordCount <= 80 ? '6-10' : '8-15';
+  const systemPrompt = `Rewrite this text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note. Use ${tagRange} expression tags total (e.g. [happy] [pause] [sighs] [laughs softly] [hesitates]). Add at least 2 pacing cues. Use casual contractions, fillers (like, you know, honestly), self-corrections, trailing thoughts. Keep meaning identical. Output ONLY the rewritten text — no quotes, no explanation.`;
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Rewrite this for a natural WhatsApp voice note:\n\n${cleanedInput}` },
+        ],
+        temperature: 1.1,
+        max_tokens: 1024,
+      }),
+    });
+    if (!response.ok) return text;
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content?.trim() || text;
+  } catch { return text; }
+}
+
+// Persist outgoing voice note buffer to disk like the manual send route does.
+function persistVoiceNoteBuffer(messageId, audioBuffer) {
+  try {
+    const mediaDir = path.join(__dirname, '..', 'data', 'message-media');
+    if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+    const safeId = String(messageId).replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+    const filename = `${safeId}.ogg`;
+    fs.writeFileSync(path.join(mediaDir, filename), audioBuffer);
+    return { mediaPath: filename, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg; codecs=opus' };
+  } catch {
+    return { mediaPath: `wa:${messageId}`, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg; codecs=opus' };
+  }
+}
+
 function isWithinActiveHours(db, userId) {
   const start = getConfigValue(db, userId, 'ai_active_hours_start', '09:00');
   const end = getConfigValue(db, userId, 'ai_active_hours_end', '02:00');
@@ -2492,10 +2597,57 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       pendingReply.typingTimer = setTimeout(async () => {
         if (pendingReply.aborted) return;
         try {
-          debugLog(db, userId, 'sending_reply', { contact: contactName || phone, replyPreview: replyText.slice(0, 80) });
-          const shouldQuote = Math.random() < 0.2;
-          const sent = await sendTextMessage(userId, jid, replyText, { quotedMessageId: shouldQuote ? latestMessageId : null });
-          const replyId = sent?.id?._serialized || uuid();
+          // ── Decide: voice note vs text ──
+          const voiceDecision = decideVoiceNote(db, userId, contactId, replyText);
+          const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
+          let sentAsVoice = false;
+          let voiceMedia = null;
+          let sent;
+          let replyId;
+
+          if (voiceDecision.send && elKey) {
+            try {
+              debugLog(db, userId, 'voice_note_decision', {
+                contact: contactName || phone,
+                voiceId: voiceDecision.voiceId,
+                bgSound: voiceDecision.bgSound,
+                chance: voiceDecision.chance + '%',
+                sentToday: `${voiceDecision.sentToday}/${voiceDecision.maxPerDay}`,
+              });
+              const enhanced = await enhanceTextForVoice(keyRow.value, replyText);
+              const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
+              const audioBuffer = await generateVoiceNote(
+                elKey,
+                enhanced,
+                voiceDecision.voiceId,
+                voiceDecision.modelId,
+                voiceDecision.bgSound && voiceDecision.bgSound !== 'none' ? voiceDecision.bgSound : null,
+                Number.isFinite(bgVolume) ? bgVolume : 0.15,
+              );
+              debugLog(db, userId, 'sending_reply', { contact: contactName || phone, mode: 'voice', replyPreview: replyText.slice(0, 80) });
+              sent = await sendVoiceNote(userId, jid, audioBuffer);
+              replyId = sent?.id?._serialized || uuid();
+              voiceMedia = persistVoiceNoteBuffer(replyId, audioBuffer);
+              db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contactId);
+              sentAsVoice = true;
+            } catch (vErr) {
+              debugLog(db, userId, 'voice_note_failed_fallback_text', { contact: contactName || phone, error: vErr?.message || String(vErr) });
+              // Fall through to text path below
+            }
+          } else if (!voiceDecision.send) {
+            // Quiet log only when interesting (skip global_disabled to avoid noise)
+            if (voiceDecision.reason && voiceDecision.reason !== 'global_disabled' && voiceDecision.reason !== 'contact_disabled') {
+              debugLog(db, userId, 'voice_note_skipped', { contact: contactName || phone, reason: voiceDecision.reason });
+            }
+          }
+
+          let shouldQuote = false;
+          if (!sentAsVoice) {
+            debugLog(db, userId, 'sending_reply', { contact: contactName || phone, mode: 'text', replyPreview: replyText.slice(0, 80) });
+            shouldQuote = Math.random() < 0.2;
+            sent = await sendTextMessage(userId, jid, replyText, { quotedMessageId: shouldQuote ? latestMessageId : null });
+            replyId = sent?.id?._serialized || uuid();
+          }
 
           // Clear typing
           await clearTypingState(userId, jid);
@@ -2514,12 +2666,22 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             }
           }
 
-          db.prepare(`
-            INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, reply_to_id, reply_to_content, reply_to_sender)
-            VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent', ?, ?, ?)
-          `).run(replyId, userId, contactId, jid, replyText, replyToId, replyToContent, replyToSender);
-          db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'auto_reply_sent', ?)`).run(userId, JSON.stringify({ contactId }));
-          debugLog(db, userId, 'auto_reply_sent', { contact: contactName || phone, replyPreview: replyText.slice(0, 80), replyLength: replyText.length, quoted: !!latestMessageId });
+          if (sentAsVoice && voiceMedia) {
+            db.prepare(`
+              INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
+              VALUES (?, ?, ?, ?, ?, 'voice', 'sent', datetime('now'), 'sent', ?, ?, ?)
+            `).run(replyId, userId, contactId, jid, replyText, voiceMedia.mediaPath, voiceMedia.mediaName, voiceMedia.mediaMime);
+            db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'auto_voice_sent', ?)`).run(userId, JSON.stringify({ contactId }));
+            db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(userId);
+            debugLog(db, userId, 'auto_reply_sent', { contact: contactName || phone, mode: 'voice', replyPreview: replyText.slice(0, 80), replyLength: replyText.length });
+          } else {
+            db.prepare(`
+              INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, reply_to_id, reply_to_content, reply_to_sender)
+              VALUES (?, ?, ?, ?, ?, 'text', 'sent', datetime('now'), 'sent', ?, ?, ?)
+            `).run(replyId, userId, contactId, jid, replyText, replyToId, replyToContent, replyToSender);
+            db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'auto_reply_sent', ?)`).run(userId, JSON.stringify({ contactId }));
+            debugLog(db, userId, 'auto_reply_sent', { contact: contactName || phone, mode: 'text', replyPreview: replyText.slice(0, 80), replyLength: replyText.length, quoted: !!latestMessageId });
+          }
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
           emit(userId, 'message', { contactId, msgId: replyId });

@@ -37,6 +37,12 @@ const SettingsPage = () => {
   const [promptContent, setPromptContent] = useState('');
   const [savingNewPrompt, setSavingNewPrompt] = useState(false);
 
+  // AI Voice Notes
+  const [voiceNoteEnabled, setVoiceNoteEnabled] = useState(false);
+  const [voiceNoteChance, setVoiceNoteChance] = useState(20);
+  const [voiceNoteMaxPerDay, setVoiceNoteMaxPerDay] = useState(3);
+  const [availableVoices, setAvailableVoices] = useState<Array<{ id: string; name: string }>>([]);
+
   // Telegram Bot
   const [telegramToken, setTelegramToken] = useState('');
   const [telegramChatId, setTelegramChatId] = useState('');
@@ -103,6 +109,15 @@ const SettingsPage = () => {
     api.getConfig('auto_summarize').then(data => {
       setAutoSummarizeEnabled(data.exists ? data.value !== 'false' : true);
     }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.getVoiceSettings().then(s => {
+      setVoiceNoteEnabled(s.enabled);
+      setVoiceNoteChance(s.chance);
+      setVoiceNoteMaxPerDay(s.maxPerDay);
+    }).catch(() => {});
+    api.getVoices().then(vs => setAvailableVoices(vs.map((v: any) => ({ id: v.id, name: v.name })))).catch(() => {});
   }, []);
 
   const handleSaveKey = async () => {
@@ -408,6 +423,47 @@ const SettingsPage = () => {
                 </div>
               </div>
 
+              {/* AI Voice Notes */}
+              <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                    <label className="text-sm font-medium text-foreground">AI Voice Notes</label>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const next = !voiceNoteEnabled;
+                      setVoiceNoteEnabled(next);
+                      try { await api.updateVoiceSettings({ enabled: next }); toast.success(next ? 'Voice notes ON' : 'Voice notes OFF'); }
+                      catch { setVoiceNoteEnabled(!next); toast.error('Failed to save'); }
+                    }}
+                    className={`px-3 py-1 rounded-full text-xs font-medium ${voiceNoteEnabled ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground border border-border'}`}
+                  >{voiceNoteEnabled ? 'ON' : 'OFF'}</button>
+                </div>
+                <p className="text-xs text-muted-foreground">AI replies sometimes as a voice note. Each contact's persona must have a voice assigned (Prompt Library below).</p>
+                {voiceNoteEnabled && (
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-xs text-muted-foreground">Voice-note chance per reply</label>
+                        <span className="text-xs font-bold text-primary">{voiceNoteChance}%</span>
+                      </div>
+                      <Slider value={[voiceNoteChance]} onValueChange={(v) => setVoiceNoteChance(v[0])}
+                        onValueCommit={(v) => api.updateVoiceSettings({ chance: v[0] }).catch(() => {})}
+                        min={0} max={100} step={5} className="w-full" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Max voice notes per contact per day</label>
+                      <input type="number" min={0} max={50} value={voiceNoteMaxPerDay}
+                        onChange={(e) => setVoiceNoteMaxPerDay(parseInt(e.target.value || '0', 10))}
+                        onBlur={() => api.updateVoiceSettings({ maxPerDay: voiceNoteMaxPerDay }).catch(() => {})}
+                        className="w-24 px-3 py-1.5 rounded-lg bg-background border border-border text-foreground text-sm" />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground italic">Anti-spam: never two voice notes in a row, AI judges suitability based on reply length/tone.</p>
+                  </div>
+                )}
+              </div>
+
               {/* Active Hours */}
               <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
                 <div className="flex items-center gap-2">
@@ -535,6 +591,26 @@ const SettingsPage = () => {
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium text-foreground">{p.name}</p>
                           <p className="text-xs text-muted-foreground truncate mt-0.5">{p.content.slice(0, 100)}...</p>
+                          <div className="mt-2 flex items-center gap-2">
+                            <label className="text-[10px] text-muted-foreground">🎤 Voice:</label>
+                            <select
+                              value={p.voice_id || ''}
+                              onChange={async (e) => {
+                                const v = e.target.value || null;
+                                try {
+                                  await api.setPromptVoice(p.id, v);
+                                  setPrompts(prev => prev.map(x => x.id === p.id ? { ...x, voice_id: v } : x));
+                                  toast.success('Voice updated');
+                                } catch { toast.error('Failed to set voice'); }
+                              }}
+                              className="text-[11px] bg-secondary border border-border rounded px-2 py-1 text-foreground max-w-[180px]"
+                            >
+                              <option value="">— No voice (text only) —</option>
+                              {availableVoices.map(v => (
+                                <option key={v.id} value={v.id}>{v.name}</option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
                           <button onClick={() => { setEditingPrompt(p); setPromptName(p.name); setPromptContent(p.content); setShowPromptForm(true); }}

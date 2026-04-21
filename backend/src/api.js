@@ -2047,6 +2047,74 @@ RULES:
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // ── AI Voice Notes: global defaults ─────────────────
+  router.get('/voice-settings', (req, res) => {
+    try {
+      res.json({
+        enabled: getConfig(db, req.userId, 'ai_voice_enabled') === '1',
+        chance: parseInt(getConfig(db, req.userId, 'ai_voice_chance') || '20', 10),
+        maxPerDay: parseInt(getConfig(db, req.userId, 'ai_voice_max_per_day') || '3', 10),
+        bgVolume: parseFloat(getConfig(db, req.userId, 'ai_voice_bg_volume') || '0.15'),
+      });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+  router.put('/voice-settings', (req, res) => {
+    try {
+      const { enabled, chance, maxPerDay, bgVolume } = req.body || {};
+      if (typeof enabled === 'boolean') setConfig(db, req.userId, 'ai_voice_enabled', enabled ? '1' : '0');
+      if (Number.isFinite(chance)) setConfig(db, req.userId, 'ai_voice_chance', String(Math.max(0, Math.min(100, chance))));
+      if (Number.isFinite(maxPerDay)) setConfig(db, req.userId, 'ai_voice_max_per_day', String(Math.max(0, Math.min(50, maxPerDay))));
+      if (Number.isFinite(bgVolume)) setConfig(db, req.userId, 'ai_voice_bg_volume', String(Math.max(0, Math.min(1, bgVolume))));
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── Per-contact voice overrides ─────────────────────
+  router.get('/contacts/:id/voice', (req, res) => {
+    try {
+      const row = db.prepare('SELECT voice_enabled, voice_max_per_day, voice_bg_sound FROM contacts WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
+      if (!row) return res.status(404).json({ error: 'Contact not found' });
+      // Today's usage count
+      const sentToday = db.prepare(
+        `SELECT COUNT(*) as c FROM voice_note_log WHERE user_id = ? AND contact_id = ? AND date(sent_at) = date('now')`
+      ).get(req.userId, req.params.id)?.c || 0;
+      res.json({
+        enabled: row.voice_enabled === 1,
+        maxPerDay: row.voice_max_per_day, // null = use global default
+        bgSound: row.voice_bg_sound || 'none',
+        sentToday,
+      });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+  router.put('/contacts/:id/voice', (req, res) => {
+    try {
+      const { enabled, maxPerDay, bgSound } = req.body || {};
+      const fields = [];
+      const vals = [];
+      if (typeof enabled === 'boolean') { fields.push('voice_enabled = ?'); vals.push(enabled ? 1 : 0); }
+      if (maxPerDay === null || Number.isFinite(maxPerDay)) {
+        fields.push('voice_max_per_day = ?');
+        vals.push(maxPerDay === null ? null : Math.max(0, Math.min(50, maxPerDay)));
+      }
+      if (typeof bgSound === 'string' || bgSound === null) { fields.push('voice_bg_sound = ?'); vals.push(bgSound || null); }
+      if (!fields.length) return res.json({ success: true });
+      vals.push(req.params.id, req.userId);
+      db.prepare(`UPDATE contacts SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...vals);
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── Per-persona voice assignment ────────────────────
+  router.put('/prompts/:id/voice', (req, res) => {
+    try {
+      const { voiceId, modelId } = req.body || {};
+      const result = db.prepare('UPDATE prompts SET voice_id = ?, model_id = ? WHERE id = ? AND user_id = ?')
+        .run(voiceId || null, modelId || null, req.params.id, req.userId);
+      if (result.changes === 0) return res.status(404).json({ error: 'Prompt not found' });
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   return router;
 }
 
