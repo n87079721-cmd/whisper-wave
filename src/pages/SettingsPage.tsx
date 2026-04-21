@@ -111,6 +111,15 @@ const SettingsPage = () => {
     }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    api.getVoiceSettings().then(s => {
+      setVoiceNoteEnabled(s.enabled);
+      setVoiceNoteChance(s.chance);
+      setVoiceNoteMaxPerDay(s.maxPerDay);
+    }).catch(() => {});
+    api.getVoices().then(vs => setAvailableVoices(vs.map((v: any) => ({ id: v.id, name: v.name })))).catch(() => {});
+  }, []);
+
   const handleSaveKey = async () => {
     if (!elevenLabsKey) return;
     setSaving(true);
