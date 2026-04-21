@@ -489,9 +489,9 @@ const VoiceStudioPage = () => {
                         setPreviewingSound(s.id);
                       }
                     }}
-                    className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center hover:bg-primary/30 shrink-0"
+                     className="w-9 h-9 rounded-full bg-primary/20 flex items-center justify-center hover:bg-primary/30 shrink-0 active:scale-95"
                   >
-                    {previewingSound === s.id ? <Pause className="w-3 h-3 text-primary" /> : <Play className="w-3 h-3 text-primary ml-0.5" />}
+                    {previewingSound === s.id ? <Pause className="w-4 h-4 text-primary" /> : <Play className="w-4 h-4 text-primary ml-0.5" />}
                   </button>
                   
                   {editingSoundId === s.dbId ? (
