@@ -1225,11 +1225,7 @@ RULES:
   const soundUpload = multer({ dest: path.join(__dirname, '..', 'data', 'temp'), limits: { fileSize: 50 * 1024 * 1024 } });
 
   router.get('/sounds', (req, res) => {
-    const presets = Object.keys(BG_SOUND_PROMPTS).map(id => ({
-      id,
-      name: id.charAt(0).toUpperCase() + id.slice(1),
-      type: 'preset',
-    }));
+    // Presets removed — only user-extracted/uploaded sounds are returned.
     const custom = db.prepare('SELECT * FROM custom_sounds WHERE user_id = ? ORDER BY created_at DESC').all(req.userId).map(s => ({
       id: s.sound_id,
       name: s.name,
@@ -1237,7 +1233,7 @@ RULES:
       duration: s.duration,
       dbId: s.id,
     }));
-    res.json({ presets, custom });
+    res.json({ presets: [], custom });
   });
 
   router.post('/sounds/upload', soundUpload.single('file'), async (req, res) => {
