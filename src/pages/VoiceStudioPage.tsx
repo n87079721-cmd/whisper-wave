@@ -560,9 +560,9 @@ const VoiceStudioPage = () => {
                         toast.error(err.message || 'Failed to delete');
                       }
                     }}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <X className="w-3 h-3" />
+                     className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-destructive active:scale-95 shrink-0"
+                   >
+                     <X className="w-4 h-4" />
                   </button>
                 </div>
               ))}
