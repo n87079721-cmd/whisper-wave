@@ -46,6 +46,22 @@ const SettingsPage = () => {
   const [voiceBgVolume, setVoiceBgVolume] = useState(15);
   const [voiceDefaultBgSound, setVoiceDefaultBgSound] = useState('none');
   const [availableSounds, setAvailableSounds] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  const [previewingSoundId, setPreviewingSoundId] = useState<string | null>(null);
+  const soundPreviewRef = useRef<HTMLAudioElement | null>(null);
+
+  const togglePreview = (soundId: string) => {
+    if (previewingSoundId === soundId) {
+      soundPreviewRef.current?.pause();
+      setPreviewingSoundId(null);
+      return;
+    }
+    if (soundPreviewRef.current) soundPreviewRef.current.pause();
+    const audio = new Audio(api.getSoundStreamUrl(soundId));
+    audio.onended = () => setPreviewingSoundId(null);
+    audio.play().catch(() => toast.error('Failed to play sound'));
+    soundPreviewRef.current = audio;
+    setPreviewingSoundId(soundId);
+  };
 
   // Telegram Bot
   const [telegramToken, setTelegramToken] = useState('');
