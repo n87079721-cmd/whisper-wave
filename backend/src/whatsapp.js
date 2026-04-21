@@ -2664,6 +2664,7 @@ async function softDisconnect(userId) {
   stopHeartbeat(userId);
   clearConnectionWatchdog(userId);
   clearRecoverySyncTimer(userId);
+  clearRecoveryAutoTimer(userId);
   inst.connectionStatus = 'disconnected';
   inst.qrCode = null;
   inst.pairingCode = null;
@@ -2707,6 +2708,7 @@ async function clearSession(userId, db) {
   stopHeartbeat(userId);
    clearConnectionWatchdog(userId);
    clearRecoverySyncTimer(userId);
+   clearRecoveryAutoTimer(userId);
   inst.connectionStatus = 'disconnected';
   inst.qrCode = null;
   inst.pairingCode = null;
@@ -2797,6 +2799,7 @@ export async function shutdownAllWhatsAppClients() {
     stopHeartbeat(userId);
     clearConnectionWatchdog(userId);
     clearRecoverySyncTimer(userId);
+    clearRecoveryAutoTimer(userId);
     if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
     if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
     if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
