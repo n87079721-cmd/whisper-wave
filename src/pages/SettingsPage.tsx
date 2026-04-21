@@ -550,6 +550,26 @@ const SettingsPage = () => {
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium text-foreground">{p.name}</p>
                           <p className="text-xs text-muted-foreground truncate mt-0.5">{p.content.slice(0, 100)}...</p>
+                          <div className="mt-2 flex items-center gap-2">
+                            <label className="text-[10px] text-muted-foreground">🎤 Voice:</label>
+                            <select
+                              value={p.voice_id || ''}
+                              onChange={async (e) => {
+                                const v = e.target.value || null;
+                                try {
+                                  await api.setPromptVoice(p.id, v);
+                                  setPrompts(prev => prev.map(x => x.id === p.id ? { ...x, voice_id: v } : x));
+                                  toast.success('Voice updated');
+                                } catch { toast.error('Failed to set voice'); }
+                              }}
+                              className="text-[11px] bg-secondary border border-border rounded px-2 py-1 text-foreground max-w-[180px]"
+                            >
+                              <option value="">— No voice (text only) —</option>
+                              {availableVoices.map(v => (
+                                <option key={v.id} value={v.id}>{v.name}</option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
                           <button onClick={() => { setEditingPrompt(p); setPromptName(p.name); setPromptContent(p.content); setShowPromptForm(true); }}
