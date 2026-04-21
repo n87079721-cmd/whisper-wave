@@ -42,6 +42,9 @@ const SettingsPage = () => {
   const [voiceNoteChance, setVoiceNoteChance] = useState(20);
   const [voiceNoteMaxPerDay, setVoiceNoteMaxPerDay] = useState(3);
   const [availableVoices, setAvailableVoices] = useState<Array<{ id: string; name: string }>>([]);
+  const [voiceBgVolume, setVoiceBgVolume] = useState(15);
+  const [voiceDefaultBgSound, setVoiceDefaultBgSound] = useState('none');
+  const [availableSounds, setAvailableSounds] = useState<Array<{ id: string; name: string; type: string }>>([]);
 
   // Telegram Bot
   const [telegramToken, setTelegramToken] = useState('');
@@ -116,8 +119,11 @@ const SettingsPage = () => {
       setVoiceNoteEnabled(s.enabled);
       setVoiceNoteChance(s.chance);
       setVoiceNoteMaxPerDay(s.maxPerDay);
+      setVoiceBgVolume(Math.round((s.bgVolume ?? 0.15) * 100));
+      setVoiceDefaultBgSound(s.defaultBgSound || 'none');
     }).catch(() => {});
     api.getVoices().then(vs => setAvailableVoices(vs.map((v: any) => ({ id: v.id, name: v.name })))).catch(() => {});
+    api.getSounds().then(s => setAvailableSounds([...s.presets, ...s.custom])).catch(() => {});
   }, []);
 
   const handleSaveKey = async () => {
@@ -458,6 +464,35 @@ const SettingsPage = () => {
                         onChange={(e) => setVoiceNoteMaxPerDay(parseInt(e.target.value || '0', 10))}
                         onBlur={() => api.updateVoiceSettings({ maxPerDay: voiceNoteMaxPerDay }).catch(() => {})}
                         className="w-24 px-3 py-1.5 rounded-lg bg-background border border-border text-foreground text-sm" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Default background sound</label>
+                      <select
+                        value={voiceDefaultBgSound}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setVoiceDefaultBgSound(v);
+                          api.updateVoiceSettings({ defaultBgSound: v }).then(() => toast.success('Background sound saved')).catch(() => toast.error('Failed to save'));
+                        }}
+                        className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-sm"
+                      >
+                        <option value="none">None (voice only)</option>
+                        {availableSounds.length > 0 && <optgroup label="Your sounds">
+                          {availableSounds.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}{s.type === 'preset' ? ' (preset)' : ''}</option>
+                          ))}
+                        </optgroup>}
+                      </select>
+                      <p className="text-[10px] text-muted-foreground mt-1">Used for all contacts without a per-contact override. Manage sounds in Voice Studio.</p>
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-xs text-muted-foreground">Background volume</label>
+                        <span className="text-xs font-bold text-primary">{voiceBgVolume}%</span>
+                      </div>
+                      <Slider value={[voiceBgVolume]} onValueChange={(v) => setVoiceBgVolume(v[0])}
+                        onValueCommit={(v) => api.updateVoiceSettings({ bgVolume: v[0] / 100 }).catch(() => {})}
+                        min={0} max={100} step={5} className="w-full" />
                     </div>
                     <p className="text-[10px] text-muted-foreground italic">Anti-spam: never two voice notes in a row, AI judges suitability based on reply length/tone.</p>
                   </div>

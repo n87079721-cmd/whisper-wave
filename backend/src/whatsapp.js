@@ -2106,11 +2106,15 @@ function decideVoiceNote(db, userId, contactId, replyText) {
   const roll = Math.random() * 100;
   if (roll > chance) return { send: false, reason: 'chance_skipped', chance, roll: Math.round(roll) };
 
+  // Background sound: contact override → global default → none
+  const globalBg = getConfigValue(db, userId, 'ai_voice_default_bg_sound', '') || 'none';
+  const bgSound = row.voice_bg_sound || globalBg || 'none';
+
   return {
     send: true,
     voiceId: personaVoice.voiceId,
     modelId: personaVoice.modelId,
-    bgSound: row.voice_bg_sound || 'none',
+    bgSound,
     sentToday,
     maxPerDay,
     chance,
