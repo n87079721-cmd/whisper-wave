@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Dice5, Gauge, RefreshCw, MessageSquare, AlertTriangle, Database, Plus, Trash2, Pencil, X, BookOpen, Send, Bot, Sparkles, MessageCircle } from 'lucide-react';
+import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Dice5, Gauge, RefreshCw, MessageSquare, AlertTriangle, Database, Plus, Trash2, Pencil, X, BookOpen, Send, Bot, Sparkles, MessageCircle, Play, Pause, Volume2 } from 'lucide-react';
 import { api, type SyncDiagnostics, type Prompt } from '@/lib/api';
 import { toast } from 'sonner';
 import { Slider } from '@/components/ui/slider';
@@ -45,6 +45,7 @@ const SettingsPage = () => {
   const [voiceBgVolume, setVoiceBgVolume] = useState(15);
   const [voiceDefaultBgSound, setVoiceDefaultBgSound] = useState('none');
   const [availableSounds, setAvailableSounds] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  const [previewingSoundId, setPreviewingSoundId] = useState<string | null>(null);
 
   // Telegram Bot
   const [telegramToken, setTelegramToken] = useState('');
@@ -123,7 +124,8 @@ const SettingsPage = () => {
       setVoiceDefaultBgSound(s.defaultBgSound || 'none');
     }).catch(() => {});
     api.getVoices().then(vs => setAvailableVoices(vs.map((v: any) => ({ id: v.id, name: v.name })))).catch(() => {});
-    api.getSounds().then(s => setAvailableSounds([...s.presets, ...s.custom])).catch(() => {});
+    // Only user-extracted sounds, no presets
+    api.getSounds().then(s => setAvailableSounds(s.custom)).catch(() => {});
   }, []);
 
   const handleSaveKey = async () => {
@@ -467,23 +469,72 @@ const SettingsPage = () => {
                     </div>
                     <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Default background sound</label>
-                      <select
-                        value={voiceDefaultBgSound}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setVoiceDefaultBgSound(v);
-                          api.updateVoiceSettings({ defaultBgSound: v }).then(() => toast.success('Background sound saved')).catch(() => toast.error('Failed to save'));
-                        }}
-                        className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-sm"
-                      >
-                        <option value="none">None (voice only)</option>
-                        {availableSounds.length > 0 && <optgroup label="Your sounds">
-                          {availableSounds.map(s => (
-                            <option key={s.id} value={s.id}>{s.name}{s.type === 'preset' ? ' (preset)' : ''}</option>
-                          ))}
-                        </optgroup>}
-                      </select>
-                      <p className="text-[10px] text-muted-foreground mt-1">Used for all contacts without a per-contact override. Manage sounds in Voice Studio.</p>
+                      {availableSounds.length === 0 ? (
+                        <div className="text-xs text-muted-foreground p-3 rounded-lg bg-background border border-dashed border-border">
+                          No extracted sounds yet. Go to <span className="text-primary">Voice Studio</span> and upload a video/audio to extract a background sound.
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVoiceDefaultBgSound('none');
+                              api.updateVoiceSettings({ defaultBgSound: 'none' }).then(() => toast.success('No background sound')).catch(() => toast.error('Failed to save'));
+                            }}
+                            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-all ${
+                              voiceDefaultBgSound === 'none'
+                                ? 'bg-primary/15 border-primary/40 text-foreground'
+                                : 'bg-background border-border text-muted-foreground hover:bg-secondary/60'
+                            }`}
+                          >
+                            <Volume2 className="w-3.5 h-3.5 opacity-50" />
+                            <span className="flex-1 text-left">None (voice only)</span>
+                          </button>
+                          {availableSounds.map(s => {
+                            const isPlaying = previewingSoundId === s.id;
+                            const isSelected = voiceDefaultBgSound === s.id;
+                            return (
+                              <div
+                                key={s.id}
+                                onClick={() => {
+                                  setVoiceDefaultBgSound(s.id);
+                                  api.updateVoiceSettings({ defaultBgSound: s.id }).then(() => toast.success(`"${s.name}" set`)).catch(() => toast.error('Failed to save'));
+                                }}
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border cursor-pointer transition-all ${
+                                  isSelected
+                                    ? 'bg-primary/15 border-primary/40 text-foreground'
+                                    : 'bg-background border-border text-muted-foreground hover:bg-secondary/60'
+                                }`}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (isPlaying) {
+                                      (window as any).__settingsBgAudio?.pause();
+                                      setPreviewingSoundId(null);
+                                    } else {
+                                      (window as any).__settingsBgAudio?.pause();
+                                      const audio = new Audio(api.getSoundStreamUrl(s.id));
+                                      audio.onended = () => setPreviewingSoundId(null);
+                                      audio.play().catch(() => toast.error('Failed to play sound'));
+                                      (window as any).__settingsBgAudio = audio;
+                                      setPreviewingSoundId(s.id);
+                                    }
+                                  }}
+                                  className="w-7 h-7 flex items-center justify-center rounded-full bg-secondary hover:bg-primary hover:text-primary-foreground transition-colors shrink-0"
+                                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                                >
+                                  {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 ml-0.5" />}
+                                </button>
+                                <span className="flex-1 truncate text-left">{s.name}</span>
+                                {isSelected && <span className="text-[10px] text-primary font-bold">✓</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <p className="text-[10px] text-muted-foreground mt-1">Used for all contacts without a per-contact override. Tap ▶ to preview.</p>
                     </div>
                     <div>
                       <div className="flex justify-between items-center mb-1">
