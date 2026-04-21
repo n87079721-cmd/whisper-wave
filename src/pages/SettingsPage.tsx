@@ -37,6 +37,12 @@ const SettingsPage = () => {
   const [promptContent, setPromptContent] = useState('');
   const [savingNewPrompt, setSavingNewPrompt] = useState(false);
 
+  // AI Voice Notes
+  const [voiceNoteEnabled, setVoiceNoteEnabled] = useState(false);
+  const [voiceNoteChance, setVoiceNoteChance] = useState(20);
+  const [voiceNoteMaxPerDay, setVoiceNoteMaxPerDay] = useState(3);
+  const [availableVoices, setAvailableVoices] = useState<Array<{ id: string; name: string }>>([]);
+
   // Telegram Bot
   const [telegramToken, setTelegramToken] = useState('');
   const [telegramChatId, setTelegramChatId] = useState('');
