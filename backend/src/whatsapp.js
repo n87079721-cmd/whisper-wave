@@ -98,6 +98,7 @@ function getInstance(userId) {
       contactCache: new Map(),
       archiveSyncTimer: null,
       recoverySyncTimer: null,
+      recoveryAutoTimer: null,
       connectionWatchdogTimer: null,
       historySyncInProgress: false,
       contactSyncInProgress: false,
@@ -778,6 +779,30 @@ function clearRecoverySyncTimer(userId) {
   }
 }
 
+function clearRecoveryAutoTimer(userId) {
+  const inst = userInstances.get(userId);
+  if (inst?.recoveryAutoTimer) {
+    clearInterval(inst.recoveryAutoTimer);
+    inst.recoveryAutoTimer = null;
+  }
+}
+
+// Periodic background recovery sync — runs every 15 minutes while connected
+// to keep chats/contacts fresh and pull anything WhatsApp didn't push live.
+const RECOVERY_AUTO_INTERVAL_MS = 15 * 60 * 1000;
+function startRecoveryAutoTimer(userId, db) {
+  const inst = getInstance(userId);
+  clearRecoveryAutoTimer(userId);
+  inst.recoveryAutoTimer = setInterval(() => {
+    if (inst.connectionStatus !== 'connected') return;
+    if (inst.historySyncInProgress || inst.contactSyncInProgress) return;
+    console.log(`🔁 [${userId}] Auto recovery sync (15m interval)`);
+    recoverSync(userId, db, { force: true }).catch(err => {
+      console.error(`Auto recovery sync error [${userId}]:`, err?.message || err);
+    });
+  }, RECOVERY_AUTO_INTERVAL_MS);
+}
+
 function clearConnectionWatchdog(userId) {
   const inst = userInstances.get(userId);
   if (inst?.connectionWatchdogTimer) {
@@ -1047,6 +1072,9 @@ async function startConnection(userId, db, options = {}) {
 
       // Only attempt a follow-up recovery pass after the main import had real time to settle
       scheduleRecoverySync(userId, db, getRecoverySyncDelayMs(userId, db));
+
+      // Always-on background recovery: refreshes every 15 minutes while connected
+      startRecoveryAutoTimer(userId, db);
 
       // Sync archive states after initial sync
       setTimeout(() => {
@@ -2636,6 +2664,7 @@ async function softDisconnect(userId) {
   stopHeartbeat(userId);
   clearConnectionWatchdog(userId);
   clearRecoverySyncTimer(userId);
+  clearRecoveryAutoTimer(userId);
   inst.connectionStatus = 'disconnected';
   inst.qrCode = null;
   inst.pairingCode = null;
@@ -2679,6 +2708,7 @@ async function clearSession(userId, db) {
   stopHeartbeat(userId);
    clearConnectionWatchdog(userId);
    clearRecoverySyncTimer(userId);
+   clearRecoveryAutoTimer(userId);
   inst.connectionStatus = 'disconnected';
   inst.qrCode = null;
   inst.pairingCode = null;
@@ -2769,6 +2799,7 @@ export async function shutdownAllWhatsAppClients() {
     stopHeartbeat(userId);
     clearConnectionWatchdog(userId);
     clearRecoverySyncTimer(userId);
+    clearRecoveryAutoTimer(userId);
     if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
     if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
     if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
