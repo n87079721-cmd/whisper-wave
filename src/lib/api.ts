@@ -658,14 +658,17 @@ export const api = {
 
   // ── AI Voice Notes ──
   getVoiceSettings() {
-    return requestJson<{ enabled: boolean; chance: number; maxPerDay: number; bgVolume: number }>('/api/voice-settings');
+    return requestJson<{ enabled: boolean; chance: number; maxPerDay: number; bgVolume: number; defaultBgSound: string }>('/api/voice-settings');
   },
-  updateVoiceSettings(payload: { enabled?: boolean; chance?: number; maxPerDay?: number; bgVolume?: number }) {
+  updateVoiceSettings(payload: { enabled?: boolean; chance?: number; maxPerDay?: number; bgVolume?: number; defaultBgSound?: string }) {
     return requestJson<{ success: boolean }>('/api/voice-settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+  },
+  getSounds() {
+    return requestJson<{ presets: Array<{ id: string; name: string; type: string }>; custom: Array<{ id: string; name: string; type: string; duration?: number }> }>('/api/sounds');
   },
   getContactVoice(contactId: string) {
     return requestJson<{ enabled: boolean; maxPerDay: number | null; bgSound: string; sentToday: number }>(`/api/contacts/${contactId}/voice`);
