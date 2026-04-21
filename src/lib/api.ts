@@ -667,9 +667,6 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  getSounds() {
-    return requestJson<{ presets: Array<{ id: string; name: string; type: string }>; custom: Array<{ id: string; name: string; type: string; duration?: number }> }>('/api/sounds');
-  },
   getContactVoice(contactId: string) {
     return requestJson<{ enabled: boolean; maxPerDay: number | null; bgSound: string; sentToday: number }>(`/api/contacts/${contactId}/voice`);
   },
