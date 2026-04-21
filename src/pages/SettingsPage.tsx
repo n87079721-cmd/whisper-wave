@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Dice5, Gauge, RefreshCw, MessageSquare, AlertTriangle, Database, Plus, Trash2, Pencil, X, BookOpen, Send, Bot, Sparkles, MessageCircle } from 'lucide-react';
+import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Dice5, Gauge, RefreshCw, MessageSquare, AlertTriangle, Database, Plus, Trash2, Pencil, X, BookOpen, Send, Bot, Sparkles, MessageCircle, Play, Pause } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api, type SyncDiagnostics, type Prompt } from '@/lib/api';
 import { toast } from 'sonner';
 import { Slider } from '@/components/ui/slider';
@@ -45,6 +46,22 @@ const SettingsPage = () => {
   const [voiceBgVolume, setVoiceBgVolume] = useState(15);
   const [voiceDefaultBgSound, setVoiceDefaultBgSound] = useState('none');
   const [availableSounds, setAvailableSounds] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  const [previewingSoundId, setPreviewingSoundId] = useState<string | null>(null);
+  const soundPreviewRef = useRef<HTMLAudioElement | null>(null);
+
+  const togglePreview = (soundId: string) => {
+    if (previewingSoundId === soundId) {
+      soundPreviewRef.current?.pause();
+      setPreviewingSoundId(null);
+      return;
+    }
+    if (soundPreviewRef.current) soundPreviewRef.current.pause();
+    const audio = new Audio(api.getSoundStreamUrl(soundId));
+    audio.onended = () => setPreviewingSoundId(null);
+    audio.play().catch(() => toast.error('Failed to play sound'));
+    soundPreviewRef.current = audio;
+    setPreviewingSoundId(soundId);
+  };
 
   // Telegram Bot
   const [telegramToken, setTelegramToken] = useState('');
@@ -123,7 +140,7 @@ const SettingsPage = () => {
       setVoiceDefaultBgSound(s.defaultBgSound || 'none');
     }).catch(() => {});
     api.getVoices().then(vs => setAvailableVoices(vs.map((v: any) => ({ id: v.id, name: v.name })))).catch(() => {});
-    api.getSounds().then(s => setAvailableSounds([...s.presets, ...s.custom])).catch(() => {});
+    api.getSounds().then(s => setAvailableSounds(s.custom)).catch(() => {});
   }, []);
 
   const handleSaveKey = async () => {
@@ -467,23 +484,57 @@ const SettingsPage = () => {
                     </div>
                     <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Default background sound</label>
-                      <select
-                        value={voiceDefaultBgSound}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setVoiceDefaultBgSound(v);
-                          api.updateVoiceSettings({ defaultBgSound: v }).then(() => toast.success('Background sound saved')).catch(() => toast.error('Failed to save'));
-                        }}
-                        className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-sm"
-                      >
-                        <option value="none">None (voice only)</option>
-                        {availableSounds.length > 0 && <optgroup label="Your sounds">
-                          {availableSounds.map(s => (
-                            <option key={s.id} value={s.id}>{s.name}{s.type === 'preset' ? ' (preset)' : ''}</option>
-                          ))}
-                        </optgroup>}
-                      </select>
-                      <p className="text-[10px] text-muted-foreground mt-1">Used for all contacts without a per-contact override. Manage sounds in Voice Studio.</p>
+                      <div className="space-y-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setVoiceDefaultBgSound('none');
+                            api.updateVoiceSettings({ defaultBgSound: 'none' }).then(() => toast.success('Background sound saved')).catch(() => toast.error('Failed to save'));
+                          }}
+                          className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all border ${
+                            voiceDefaultBgSound === 'none'
+                              ? 'bg-primary/15 border-primary/40 text-foreground'
+                              : 'bg-background border-border text-foreground hover:bg-secondary/60'
+                          }`}
+                        >
+                          <span className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center shrink-0">🔇</span>
+                          <span className="flex-1 text-left">None (voice only)</span>
+                        </button>
+                        {availableSounds.length === 0 ? (
+                          <p className="text-[11px] text-muted-foreground italic px-1">
+                            No sounds yet — extract one in <Link to="/voice-studio" className="text-primary underline">Voice Studio</Link>.
+                          </p>
+                        ) : (
+                          availableSounds.map(s => (
+                            <div
+                              key={s.id}
+                              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all border cursor-pointer ${
+                                voiceDefaultBgSound === s.id
+                                  ? 'bg-primary/15 border-primary/40'
+                                  : 'bg-background border-border hover:bg-secondary/60'
+                              }`}
+                              onClick={() => {
+                                setVoiceDefaultBgSound(s.id);
+                                api.updateVoiceSettings({ defaultBgSound: s.id }).then(() => toast.success('Background sound saved')).catch(() => toast.error('Failed to save'));
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); togglePreview(s.id); }}
+                                className="w-9 h-9 rounded-full bg-primary/20 flex items-center justify-center hover:bg-primary/30 shrink-0 active:scale-95"
+                                title={previewingSoundId === s.id ? 'Pause' : 'Play preview'}
+                              >
+                                {previewingSoundId === s.id ? <Pause className="w-4 h-4 text-primary" /> : <Play className="w-4 h-4 text-primary ml-0.5" />}
+                              </button>
+                              <span className="flex-1 text-foreground truncate text-left">🎵 {s.name}</span>
+                              {voiceDefaultBgSound === s.id && (
+                                <span className="text-[10px] text-primary font-semibold uppercase tracking-wide">Selected</span>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-2">Only your extracted sounds appear here. Upload more in Voice Studio.</p>
                     </div>
                     <div>
                       <div className="flex justify-between items-center mb-1">

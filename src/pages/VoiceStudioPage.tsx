@@ -6,11 +6,6 @@ import { api, type Contact, type Voice, type SoundItem } from '@/lib/api';
 import { getContactDisplayMeta, getContactDisplayName } from '@/lib/contactDisplay';
 import { toast } from 'sonner';
 
-const PRESET_EMOJIS: Record<string, string> = {
-  cafe: '☕', rain: '🌧', street: '🏙', nature: '🌳', office: '💼',
-  car: '🚗', crowd: '👥', ocean: '🌊', fireplace: '🔥',
-};
-
 const MODELS = [
   { id: 'eleven_v3', name: 'v3 Human Mode ✨', desc: 'Most natural & expressive — recommended' },
   { id: 'eleven_multilingual_v2', name: 'Multilingual v2', desc: 'High quality, 29 languages' },
@@ -122,7 +117,6 @@ const VoiceStudioPage = () => {
   // Background sound state
   const [backgroundSound, setBackgroundSound] = useState<string>('none');
   const [bgVolume, setBgVolume] = useState(0.15);
-  const [presetSounds, setPresetSounds] = useState<SoundItem[]>([]);
   const [customSounds, setCustomSounds] = useState<SoundItem[]>([]);
   const [isUploadingSound, setIsUploadingSound] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -157,8 +151,7 @@ const VoiceStudioPage = () => {
       })
       .finally(() => setLoadingVoices(false));
     // Load sounds
-    api.getSounds().then(({ presets, custom }) => {
-      setPresetSounds(presets);
+    api.getSounds().then(({ custom }) => {
       setCustomSounds(custom);
     }).catch(() => {});
   }, []);
@@ -443,20 +436,6 @@ const VoiceStudioPage = () => {
             >
               None
             </button>
-            {presetSounds.map(s => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setBackgroundSound(s.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
-                  backgroundSound === s.id
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80'
-                }`}
-              >
-                {PRESET_EMOJIS[s.id] || '🔊'} {s.name}
-              </button>
-            ))}
           </div>
 
           {/* Custom sounds */}
