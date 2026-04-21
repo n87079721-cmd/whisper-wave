@@ -124,7 +124,7 @@ const SettingsPage = () => {
       setVoiceDefaultBgSound(s.defaultBgSound || 'none');
     }).catch(() => {});
     api.getVoices().then(vs => setAvailableVoices(vs.map((v: any) => ({ id: v.id, name: v.name })))).catch(() => {});
-    api.getSounds().then(s => setAvailableSounds([...s.presets, ...s.custom])).catch(() => {});
+    api.getSounds().then(s => setAvailableSounds(s.custom)).catch(() => {});
   }, []);
 
   const handleSaveKey = async () => {
