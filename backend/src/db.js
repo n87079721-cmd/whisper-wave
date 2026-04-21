@@ -150,6 +150,28 @@ function ensureCurrentTables(db) {
     );
   `);
 
+  // ── AI voice-note feature: per-persona voice + per-contact voice settings + send log ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS voice_note_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      contact_id TEXT NOT NULL,
+      sent_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_voice_log_user_contact_time ON voice_note_log(user_id, contact_id, sent_at);
+  `);
+  try {
+    const promptCols = getColumnNames(db, 'prompts');
+    if (!promptCols.has('voice_id')) db.exec("ALTER TABLE prompts ADD COLUMN voice_id TEXT");
+    if (!promptCols.has('model_id')) db.exec("ALTER TABLE prompts ADD COLUMN model_id TEXT");
+  } catch {}
+  try {
+    const cCols = getColumnNames(db, 'contacts');
+    if (!cCols.has('voice_enabled')) db.exec("ALTER TABLE contacts ADD COLUMN voice_enabled INTEGER DEFAULT 0");
+    if (!cCols.has('voice_max_per_day')) db.exec("ALTER TABLE contacts ADD COLUMN voice_max_per_day INTEGER");
+    if (!cCols.has('voice_bg_sound')) db.exec("ALTER TABLE contacts ADD COLUMN voice_bg_sound TEXT");
+  } catch {}
+
   // Add prompt_id column to contacts if missing
   try {
     const contactCols = getColumnNames(db, 'contacts');
