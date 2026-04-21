@@ -156,8 +156,9 @@ const VoiceStudioPage = () => {
         toast.error(err.message || 'Failed to load voices from ElevenLabs');
       })
       .finally(() => setLoadingVoices(false));
-    // Load sounds — only user-extracted sounds, no presets
-    api.getSounds().then(({ custom }) => {
+    // Load sounds
+    api.getSounds().then(({ presets, custom }) => {
+      setPresetSounds(presets);
       setCustomSounds(custom);
     }).catch(() => {});
   }, []);
@@ -442,6 +443,20 @@ const VoiceStudioPage = () => {
             >
               None
             </button>
+            {presetSounds.map(s => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setBackgroundSound(s.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                  backgroundSound === s.id
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80'
+                }`}
+              >
+                {PRESET_EMOJIS[s.id] || '🔊'} {s.name}
+              </button>
+            ))}
           </div>
 
           {/* Custom sounds */}
