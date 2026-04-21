@@ -797,4 +797,6 @@ export interface Prompt {
   name: string;
   content: string;
   created_at: string;
+  voice_id?: string | null;
+  model_id?: string | null;
 }
