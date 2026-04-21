@@ -6,11 +6,6 @@ import { api, type Contact, type Voice, type SoundItem } from '@/lib/api';
 import { getContactDisplayMeta, getContactDisplayName } from '@/lib/contactDisplay';
 import { toast } from 'sonner';
 
-const PRESET_EMOJIS: Record<string, string> = {
-  cafe: '☕', rain: '🌧', street: '🏙', nature: '🌳', office: '💼',
-  car: '🚗', crowd: '👥', ocean: '🌊', fireplace: '🔥',
-};
-
 const MODELS = [
   { id: 'eleven_v3', name: 'v3 Human Mode ✨', desc: 'Most natural & expressive — recommended' },
   { id: 'eleven_multilingual_v2', name: 'Multilingual v2', desc: 'High quality, 29 languages' },
