@@ -45,6 +45,7 @@ const SettingsPage = () => {
   const [voiceBgVolume, setVoiceBgVolume] = useState(15);
   const [voiceDefaultBgSound, setVoiceDefaultBgSound] = useState('none');
   const [availableSounds, setAvailableSounds] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  const [previewingSoundId, setPreviewingSoundId] = useState<string | null>(null);
 
   // Telegram Bot
   const [telegramToken, setTelegramToken] = useState('');
@@ -123,7 +124,8 @@ const SettingsPage = () => {
       setVoiceDefaultBgSound(s.defaultBgSound || 'none');
     }).catch(() => {});
     api.getVoices().then(vs => setAvailableVoices(vs.map((v: any) => ({ id: v.id, name: v.name })))).catch(() => {});
-    api.getSounds().then(s => setAvailableSounds([...s.presets, ...s.custom])).catch(() => {});
+    // Only user-extracted sounds, no presets
+    api.getSounds().then(s => setAvailableSounds(s.custom)).catch(() => {});
   }, []);
 
   const handleSaveKey = async () => {
