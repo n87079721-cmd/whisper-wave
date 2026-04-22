@@ -2218,11 +2218,16 @@ RULES:
   let out = await callOpenAI(baseSystem);
   if (!isValidEnhancedText(out)) {
     const retrySystem = `${baseSystem}\n\nCRITICAL RETRY INSTRUCTION: your previous attempt failed validation. The rewrite MUST contain at least ${minTags} bracketed tags and at least one pacing/reaction cue such as [pause], [hesitates], [breathes], [laughing], [laughs softly], [sighing], or [gasping]. Output ONLY the rewritten line.`;
-    out = await callOpenAI(retrySystem);
+    try {
+      const retried = await callOpenAI(retrySystem);
+      // Prefer the retry if it has more tags than the first attempt
+      if (countTags(retried) > countTags(out)) out = retried;
+    } catch {
+      // Retry failed — keep first attempt
+    }
   }
-  if (!isValidEnhancedText(out)) {
-    throw new Error(`enhanceTextForVoice produced insufficient tags (${countTags(out)}) or no pacing cues after retry`);
-  }
+  // Always return the best enhancement we got (even if below ideal tag count).
+  // A voice note with 1 tag is still better than failing the whole send.
   return out;
 }
 
