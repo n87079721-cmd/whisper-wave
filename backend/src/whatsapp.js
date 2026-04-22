@@ -2058,6 +2058,26 @@ function getConfigValue(db, userId, key, fallback) {
   return row?.value ?? fallback;
 }
 
+// Resolve the OpenAI key used for the "enhance" feature for ALL accounts.
+// Per product rule: every user's Enhance button and Telegram "Send as VN"
+// must run through the admin's OpenAI key + admin's enhance prompt — not the
+// individual user's key. Standard AI auto-replies still use each user's own key.
+// Resolution order: admin user's openai_api_key → process.env.OPENAI_API_KEY.
+export function getAdminEnhanceOpenAIKey(db) {
+  try {
+    const admin = db.prepare(
+      "SELECT id FROM users WHERE is_admin = 1 ORDER BY created_at ASC, id ASC LIMIT 1"
+    ).get();
+    if (admin?.id) {
+      const row = db.prepare(
+        "SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'"
+      ).get(admin.id);
+      if (row?.value) return row.value;
+    }
+  } catch {}
+  return process.env.OPENAI_API_KEY || '';
+}
+
 /**
  * Build the full system prompt for a contact: persona (or global) + memory + active directive.
  * Directive is wrapped at the top AND repeated at the bottom so the model can't drift away from it.
