@@ -578,3 +578,73 @@ Respond with ONLY the compacted memory, nothing else.`,
   const data = await response.json();
   return data.choices?.[0]?.message?.content?.trim() || memory;
 }
+
+/**
+ * Detect whether a piece of text is in English; if not, also return an
+ * English translation. Single round-trip with gpt-4o-mini in JSON mode.
+ * Returns null when input is unsuitable for detection (too short, emoji-only,
+ * URL-only) or when the API fails (caller should silently fall back).
+ * Shape: { language, languageCode, isEnglish, englishTranslation }
+ */
+export async function detectAndTranslate(apiKey, text) {
+  if (!apiKey || !text) return null;
+
+  // Strip the voice-note transcript prefix so language detection reads the
+ // actual spoken content, not our wrapper.
+  let cleaned = String(text).trim();
+  cleaned = cleaned.replace(/^🎤\s*\[Voice note\]:\s*"?/i, '').replace(/"$/, '').trim();
+
+  // Skip obviously-not-text inputs
+  if (cleaned.length < 3) return null;
+  // Strip URLs and emoji/symbols — if nothing meaningful remains, skip.
+  const stripped = cleaned
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}\u200d\ufe0f]/gu, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .trim();
+  if (stripped.length < 3) return null;
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a language detector and translator. Given a short message, identify its language and (if not English) provide an English translation.
+
+Rules:
+- "language": full English name of the detected language (e.g. "Yoruba", "French", "Naija Pidgin", "Mandarin Chinese"). For Nigerian Pidgin / broken English, use "Naija Pidgin", not "English".
+- "languageCode": short lowercase tag matching the name (e.g. "yoruba", "french", "naija-pidgin", "mandarin").
+- "isEnglish": true ONLY for standard English (US, UK, etc.). Naija Pidgin, Jamaican Patois, etc. are NOT English.
+- "englishTranslation": natural fluent English translation of the message. If isEnglish is true, repeat the original message verbatim.
+
+Respond ONLY with a JSON object: {"language": "...", "languageCode": "...", "isEnglish": bool, "englishTranslation": "..."}`,
+          },
+          { role: 'user', content: cleaned.slice(0, 1000) },
+        ],
+        max_tokens: 300,
+        temperature: 0.1,
+        response_format: { type: 'json_object' },
+      }),
+    });
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    const result = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+    if (typeof result.isEnglish !== 'boolean' || !result.language) return null;
+    return {
+      language: String(result.language),
+      languageCode: String(result.languageCode || result.language).toLowerCase(),
+      isEnglish: !!result.isEnglish,
+      englishTranslation: String(result.englishTranslation || cleaned),
+    };
+  } catch {
+    return null;
+  }
+}
