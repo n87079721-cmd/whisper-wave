@@ -17,6 +17,7 @@ const botInstances = new Map();
 //   previews: Map<token, { jid, text, messages: [{chat_id, message_id}] }>,  // token-keyed previews
 //   activeTokenByJid: Map<jid, token>,        // newest token for a jid (so we can disable older ones)
 //   vnInFlight: Set<token>,                    // tokens currently being processed
+//   sensitiveAlerts: Map<token, { jid, contactName }>, // token -> sensitive alert context for "🤖 AI reply" button
 // }
 
 function makeToken() {
@@ -55,6 +56,7 @@ function getBotState(userId) {
       previews: new Map(),
       activeTokenByJid: new Map(),
       vnInFlight: new Set(),
+      sensitiveAlerts: new Map(),
     });
   }
   const inst = botInstances.get(userId);
@@ -63,6 +65,7 @@ function getBotState(userId) {
   if (!inst.previews) inst.previews = new Map();
   if (!inst.activeTokenByJid) inst.activeTokenByJid = new Map();
   if (!inst.vnInFlight) inst.vnInFlight = new Set();
+  if (!inst.sensitiveAlerts) inst.sensitiveAlerts = new Map();
   return inst;
 }
 
