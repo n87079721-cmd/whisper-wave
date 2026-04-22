@@ -4009,6 +4009,85 @@ export function getTelegramCallbackHandlers(userId, db) {
         return { ok: false, reason: err?.message || 'unknown error' };
       }
     },
+
+    /**
+     * Direct VN-from-text send (sensitive-alert "🎤 Send VN" flow). Same
+     * pipeline as onSendVN but takes user-typed text instead of consuming a
+     * preview token. Uses Telegram VN voice + language settings; no contact
+     * persona override needed since the user typed exactly what to say.
+     */
+    onSendVNDirect: async (jid, rawText) => {
+      try {
+        const text = String(rawText || '').trim();
+        if (!text) return { ok: false, reason: 'empty text' };
+
+        let contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+        if (!contact) {
+          const phone = String(jid || '').split('@')[0];
+          if (phone) {
+            contact = db.prepare('SELECT id, name, phone FROM contacts WHERE phone = ? AND user_id = ? ORDER BY id DESC LIMIT 1').get(phone, userId);
+          }
+        }
+        if (!contact) return { ok: false, reason: 'contact not found' };
+
+        const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
+        if (!elKey) return { ok: false, reason: 'ElevenLabs API key not configured' };
+
+        const hasV3Tags = /\[[A-Za-z][A-Za-z0-9 _-]{0,28}\]/.test(text);
+        let openaiKey = null;
+        if (!hasV3Tags) {
+          openaiKey = getAdminEnhanceOpenAIKey(db);
+          if (!openaiKey) return { ok: false, reason: 'No tags + admin OpenAI key not configured' };
+        }
+        const speakable = hasV3Tags ? text : await enhanceTextForVoice(openaiKey, text);
+
+        // Same voice resolution as onSendVN: Telegram override → persona → default.
+        const telegramVoiceOverride = getConfigValue(db, userId, 'ai_telegram_vn_voice_id', '');
+        const personaVoice = getPersonaVoice(db, userId, contact.id);
+        const defaultVoiceId = getConfigValue(db, userId, 'ai_default_voice_id', '') || 'JBFqnCBsd6RMkjVDRZzb';
+        const voiceId = telegramVoiceOverride || personaVoice?.voiceId || defaultVoiceId;
+        const modelId = personaVoice?.modelId || null;
+
+        let bgSound = getConfigValue(db, userId, 'ai_voice_default_bg_sound', '') || 'none';
+        if (bgSound === 'none') bgSound = null;
+        if (bgSound?.startsWith('custom-')) {
+          const owned = db.prepare('SELECT 1 FROM custom_sounds WHERE user_id = ? AND sound_id = ?').get(userId, bgSound);
+          if (!owned) bgSound = null;
+        }
+        const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
+        const langSetting = getConfigValue(db, userId, 'ai_telegram_vn_voice_language', 'auto');
+
+        const audioBuffer = await generateVoiceNote(
+          elKey, speakable, voiceId, modelId, bgSound,
+          Number.isFinite(bgVolume) ? bgVolume : 0.15,
+          langSetting,
+        );
+
+        const sent = await sendVoiceNote(userId, jid, audioBuffer);
+        const replyId = sent?.id?._serialized || uuid();
+        const voiceMedia = persistVoiceNoteBuffer(replyId, audioBuffer);
+
+        db.prepare(`
+          INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
+          VALUES (?, ?, ?, ?, ?, 'voice', 'sent', datetime('now'), 'sent', ?, ?, ?)
+        `).run(replyId, userId, contact.id, jid, text, voiceMedia.mediaPath, voiceMedia.mediaName, voiceMedia.mediaMime);
+        db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contact.id);
+        db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(userId);
+        db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'telegram_vn_sent', ?)`).run(userId, JSON.stringify({ contactId: contact.id, source: 'sensitive_alert' }));
+
+        debugLog(db, userId, 'telegram_send_vn_direct', {
+          jid, contact: contact.name || contact.phone, voiceId,
+          language: langSetting, bgSound: bgSound || 'none',
+          textPreview: text.slice(0, 80),
+        });
+
+        emit(userId, 'message', { contactId: contact.id, msgId: replyId });
+        return { ok: true };
+      } catch (err) {
+        debugLog(db, userId, 'telegram_vn_direct_failed', { jid, error: err?.message || String(err) });
+        return { ok: false, reason: err?.message || 'unknown error' };
+      }
+    },
   };
 }
 
