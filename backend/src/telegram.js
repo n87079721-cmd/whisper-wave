@@ -17,6 +17,7 @@ const botInstances = new Map();
 //   previews: Map<token, { jid, text, messages: [{chat_id, message_id}] }>,  // token-keyed previews
 //   activeTokenByJid: Map<jid, token>,        // newest token for a jid (so we can disable older ones)
 //   vnInFlight: Set<token>,                    // tokens currently being processed
+//   sensitiveAlerts: Map<token, { jid, contactName }>, // token -> sensitive alert context for "🤖 AI reply" button
 // }
 
 function makeToken() {
@@ -55,6 +56,7 @@ function getBotState(userId) {
       previews: new Map(),
       activeTokenByJid: new Map(),
       vnInFlight: new Set(),
+      sensitiveAlerts: new Map(),
     });
   }
   const inst = botInstances.get(userId);
@@ -63,6 +65,7 @@ function getBotState(userId) {
   if (!inst.previews) inst.previews = new Map();
   if (!inst.activeTokenByJid) inst.activeTokenByJid = new Map();
   if (!inst.vnInFlight) inst.vnInFlight = new Set();
+  if (!inst.sensitiveAlerts) inst.sensitiveAlerts = new Map();
   return inst;
 }
 
@@ -227,11 +230,30 @@ export async function sendReplyPreview(db, userId, contactName, replyText, jid, 
 /**
  * Send a sensitive topic alert to the user's Telegram.
  */
-export async function sendSensitiveAlert(db, userId, contactName, topic, messagePreview) {
+export async function sendSensitiveAlert(db, userId, contactName, topic, messagePreview, jid = null, { isAdmin = false } = {}) {
   const { token, chatIds } = getBotConfig(db, userId);
   if (!token || chatIds.length === 0) return;
 
-  const text = `🚨 *Sensitive Topic Detected*\n\nFrom: *${escapeMarkdown(contactName)}*\nTopic: ${escapeMarkdown(topic)}\n\nMessage: _${escapeMarkdown(messagePreview.slice(0, 200))}_\n\nAI reply has been paused. Please respond manually.`;
+  // Only admins should be able to trigger AI replies on sensitive alerts. The
+  // alert is still sent to every configured chat ID, but the inline button is
+  // gated behind the admin flag at callback time.
+  const text = `🚨 *Sensitive Topic Detected*\n\nFrom: *${escapeMarkdown(contactName)}*\nTopic: ${escapeMarkdown(topic)}\n\nMessage: _${escapeMarkdown(messagePreview.slice(0, 200))}_\n\nAI reply is paused. Tap below to draft a reply, or respond manually.`;
+
+  // Mint a token tying this alert to the jid so the button callback can locate
+  // the contact and trigger the existing onRewrite handler (which generates a
+  // draft and shows it in the standard preview UI). The button is only added
+  // when the caller passes a jid AND the user is an admin — non-admins still
+  // see the alert text but no actionable button.
+  let reply_markup;
+  if (jid && isAdmin) {
+    const alertToken = makeToken();
+    const state = getBotState(userId);
+    state.sensitiveAlerts.set(alertToken, { jid, contactName });
+    setTimeout(() => { state.sensitiveAlerts.delete(alertToken); }, 24 * 60 * 60 * 1000).unref?.();
+    reply_markup = {
+      inline_keyboard: [[{ text: '🤖 Draft AI reply', callback_data: `sensreply_${alertToken}` }]],
+    };
+  }
 
   await Promise.all(chatIds.map(async (cid) => {
     try {
@@ -239,11 +261,21 @@ export async function sendSensitiveAlert(db, userId, contactName, topic, message
         chat_id: cid,
         text,
         parse_mode: 'Markdown',
+        reply_markup,
       });
     } catch (err) {
       console.error(`[${userId}] Failed to send Telegram sensitive alert to ${cid}:`, err?.message);
     }
   }));
+}
+
+/** Resolve the jid + contact name for a sensitive-alert token (one-shot consume). */
+export function consumeSensitiveAlert(userId, token) {
+  const state = botInstances.get(userId);
+  if (!state?.sensitiveAlerts) return null;
+  const entry = state.sensitiveAlerts.get(token);
+  if (entry) state.sensitiveAlerts.delete(token);
+  return entry || null;
 }
 
 /**
@@ -365,6 +397,38 @@ export function startTelegramPolling(db, userId, handlers) {
             const cbData = update.callback_query.data;
             const [action, ...rest] = cbData.split('_');
             const tokenOrJid = rest.join('_');
+
+            // ── 🤖 "Draft AI reply" on a sensitive-topic alert ──
+            // Resolve the alert token → jid, ack the tap, then call onRewrite
+            // which generates a draft and shows the standard preview UI.
+            if (action === 'sensreply') {
+              const alert = consumeSensitiveAlert(userId, tokenOrJid);
+              await telegramRequest(token, 'answerCallbackQuery', {
+                callback_query_id: update.callback_query.id,
+                text: alert ? '🤖 Drafting…' : 'This alert has expired',
+              });
+              if (alert && handlers.onRewrite) {
+                // Strip the button so it can't be tapped twice
+                const msgChatId = update.callback_query.message?.chat?.id;
+                const msgId = update.callback_query.message?.message_id;
+                if (msgChatId && msgId) {
+                  telegramRequest(token, 'editMessageReplyMarkup', {
+                    chat_id: msgChatId, message_id: msgId,
+                    reply_markup: { inline_keyboard: [] },
+                  }).catch(() => {});
+                }
+                try {
+                  await handlers.onRewrite(alert.jid);
+                } catch (err) {
+                  await telegramRequest(token, 'sendMessage', {
+                    chat_id: incomingChatId,
+                    text: `⚠️ Could not draft: ${err?.message || 'error'}`,
+                  });
+                }
+              }
+              continue;
+            }
+
             // New format: tokenOrJid is a short token. Old format (back-compat
             // for in-flight previews after deploy): tokenOrJid is the jid itself.
             const resolvedJid = resolveJidFromToken(userId, tokenOrJid) || tokenOrJid;
