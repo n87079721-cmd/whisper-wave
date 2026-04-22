@@ -1175,7 +1175,9 @@ export function createApiRouter(db) {
       const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
       // ALWAYS enhance — no raw-text fallback. If enhance fails or no OpenAI
       // key is set, the request errors out (400 / 500). Per user request.
-      const openaiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
+      // Falls back to the admin's key so every account gets identical
+      // enhancement quality without each user configuring their own key.
+      const openaiKey = getSharedOpenAIKey(db, req.userId);
       if (!openaiKey) return res.status(400).json({ error: 'OpenAI API key required to enhance VN text. No fallback to raw text.' });
       const speakable = await enhanceTextForVoice(openaiKey, text);
       const audioBuffer = await generateVoiceNote(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
