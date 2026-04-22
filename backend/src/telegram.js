@@ -565,15 +565,18 @@ export function startTelegramPolling(db, userId, handlers) {
 
             if (msgText.startsWith('/login')) {
               const creds = handlers.getUserbotCreds?.() || null;
+              handlers.debugLog?.('telegram_cmd_login', { hasCreds: !!creds });
               await userbotStartLogin(userId, incomingChatId, sendBotMessage, creds);
               continue;
             }
             if (msgText.startsWith('/cancel')) {
+              handlers.debugLog?.('telegram_cmd_cancel', {});
               await userbotCancel(userId, sendBotMessage);
               continue;
             }
             if (msgText.startsWith('/send')) {
               const recipient = msgText.replace(/^\/send\s*/, '').trim();
+              handlers.debugLog?.('telegram_cmd_send', { recipient });
               if (handlers.onUserbotSend) {
                 await handlers.onUserbotSend(userId, recipient, sendBotMessage);
               }
@@ -583,8 +586,22 @@ export function startTelegramPolling(db, userId, handlers) {
             // this plain text as that input — DO NOT also feed it to the
             // custom-reply handler.
             if (userbotIsBusy(userId) && !msgText.startsWith('/')) {
-              const consumed = userbotFeedReply(userId, msgText);
-              if (consumed) continue;
+              const consumedAs = userbotFeedReply(userId, msgText);
+              if (consumedAs) {
+                handlers.debugLog?.('telegram_userbot_input', { kind: consumedAs, len: msgText.length });
+                // Security: scrub sensitive inputs (2FA password, login code) from
+                // the chat as soon as we've consumed them so they don't sit in
+                // Telegram history. Best-effort — bot needs delete permission.
+                if (consumedAs === 'password' || consumedAs === 'code') {
+                  const mid = update.message?.message_id;
+                  if (mid) {
+                    telegramRequest(token, 'deleteMessage', {
+                      chat_id: incomingChatId, message_id: mid,
+                    }).catch(() => {});
+                  }
+                }
+                continue;
+              }
             }
           }
 
