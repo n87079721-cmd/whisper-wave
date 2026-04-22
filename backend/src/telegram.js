@@ -357,9 +357,12 @@ export async function sendTestMessage(token, chatIdOrIds) {
   return results.some(r => r.ok);
 }
 
+// Legacy-Markdown escape (parse_mode: 'Markdown'). Only `_ * [ ` need
+// escaping — MarkdownV2's broader set was leaking literal backslashes into
+// rendered messages (e.g. "Lenny \) Mexico", "today\.").
 function escapeMarkdown(text) {
   if (!text) return '';
-  return text.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+  return String(text).replace(/([_*`\[])/g, '\\$1');
 }
 
 /**
@@ -548,18 +551,17 @@ export function startTelegramPolling(db, userId, handlers) {
           // Routed before the custom-reply text handler so commands and
           // mid-flow replies (phone, code, 2FA, paste-text) work correctly.
           const msgText = update.message?.text;
-          if (msgText && handlers.userbotEnabled && handlers.isAdmin) {
+          // Re-check userbot env at command time (not just at handler init) so
+          // newly-added TELEGRAM_API_ID / TELEGRAM_API_HASH secrets take effect
+          // without restarting the polling loop.
+          const userbotReady = !!(process.env.TELEGRAM_API_ID && process.env.TELEGRAM_API_HASH);
+          if (msgText && handlers.isAdmin && (userbotReady || handlers.userbotEnabled)) {
+            // Plain-text bot replies — no parse_mode means no escaping rules,
+            // no risk of literal backslashes leaking into the UI.
             const sendBotMessage = async (t) => {
-              try {
-                await telegramRequest(token, 'sendMessage', {
-                  chat_id: incomingChatId, text: t, parse_mode: 'MarkdownV2',
-                });
-              } catch {
-                // Fallback to plain text if MarkdownV2 escaping is wrong
-                await telegramRequest(token, 'sendMessage', {
-                  chat_id: incomingChatId, text: t.replace(/\\/g, ''),
-                });
-              }
+              await telegramRequest(token, 'sendMessage', {
+                chat_id: incomingChatId, text: t,
+              });
             };
 
             if (msgText.startsWith('/login')) {
