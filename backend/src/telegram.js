@@ -75,45 +75,57 @@ export function getLastPreviewedReply(userId, jid) {
 }
 
 /**
- * Atomically consume a previewed reply for a jid. Returns the text if it was
- * still available (and removes it so it can never be sent twice), or null if
- * it was already consumed / never existed. This is the idempotency guard for
- * the "🎤 Send as VN" button — re-tapping the same Telegram message (even days
- * later) will return null instead of sending the VN again.
+ * Token-based claim. Each Telegram preview message carries its own short token,
+ * so re-tapping an OLD preview's button (after a newer reply was generated) will
+ * NOT pick up the newer text — it will fail cleanly with "expired".
+ * Returns { text, jid, release(commit) } or { busy: true } / { text: null }.
  */
-export function consumeLastPreviewedReply(userId, jid) {
+export function claimPreviewByToken(userId, token) {
   const state = botInstances.get(userId);
-  if (!state?.lastReplies) return null;
-  const text = state.lastReplies.get(jid);
-  if (!text) return null;
-  state.lastReplies.delete(jid);
-  return text;
-}
-
-/**
- * Try to claim the previewed reply for a jid for sending. Returns the text and
- * a release() function. Until release(commit=true) is called the preview stays
- * cached so a retry/re-tap can succeed if the in-flight send fails. If another
- * caller already holds the lock, returns { busy: true } so the UI can tell the
- * user "VN already in progress" instead of "already sent".
- */
-export function claimLastPreviewedReply(userId, jid) {
-  const state = botInstances.get(userId);
-  if (!state?.lastReplies) return { text: null };
-  if (!state.vnInFlight) state.vnInFlight = new Set();
-  if (state.vnInFlight.has(jid)) return { busy: true };
-  const text = state.lastReplies.get(jid);
-  if (!text) return { text: null };
-  state.vnInFlight.add(jid);
+  if (!state?.previews) return { text: null };
+  const entry = state.previews.get(token);
+  if (!entry) return { text: null };
+  if (state.vnInFlight.has(token)) return { busy: true };
+  state.vnInFlight.add(token);
   return {
-    text,
+    text: entry.text,
+    jid: entry.jid,
+    messages: entry.messages,
     release: (commit) => {
       const s = botInstances.get(userId);
       if (!s) return;
-      s.vnInFlight?.delete(jid);
-      if (commit) s.lastReplies?.delete(jid);
+      s.vnInFlight.delete(token);
+      if (commit) {
+        s.previews.delete(token);
+        // Only clear activeTokenByJid if this WAS the active one
+        if (s.activeTokenByJid.get(entry.jid) === token) {
+          s.activeTokenByJid.delete(entry.jid);
+        }
+      }
     },
   };
+}
+
+/** Look up just the jid for a token (used by Cancel/Rewrite/Custom callbacks). */
+export function resolveJidFromToken(userId, token) {
+  const state = botInstances.get(userId);
+  if (!state?.previews) return null;
+  return state.previews.get(token)?.jid || null;
+}
+
+/**
+ * Disable an old preview's inline keyboard in Telegram so it can no longer be
+ * tapped. Best-effort — silently ignores errors (message too old, deleted, etc.).
+ */
+async function disablePreviewMessages(token, messages) {
+  if (!messages?.length) return;
+  await Promise.all(messages.map(async ({ chat_id, message_id }) => {
+    try {
+      await telegramRequest(token, 'editMessageReplyMarkup', {
+        chat_id, message_id, reply_markup: { inline_keyboard: [] },
+      });
+    } catch {}
+  }));
 }
 
 async function telegramRequest(token, method, body = {}) {
