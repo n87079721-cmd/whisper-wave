@@ -2908,7 +2908,11 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
               chance: voiceDecision.chance + '%',
               sentToday: `${voiceDecision.sentToday}/${voiceDecision.maxPerDay}`,
             });
-            const enhanced = await enhanceTextForVoice(keyRow.value, replyText);
+            // Enhance using the ADMIN's OpenAI key + global prompt so every
+            // account (incl. new users without their own key) gets the same
+            // enhancement voice. Falls back to caller key only if no admin key.
+            const enhanceKey = getAdminEnhanceOpenAIKey(db, userId) || keyRow.value;
+            const enhanced = await enhanceTextForVoice(enhanceKey, replyText);
             const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
             const audioBuffer = await generateVoiceNote(
               elKey,
