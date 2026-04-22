@@ -1198,70 +1198,7 @@ export function createApiRouter(db) {
       const apiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
       if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured.' });
 
-      const cleanedInput = String(text)
-        .replace(/\[[^\]\n]{1,40}\]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim() || String(text).trim();
-
-      // Scale tag count based on text length
-      const wordCount = cleanedInput.split(/\s+/).length;
-      const tagRange = wordCount <= 15 ? '2-3' : wordCount <= 40 ? '4-6' : wordCount <= 80 ? '6-10' : '8-15';
-
-      const systemPrompt = `You rewrite text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note. You ARE this person — you feel things, you react, you breathe.
-
-AVAILABLE EXPRESSION TAGS (use generously where they fit):
-Emotions: [happy] [sad] [angry] [excited] [nervous] [scared] [disgusted] [surprised] [confused] [bored] [proud] [shy] [jealous] [grateful] [hopeful] [disappointed] [embarrassed] [anxious] [frustrated] [amused] [nostalgic] [elated] [resigned] [awe]
-Reactions: [laughing] [crying] [gasping] [sighing] [groaning] [screaming] [giggling] [chuckling] [sniffling] [yawning] [scoffing] [laughs softly] [snickering]
-Delivery: [whispering] [shouting] [singing] [mumbling] [sarcastically] [dramatically] [deadpan] [breathlessly] [cheerfully] [sadly] [angrily] [nervously] [excitedly] [lovingly] [coldly] [mockingly] [matter-of-fact] [wistful] [cautiously] [timidly] [quizzically]
-Physical: [clearing throat] [coughing] [sneezing] [hiccupping] [clicking tongue] [tutting] [blowing raspberry] [kissing teeth] [inhaling sharply] [exhaling deeply] [clapping] [gulping] [panting]
-Pacing cues: [pause] [hesitates] [breathes] [slows down] [drawn out] [continues after a beat] [stammers] [deliberate] [rushed] [emphasized] [understated] ... —
-
-TEXT FILTERS — Make it sound SPOKEN, not typed:
-- Use fillers naturally: "like", "you know", "I mean", "honestly", "basically", "right?", "so yeah", "anyway", "look", "thing is"
-- Use casual contractions and slang: "gonna", "wanna", "kinda", "sorta", "dunno", "lemme", "y'know", "ngl", "tbh", "lowkey"
-- Self-corrections mid-sentence: "I was gonna— actually no, I think..."
-- Trailing thoughts: "but yeah..." or "so... yeah"
-- Verbal reactions: "oh!", "wait", "okay so", "ugh", "hmm", "right right right"
-- Tone shifts within the message — start casual, get serious, or vice versa
-
-EMOTION & DELIVERY RULES:
-- FEEL the text. If it's good news, be genuinely excited. Bad news, let the weight show.
-- Layer emotions: [inhaling sharply] before a revelation, [pause] before something heavy, [laughs softly] after self-deprecation
-- Use tone SHIFTS — start one way, shift mid-message. People don't maintain one emotion throughout.
-- For longer texts: vary the energy. Mix calm reflective moments with bursts of emotion.
-
-RULES:
-- Output ONE rewritten version only — ONLY the enhanced text, no quotes, no explanation
-- Use ${tagRange} expression tags total (scale with length — longer = more tags)
-- At least 2 pacing cues (pauses, breaths, hesitations) per rewrite
-- Break long sentences into shorter spoken fragments
-- Use contractions everywhere (I'm, don't, can't, won't, it's, that's, there's)
-- Match tags to context: happy → [excited] [laughing], bad → [sighing] [sadly], funny → [chuckling] [laughs softly], serious → [clearing throat] [inhaling sharply], awkward → [hesitates] [nervously]
-- If input already had tags, completely rewrite with fresh emotion and new tags
-- Add at least one emotional shift or tonal change in longer texts`;
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: `Rewrite this for a natural WhatsApp voice note:\n\n${cleanedInput}` }
-          ],
-          temperature: 1.2,
-          max_tokens: 1024,
-        }),
-      });
-
-      if (!response.ok) {
-        const details = await response.text();
-        return res.status(response.status).json({ error: `OpenAI request failed: ${details}` });
-      }
-
-      const data = await response.json();
-      const enhanced = data.choices?.[0]?.message?.content?.trim();
-      if (!enhanced) return res.status(500).json({ error: 'No response from OpenAI' });
+      const enhanced = await enhanceTextForVoice(apiKey, text);
 
       res.json({ enhanced });
     } catch (err) {
