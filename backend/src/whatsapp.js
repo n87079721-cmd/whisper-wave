@@ -2017,12 +2017,16 @@ function buildContactSystemPrompt(db, userId, contactId) {
   let memory = '';
   let directive = '';
   try {
-    const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires, memory_enabled FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
     if (contactRow?.prompt_id) {
       const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
       systemPrompt = promptRow?.content || '';
     }
-    if (contactRow?.memory) memory = contactRow.memory;
+    // Per-contact memory toggle: when explicitly disabled, skip memory injection entirely.
+    const memoryEnabled = contactRow?.memory_enabled === undefined || contactRow?.memory_enabled === null
+      ? 1
+      : contactRow.memory_enabled;
+    if (contactRow?.memory && memoryEnabled !== 0) memory = contactRow.memory;
     if (contactRow?.active_directive) {
       const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
       if (notExpired) directive = contactRow.active_directive;
@@ -3293,14 +3297,21 @@ export async function markChatRead(userId, db, contactId) {
   return { success: true };
 }
 
-// ── Conversation Summary (auto-trigger after 20+ messages) ──
+// ── Conversation Summary (auto-trigger after 10+ messages, or forced manually) ──
 
-async function triggerConversationSummary(userId, db, contactId, jid, contactName, apiKey) {
+export async function triggerConversationSummary(userId, db, contactId, jid, contactName, apiKey, opts = {}) {
+  const force = !!opts.force;
   const autoSummarize = getConfigValue(db, userId, 'auto_summarize', 'true');
-  if (autoSummarize !== 'true') return;
+  if (!force && autoSummarize !== 'true') return { ran: false, reason: 'auto_summarize_off' };
 
   try {
-    const contactRow = db.prepare('SELECT memory, last_summary_at FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+    const contactRow = db.prepare('SELECT memory, last_summary_at, memory_enabled FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+    // Respect per-contact memory toggle (don't build memory for contacts where it's disabled).
+    const memoryEnabled = contactRow?.memory_enabled === undefined || contactRow?.memory_enabled === null
+      ? 1
+      : contactRow.memory_enabled;
+    if (memoryEnabled === 0) return { ran: false, reason: 'memory_disabled' };
+
     const lastSummaryAt = contactRow?.last_summary_at ? new Date(contactRow.last_summary_at) : null;
 
     // Count messages since last summary
@@ -3312,7 +3323,9 @@ async function triggerConversationSummary(userId, db, contactId, jid, contactNam
     }
     const count = db.prepare(countQuery).get(...params)?.c || 0;
 
-    if (count < 20) return;
+    // Lowered auto-trigger threshold from 20 → 10 so memory updates twice as often.
+    // Manual "Summarize now" button bypasses this gate via { force: true }.
+    if (!force && count < 10) return { ran: false, reason: 'not_enough_new_messages', count };
 
     // Get recent messages for summary
     const messages = db.prepare(`
@@ -3321,10 +3334,12 @@ async function triggerConversationSummary(userId, db, contactId, jid, contactNam
       ORDER BY timestamp DESC LIMIT 40
     `).all(contactId, userId).reverse();
 
-    if (messages.length < 10) return;
+    // For forced runs allow as few as 4 messages (quick manual capture).
+    const minMessages = force ? 4 : 10;
+    if (messages.length < minMessages) return { ran: false, reason: 'too_few_messages', count: messages.length };
 
     const summary = await generateConversationSummary(apiKey, messages, contactName, contactRow?.memory || '', { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
-    if (!summary) return;
+    if (!summary) return { ran: false, reason: 'empty_summary' };
 
     // Append summary to memory
     const existingMemory = contactRow?.memory || '';
@@ -3349,8 +3364,10 @@ async function triggerConversationSummary(userId, db, contactId, jid, contactNam
       .run(newMemory, contactId, userId);
 
     debugLog(db, userId, 'conversation_summarized', { contact: contactName, summaryPreview: summary.slice(0, 100) });
+    return { ran: true, summary, memory: newMemory };
   } catch (err) {
     console.error(`[${userId}] Conversation summary failed:`, err?.message);
+    return { ran: false, reason: 'error', error: err?.message };
   }
 }
 
