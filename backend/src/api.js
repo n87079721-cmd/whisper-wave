@@ -2266,27 +2266,6 @@ function getConfig(db, userId, key) {
   return row?.value || null;
 }
 
-// Returns an OpenAI key for VN enhancement, falling back through:
-//   1) the user's own configured key
-//   2) the primary admin's configured key  (so all sub-accounts inherit
-//      the same enhancement quality the admin enjoys, with no setup)
-//   3) process.env.OPENAI_API_KEY
-// This is what makes "every user's voice notes work the same as admin's".
-export function getSharedOpenAIKey(db, userId) {
-  const own = getConfig(db, userId, 'openai_api_key');
-  if (own) return own;
-  try {
-    const admin = db.prepare(
-      'SELECT id FROM users WHERE is_admin = 1 ORDER BY created_at ASC LIMIT 1'
-    ).get();
-    if (admin && admin.id !== userId) {
-      const adminKey = getConfig(db, admin.id, 'openai_api_key');
-      if (adminKey) return adminKey;
-    }
-  } catch {}
-  return process.env.OPENAI_API_KEY || null;
-}
-
 function setConfig(db, userId, key, value) {
   db.prepare('INSERT OR REPLACE INTO config (user_id, key, value) VALUES (?, ?, ?)').run(userId, key, value);
 }
