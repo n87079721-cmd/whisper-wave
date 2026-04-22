@@ -1175,9 +1175,7 @@ export function createApiRouter(db) {
       const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
       // ALWAYS enhance — no raw-text fallback. If enhance fails or no OpenAI
       // key is set, the request errors out (400 / 500). Per user request.
-      // Falls back to the admin's key so every account gets identical
-      // enhancement quality without each user configuring their own key.
-      const openaiKey = getSharedOpenAIKey(db, req.userId);
+      const openaiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
       if (!openaiKey) return res.status(400).json({ error: 'OpenAI API key required to enhance VN text. No fallback to raw text.' });
       const speakable = await enhanceTextForVoice(openaiKey, text);
       const audioBuffer = await generateVoiceNote(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
@@ -1280,16 +1278,7 @@ export function createApiRouter(db) {
       if (!apiKey) return res.status(400).json({ error: 'ElevenLabs API key not configured' });
 
       const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
-      // Voice Studio previews ALSO get the same enhancement pipeline as admin
-      // sends, so all users hear properly-tagged speech (laughs, pauses, etc.)
-      // not raw text. Falls back to admin's OpenAI key so no per-user setup.
-      let speakable = text;
-      const openaiKey = getSharedOpenAIKey(db, req.userId);
-      if (openaiKey) {
-        try { speakable = await enhanceTextForVoice(openaiKey, text); }
-        catch (e) { console.log('[voice/preview] enhance failed, using raw text:', e?.message); }
-      }
-      const audioBuffer = await generatePreviewAudio(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
+      const audioBuffer = await generatePreviewAudio(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
       // Count this preview toward today's usage so the limit truly caps Voice Studio activity.
       try { db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(req.userId); } catch {}
       res.set('Content-Type', 'audio/mpeg');
@@ -1305,7 +1294,7 @@ export function createApiRouter(db) {
       const { text } = req.body;
       if (!text) return res.status(400).json({ error: 'Missing text' });
 
-      const apiKey = getSharedOpenAIKey(db, req.userId);
+      const apiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
       if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured.' });
 
       const enhanced = await enhanceTextForVoice(apiKey, text);
@@ -2275,27 +2264,6 @@ export function createApiRouter(db) {
 function getConfig(db, userId, key) {
   const row = db.prepare('SELECT value FROM config WHERE user_id = ? AND key = ?').get(userId, key);
   return row?.value || null;
-}
-
-// Returns an OpenAI key for VN enhancement, falling back through:
-//   1) the user's own configured key
-//   2) the primary admin's configured key  (so all sub-accounts inherit
-//      the same enhancement quality the admin enjoys, with no setup)
-//   3) process.env.OPENAI_API_KEY
-// This is what makes "every user's voice notes work the same as admin's".
-export function getSharedOpenAIKey(db, userId) {
-  const own = getConfig(db, userId, 'openai_api_key');
-  if (own) return own;
-  try {
-    const admin = db.prepare(
-      'SELECT id FROM users WHERE is_admin = 1 ORDER BY created_at ASC LIMIT 1'
-    ).get();
-    if (admin && admin.id !== userId) {
-      const adminKey = getConfig(db, admin.id, 'openai_api_key');
-      if (adminKey) return adminKey;
-    }
-  } catch {}
-  return process.env.OPENAI_API_KEY || null;
 }
 
 function setConfig(db, userId, key, value) {

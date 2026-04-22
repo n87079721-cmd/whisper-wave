@@ -2008,24 +2008,6 @@ function getConfigValue(db, userId, key, fallback) {
   return row?.value ?? fallback;
 }
 
-// Shared OpenAI key resolver: user's own key → primary admin's key → env.
-// This lets every sub-account use AI auto-reply + VN enhancement with the
-// same quality as the admin, without each user pasting their own key.
-function getSharedOpenAIKey(db, userId) {
-  const own = getConfigValue(db, userId, 'openai_api_key', '');
-  if (own) return own;
-  try {
-    const admin = db.prepare(
-      'SELECT id FROM users WHERE is_admin = 1 ORDER BY created_at ASC LIMIT 1'
-    ).get();
-    if (admin && admin.id !== userId) {
-      const adminKey = getConfigValue(db, admin.id, 'openai_api_key', '');
-      if (adminKey) return adminKey;
-    }
-  } catch {}
-  return process.env.OPENAI_API_KEY || null;
-}
-
 /**
  * Build the full system prompt for a contact: persona (or global) + memory + active directive.
  * Directive is wrapped at the top AND repeated at the bottom so the model can't drift away from it.
@@ -2528,14 +2510,11 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
 async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestResolvedContent, latestMessageId, forceReply = false }) {
   const inst = getInstance(userId);
 
-  // Falls back to the admin's OpenAI key so every sub-account gets the
-  // same AI auto-reply + VN enhancement out of the box, with no setup.
-  const sharedOpenAIKey = getSharedOpenAIKey(db, userId);
-  if (!sharedOpenAIKey) {
+  const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
+  if (!keyRow?.value) {
     debugLog(db, userId, 'skip_no_api_key', { contact: contactName || phone });
     return;
   }
-  const keyRow = { value: sharedOpenAIKey };
 
   // ── Persona gate ──
   // If this contact has NO persona assigned from the prompt library, the AI
@@ -3675,9 +3654,9 @@ export function getTelegramCallbackHandlers(userId, db) {
         const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
         if (!elKey) return { ok: false, reason: 'ElevenLabs API key not configured' };
 
-        // Inherits admin's OpenAI key when user hasn't set their own, so
-        // every account gets identical VN enhancement.
-        const openaiKey = getSharedOpenAIKey(db, userId);
+        const openaiKey =
+          (db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId)?.value)
+          || process.env.OPENAI_API_KEY;
         if (!openaiKey) return { ok: false, reason: 'OpenAI API key required to enhance VN text. No fallback.' };
 
         // Voice selection: persona voice → contact voice override is implicit via persona →
