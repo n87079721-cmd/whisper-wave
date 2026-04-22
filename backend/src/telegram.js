@@ -81,11 +81,16 @@ export async function sendReplyPreview(db, userId, contactName, replyText, jid, 
   const personaLine = persona ? `🎭 _${escapeMarkdown(persona)}_\n` : '';
   const text = `💬 Reply to *${escapeMarkdown(contactName)}*:\n${personaLine}\n${escapeMarkdown(replyText)}`;
   const keyboard = {
-    inline_keyboard: [[
-      { text: '❌ Cancel', callback_data: `cancel_${jid}` },
-      { text: '🔄 Rewrite', callback_data: `rewrite_${jid}` },
-      { text: '✏️ Custom', callback_data: `custom_${jid}` },
-    ]],
+    inline_keyboard: [
+      [
+        { text: '❌ Cancel', callback_data: `cancel_${jid}` },
+        { text: '🔄 Rewrite', callback_data: `rewrite_${jid}` },
+        { text: '✏️ Custom', callback_data: `custom_${jid}` },
+      ],
+      [
+        { text: '🎤 Send as VN', callback_data: `vn_${jid}` },
+      ],
+    ],
   };
 
   await Promise.all(chatIds.map(async (cid) => {
