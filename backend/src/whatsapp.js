@@ -2890,7 +2890,11 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
               chance: voiceDecision.chance + '%',
               sentToday: `${voiceDecision.sentToday}/${voiceDecision.maxPerDay}`,
             });
-            const enhanced = await enhanceTextForVoice(keyRow.value, replyText);
+            // Enhance ALWAYS uses the admin's OpenAI key, regardless of which
+            // user's auto-reply this is. Per product rule: "enhance" = admin key.
+            const adminEnhanceKey = getAdminEnhanceOpenAIKey(db);
+            if (!adminEnhanceKey) throw new Error('Admin OpenAI API key not configured — cannot enhance VN text.');
+            const enhanced = await enhanceTextForVoice(adminEnhanceKey, replyText);
             const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
             const audioBuffer = await generateVoiceNote(
               elKey,
@@ -3808,10 +3812,10 @@ export function getTelegramCallbackHandlers(userId, db) {
         const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
         if (!elKey) return { ok: false, reason: 'ElevenLabs API key not configured' };
 
-        const openaiKey =
-          (db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId)?.value)
-          || process.env.OPENAI_API_KEY;
-        if (!openaiKey) return { ok: false, reason: 'OpenAI API key required to enhance VN text. No fallback.' };
+        // Enhance ALWAYS uses the admin's OpenAI key (and admin enhance prompt),
+        // regardless of which user owns this Telegram bridge. Per product rule.
+        const openaiKey = getAdminEnhanceOpenAIKey(db);
+        if (!openaiKey) return { ok: false, reason: 'Admin OpenAI API key not configured — cannot enhance VN text.' };
 
         // Voice selection: persona voice → contact voice override is implicit via persona →
         // global default voice → hard-coded fallback (George).
