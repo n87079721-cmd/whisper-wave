@@ -4,6 +4,7 @@ import { api, type Contact, type Message, type Voice, type Prompt } from '@/lib/
 import { toast } from 'sonner';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
+import { LANGUAGES } from '@/lib/languages';
 
 interface ConversationsPageProps {
   initialContact?: Contact | null;
@@ -83,6 +84,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [lastSummaryAt, setLastSummaryAt] = useState<string | null>(null);
   const [summarizingNow, setSummarizingNow] = useState(false);
   const [aiTimezone, setAiTimezone] = useState<string>('America/New_York');
+  const [contactReplyLanguage, setContactReplyLanguage] = useState<string>('auto');
+  const [savingLanguage, setSavingLanguage] = useState(false);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -315,6 +318,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setContactMemoryEnabled(data.memory_enabled !== 0);
       setLastSummaryAt(data.last_summary_at || null);
       setAiTimezone(data.timezone || 'America/New_York');
+      setContactReplyLanguage(data.reply_language || 'auto');
     }).catch(() => {
       setContactMemory('');
       setContactDirective('');
@@ -323,6 +327,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setContactMemoryEnabled(true);
       setLastSummaryAt(null);
       setAiTimezone('America/New_York');
+      setContactReplyLanguage('auto');
     });
     api.getContactAutoInitiate(selectedContact.id).then(data => {
       setContactAutoInitiate(data.autoInitiate);
