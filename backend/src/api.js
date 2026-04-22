@@ -1877,7 +1877,18 @@ export function createApiRouter(db) {
         ORDER BY u.created_at ASC
       `).all();
 
-      res.json(users.map(u => ({ ...u, is_admin: !!u.is_admin, isAdmin: !!u.is_admin, is_current: u.id === req.userId })));
+      res.json(users.map(u => {
+        const limit = getVoiceDailyLimit(db, u.id);
+        const sentToday = getVoiceSentTodayCount(db, u.id);
+        return {
+          ...u,
+          is_admin: !!u.is_admin,
+          isAdmin: !!u.is_admin,
+          is_current: u.id === req.userId,
+          voice_daily_limit: limit,            // null = unlimited, 0 = disabled, n>0 = cap
+          voice_sent_today: sentToday,
+        };
+      }));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
