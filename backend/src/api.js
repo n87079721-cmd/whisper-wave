@@ -1102,11 +1102,11 @@ export function createApiRouter(db) {
       const wa = getWA(req);
       const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId });
       const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
-      // ALWAYS enhance the text so the VN sounds like a real voice note
-      // (expression tags, fillers, pacing). enhanceTextForVoice safely
-      // returns the original text if the OpenAI call fails or no key is set.
+      // ALWAYS enhance — no raw-text fallback. If enhance fails or no OpenAI
+      // key is set, the request errors out (400 / 500). Per user request.
       const openaiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
-      const speakable = openaiKey ? await enhanceTextForVoice(openaiKey, text) : text;
+      if (!openaiKey) return res.status(400).json({ error: 'OpenAI API key required to enhance VN text. No fallback to raw text.' });
+      const speakable = await enhanceTextForVoice(openaiKey, text);
       const audioBuffer = await generateVoiceNote(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
 
       const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);

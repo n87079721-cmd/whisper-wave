@@ -2138,29 +2138,34 @@ function decideVoiceNote(db, userId, contactId, replyText) {
 }
 
 // Rewrite reply text via OpenAI to add ElevenLabs v3 expression tags (mirrors /enhance route).
-export async function enhanceTextForVoice(openaiKey, text) {
+async function enhanceTextForVoice(openaiKey, text) {
   const cleanedInput = String(text).replace(/\[[^\]\n]{1,40}\]/g, ' ').replace(/\s+/g, ' ').trim() || String(text).trim();
   const wordCount = cleanedInput.split(/\s+/).length;
   const tagRange = wordCount <= 15 ? '2-3' : wordCount <= 40 ? '4-6' : wordCount <= 80 ? '6-10' : '8-15';
   const systemPrompt = `Rewrite this text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note. Use ${tagRange} expression tags total (e.g. [happy] [pause] [sighs] [laughs softly] [hesitates]). Add at least 2 pacing cues. Use casual contractions, fillers (like, you know, honestly), self-corrections, trailing thoughts. Keep meaning identical. Output ONLY the rewritten text — no quotes, no explanation.`;
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Rewrite this for a natural WhatsApp voice note:\n\n${cleanedInput}` },
-        ],
-        temperature: 1.1,
-        max_tokens: 1024,
-      }),
-    });
-    if (!response.ok) return text;
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content?.trim() || text;
-  } catch { return text; }
+  if (!openaiKey) throw new Error('OpenAI API key required to enhance VN text');
+  // No silent fallback — if enhance fails, throw so the caller aborts the VN.
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Rewrite this for a natural WhatsApp voice note:\n\n${cleanedInput}` },
+      ],
+      temperature: 1.1,
+      max_tokens: 1024,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`enhanceTextForVoice failed: HTTP ${response.status} ${body.slice(0, 200)}`);
+  }
+  const data = await response.json();
+  const out = data.choices?.[0]?.message?.content?.trim();
+  if (!out) throw new Error('enhanceTextForVoice returned empty content');
+  return out;
 }
 
 // Persist outgoing voice note buffer to disk like the manual send route does.
@@ -2665,34 +2670,32 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
           let replyId;
 
           if (voiceDecision.send && elKey) {
-            try {
-              debugLog(db, userId, 'voice_note_decision', {
-                contact: contactName || phone,
-                voiceId: voiceDecision.voiceId,
-                bgSound: voiceDecision.bgSound,
-                chance: voiceDecision.chance + '%',
-                sentToday: `${voiceDecision.sentToday}/${voiceDecision.maxPerDay}`,
-              });
-              const enhanced = await enhanceTextForVoice(keyRow.value, replyText);
-              const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
-              const audioBuffer = await generateVoiceNote(
-                elKey,
-                enhanced,
-                voiceDecision.voiceId,
-                voiceDecision.modelId,
-                voiceDecision.bgSound && voiceDecision.bgSound !== 'none' ? voiceDecision.bgSound : null,
-                Number.isFinite(bgVolume) ? bgVolume : 0.15,
-              );
-              debugLog(db, userId, 'sending_reply', { contact: contactName || phone, mode: 'voice', replyPreview: replyText.slice(0, 80) });
-              sent = await sendVoiceNote(userId, jid, audioBuffer);
-              replyId = sent?.id?._serialized || uuid();
-              voiceMedia = persistVoiceNoteBuffer(replyId, audioBuffer);
-              db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contactId);
-              sentAsVoice = true;
-            } catch (vErr) {
-              debugLog(db, userId, 'voice_note_failed_fallback_text', { contact: contactName || phone, error: vErr?.message || String(vErr) });
-              // Fall through to text path below
-            }
+            // No fallback: if VN was chosen, it MUST be sent as a VN.
+            // Any failure aborts the reply entirely (the message is dropped,
+            // not silently sent as text). The user explicitly asked for this.
+            debugLog(db, userId, 'voice_note_decision', {
+              contact: contactName || phone,
+              voiceId: voiceDecision.voiceId,
+              bgSound: voiceDecision.bgSound,
+              chance: voiceDecision.chance + '%',
+              sentToday: `${voiceDecision.sentToday}/${voiceDecision.maxPerDay}`,
+            });
+            const enhanced = await enhanceTextForVoice(keyRow.value, replyText);
+            const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
+            const audioBuffer = await generateVoiceNote(
+              elKey,
+              enhanced,
+              voiceDecision.voiceId,
+              voiceDecision.modelId,
+              voiceDecision.bgSound && voiceDecision.bgSound !== 'none' ? voiceDecision.bgSound : null,
+              Number.isFinite(bgVolume) ? bgVolume : 0.15,
+            );
+            debugLog(db, userId, 'sending_reply', { contact: contactName || phone, mode: 'voice', replyPreview: replyText.slice(0, 80) });
+            sent = await sendVoiceNote(userId, jid, audioBuffer);
+            replyId = sent?.id?._serialized || uuid();
+            voiceMedia = persistVoiceNoteBuffer(replyId, audioBuffer);
+            db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contactId);
+            sentAsVoice = true;
           } else if (!voiceDecision.send) {
             // Quiet log only when interesting (skip global_disabled to avoid noise)
             if (voiceDecision.reason && voiceDecision.reason !== 'global_disabled' && voiceDecision.reason !== 'contact_disabled') {
@@ -3574,6 +3577,7 @@ export function getTelegramCallbackHandlers(userId, db) {
         const openaiKey =
           (db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId)?.value)
           || process.env.OPENAI_API_KEY;
+        if (!openaiKey) return { ok: false, reason: 'OpenAI API key required to enhance VN text. No fallback.' };
 
         // Voice selection: persona voice → contact voice override is implicit via persona →
         // global default voice → hard-coded fallback (George).
@@ -3587,13 +3591,9 @@ export function getTelegramCallbackHandlers(userId, db) {
         const bgSound = bgRow?.voice_bg_sound && bgRow.voice_bg_sound !== 'none' ? bgRow.voice_bg_sound : null;
         const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
 
-        // ALWAYS run the text through enhanceTextForVoice so VNs sound like
-        // a real voice note (expression tags, fillers, pacing). The helper
-        // safely returns the original text if anything goes wrong.
-        const speakable = openaiKey ? await enhanceTextForVoice(openaiKey, replyText) : replyText;
-        if (!openaiKey) {
-          debugLog(db, userId, 'telegram_vn_enhance_skipped', { jid, reason: 'no_openai_key' });
-        }
+        // ALWAYS enhance — no raw-text fallback. enhanceTextForVoice throws on
+        // failure, which the surrounding try/catch turns into a Telegram error.
+        const speakable = await enhanceTextForVoice(openaiKey, replyText);
 
         const audioBuffer = await generateVoiceNote(
           elKey, speakable, voiceId, modelId, bgSound,
