@@ -2239,7 +2239,10 @@ RULES:
 - If input already had tags, completely rewrite with fresh emotion and new tags
 - Add at least one emotional shift or tonal change in longer texts
 - NEVER add greetings like "hey", "hi", "hello", "yo", "hey [name]", "hi [name]" at the start — this is mid-conversation, not a new chat. Do NOT invent or insert names. Start directly with the content/reaction.
-- Do NOT add sign-offs like "talk soon", "later", "bye" unless they were in the original text.`;
+- Do NOT add sign-offs like "talk soon", "later", "bye" unless they were in the original text.
+- NEVER add formal/host-y/customer-service phrases. BANNED examples: "if you ever need to chat", "I'll be here", "I'm here for you", "let me know if", "feel free to", "don't hesitate to", "happy to help", "reach out anytime", "always here", "whenever you need", "if you want to talk". This is two people mid-conversation, not a support agent. Do NOT add offers, invitations, or availability statements that weren't in the original text.
+- Do NOT moralize, soften, or add reassurance lines that weren't already there. Keep the original intent and edge — just make it sound spoken.
+- Preserve the speaker's voice and tone exactly. If the input is casual/blunt/flirty/dry, the output stays casual/blunt/flirty/dry — never rewrite it formal or polite.`;
 
   async function callOpenAI(systemPrompt) {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
