@@ -624,7 +624,7 @@ export const api = {
 
   // Contact Memory, Directive & AI Toggle
   getContactMemory(contactId: string) {
-    return requestJson<{ memory: string; active_directive: string; directive_expires: string | null; ai_enabled: number; memory_enabled: number; last_summary_at: string | null; timezone: string }>(`/api/contacts/${contactId}/memory`);
+    return requestJson<{ memory: string; active_directive: string; directive_expires: string | null; ai_enabled: number; memory_enabled: number; last_summary_at: string | null; reply_language: string | null; timezone: string }>(`/api/contacts/${contactId}/memory`);
   },
 
   updateContactMemory(contactId: string, memory: string) {
@@ -656,6 +656,14 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
+    });
+  },
+
+  updateContactReplyLanguage(contactId: string, language: string | null) {
+    return requestJson<{ success: boolean; reply_language: string | null }>(`/api/contacts/${contactId}/reply-language`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language: language || 'auto' }),
     });
   },
 
