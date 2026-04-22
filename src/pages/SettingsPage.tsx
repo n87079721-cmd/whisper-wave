@@ -76,6 +76,13 @@ const SettingsPage = () => {
   const [savingTelegram, setSavingTelegram] = useState(false);
   const [testingTelegram, setTestingTelegram] = useState(false);
 
+  // Telegram Userbot (per-user MTProto creds for /login + /send VN flow)
+  const [userbotApiId, setUserbotApiId] = useState('');
+  const [userbotApiHash, setUserbotApiHash] = useState('');
+  const [userbotApiIdExists, setUserbotApiIdExists] = useState(false);
+  const [userbotApiHashExists, setUserbotApiHashExists] = useState(false);
+  const [savingUserbot, setSavingUserbot] = useState(false);
+
   // Feature toggles
   const [sensitiveTopicEnabled, setSensitiveTopicEnabled] = useState(true);
   const [conversationStartersEnabled, setConversationStartersEnabled] = useState(false);
