@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap, Ban, ChevronDown, ChevronUp, Send } from 'lucide-react';
+import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap, Ban, ChevronDown, ChevronUp, Send, Mic, Infinity as InfinityIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -18,6 +18,8 @@ interface UserAccount {
   is_current: boolean;
   is_admin?: boolean;
   isAdmin?: boolean;
+  voice_daily_limit?: number | null;
+  voice_sent_today?: number;
 }
 
 interface DebugEntry {
