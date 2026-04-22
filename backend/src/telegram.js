@@ -170,6 +170,34 @@ export async function sendVoiceNoteTranscript(db, userId, contactName, transcrip
 }
 
 /**
+ * Forward a non-English inbound message to the user's Telegram chats with the
+ * original text + an English translation. Silently skipped if the user has
+ * not configured a Telegram bot.
+ */
+export async function sendForeignLanguageAlert(db, userId, contactName, original, language, translation) {
+  const { token, chatIds } = getBotConfig(db, userId);
+  if (!token || chatIds.length === 0) return;
+  if (!original || !translation) return;
+
+  const text =
+    `🌍 *New message from ${escapeMarkdown(contactName || 'Unknown')}* _(${escapeMarkdown(language || 'Unknown')})_\n\n` +
+    `*Original:*\n_${escapeMarkdown(String(original).trim())}_\n\n` +
+    `*English:*\n_${escapeMarkdown(String(translation).trim())}_`;
+
+  await Promise.all(chatIds.map(async (cid) => {
+    try {
+      await telegramRequest(token, 'sendMessage', {
+        chat_id: cid,
+        text,
+        parse_mode: 'Markdown',
+      });
+    } catch (err) {
+      console.error(`[${userId}] Failed to send Telegram foreign-language alert to ${cid}:`, err?.message);
+    }
+  }));
+}
+
+/**
  * Send a test message to verify the bot token and chat IDs.
  * Accepts a single chat ID string or a multi-id string (comma/newline separated).
  * Returns true if at least one chat ID accepted the message.
