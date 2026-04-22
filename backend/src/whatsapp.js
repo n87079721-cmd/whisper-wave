@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
 import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory, detectAndTranslate } from './ai.js';
-import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, claimPreviewByToken, sendVoiceNoteTranscript, sendForeignLanguageAlert } from './telegram.js';
+import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, claimPreviewByToken, consumeSensitiveAlert, sendVoiceNoteTranscript, sendForeignLanguageAlert } from './telegram.js';
 import { transcribeAudio, generateVoiceNote } from './elevenlabs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -2673,7 +2673,13 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       const sensitive = await detectSensitiveTopic(keyRow.value, msgText, { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
       if (sensitive?.isSensitive) {
         debugLog(db, userId, 'skip_sensitive_topic', { contact: contactName || phone, topic: sensitive.topic, reason: sensitive.reason });
-        await sendSensitiveAlert(db, userId, contactName || phone, sensitive.topic, msgText);
+        // Pass jid + isAdmin so the alert can include a "🤖 Draft AI reply"
+        // button for admins. Non-admins still receive the alert text only.
+        const adminRow = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
+        await sendSensitiveAlert(
+          db, userId, contactName || phone, sensitive.topic, msgText,
+          jid, { isAdmin: !!adminRow?.is_admin }
+        );
         return;
       }
     } catch (err) {
