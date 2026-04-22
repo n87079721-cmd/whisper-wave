@@ -2059,6 +2059,44 @@ function getConfigValue(db, userId, key, fallback) {
 }
 
 /**
+ * Resolve the OpenAI API key used for the global "enhance" pipeline.
+ * Per product rule: ALL accounts (including brand-new users) and the Telegram
+ * "Send as VN" flow must enhance using the ADMIN's OpenAI key + the global
+ * enhance prompt (which lives inside enhanceTextForVoice). This guarantees a
+ * single, consistent enhancement voice across the system, even for users who
+ * have not configured their own OpenAI key.
+ *
+ * Resolution order:
+ *   1. The admin user's openai_api_key (oldest user with is_admin = 1)
+ *   2. process.env.OPENAI_API_KEY
+ *   3. The caller's own openai_api_key (last-resort fallback so things keep
+ *      working in dev / single-user installs where no admin flag exists yet)
+ */
+export function getAdminEnhanceOpenAIKey(db, callerUserId) {
+  try {
+    const adminRow = db.prepare(
+      "SELECT u.id FROM users u WHERE u.is_admin = 1 ORDER BY u.id ASC LIMIT 1"
+    ).get();
+    if (adminRow?.id) {
+      const keyRow = db.prepare(
+        "SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'"
+      ).get(adminRow.id);
+      if (keyRow?.value) return keyRow.value;
+    }
+  } catch {}
+  if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
+  if (callerUserId != null) {
+    try {
+      const own = db.prepare(
+        "SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'"
+      ).get(callerUserId);
+      if (own?.value) return own.value;
+    } catch {}
+  }
+  return '';
+}
+
+/**
  * Build the full system prompt for a contact: persona (or global) + memory + active directive.
  * Directive is wrapped at the top AND repeated at the bottom so the model can't drift away from it.
  */
