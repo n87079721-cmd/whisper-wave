@@ -234,7 +234,29 @@ export async function sendSensitiveAlert(db, userId, contactName, topic, message
   const { token, chatIds } = getBotConfig(db, userId);
   if (!token || chatIds.length === 0) return;
 
-  const text = `🚨 *Sensitive Topic Detected*\n\nFrom: *${escapeMarkdown(contactName)}*\nTopic: ${escapeMarkdown(topic)}\n\nMessage: _${escapeMarkdown(messagePreview.slice(0, 200))}_\n\nAI reply has been paused. Please respond manually.`;
+  // Only admins should be able to trigger AI replies on sensitive alerts. The
+  // alert is still sent to every configured chat ID, but the inline button is
+  // gated behind the admin flag at callback time.
+  const text = `🚨 *Sensitive Topic Detected*\n\nFrom: *${escapeMarkdown(contactName)}*\nTopic: ${escapeMarkdown(topic)}\n\nMessage: _${escapeMarkdown(messagePreview.slice(0, 200))}_\n\nAI reply is paused. Tap below to draft a reply, or respond manually.`;
+
+  // Mint a token tying this alert to the jid so the button callback can locate
+  // the contact and trigger the existing onRewrite handler (which already
+  // generates a draft and shows it in the standard preview UI).
+  const alertToken = makeToken();
+  const state = getBotState(userId);
+  // Resolve the contact's jid for this alert. We accept a hint from the caller
+  // via a side-channel: the caller passes the jid as the optional 5th arg.
+  // (Kept backward-compatible: undefined just means no button.)
+  const jid = arguments[5] || null;
+  if (jid) {
+    state.sensitiveAlerts.set(alertToken, { jid, contactName });
+    // Auto-expire after 24h to avoid unbounded growth
+    setTimeout(() => { state.sensitiveAlerts.delete(alertToken); }, 24 * 60 * 60 * 1000).unref?.();
+  }
+
+  const reply_markup = jid ? {
+    inline_keyboard: [[{ text: '🤖 Draft AI reply', callback_data: `sensreply_${alertToken}` }]],
+  } : undefined;
 
   await Promise.all(chatIds.map(async (cid) => {
     try {
@@ -242,11 +264,21 @@ export async function sendSensitiveAlert(db, userId, contactName, topic, message
         chat_id: cid,
         text,
         parse_mode: 'Markdown',
+        reply_markup,
       });
     } catch (err) {
       console.error(`[${userId}] Failed to send Telegram sensitive alert to ${cid}:`, err?.message);
     }
   }));
+}
+
+/** Resolve the jid + contact name for a sensitive-alert token (one-shot consume). */
+export function consumeSensitiveAlert(userId, token) {
+  const state = botInstances.get(userId);
+  if (!state?.sensitiveAlerts) return null;
+  const entry = state.sensitiveAlerts.get(token);
+  if (entry) state.sensitiveAlerts.delete(token);
+  return entry || null;
 }
 
 /**
