@@ -3784,7 +3784,15 @@ export function getTelegramCallbackHandlers(userId, db) {
           speakablePreview: speakable.slice(0, 120),
         });
 
-        return generateVoiceNote(elKey, speakable, voiceId, null, bgSound, Number.isFinite(bgVolume) ? bgVolume : 0.15);
+        // Telegram VN language: when the user picks a non-auto language in
+        // Settings → "Telegram VN voice language", forward it to ElevenLabs so
+        // v3 doesn't auto-default to English on short prompts.
+        const langSetting = getConfigValue(db, uid, 'ai_telegram_vn_voice_language', 'auto');
+        return generateVoiceNote(
+          elKey, speakable, voiceId, null, bgSound,
+          Number.isFinite(bgVolume) ? bgVolume : 0.15,
+          langSetting,
+        );
       });
     },
 
