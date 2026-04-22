@@ -41,6 +41,36 @@ function ensureUserBackgroundServices(db, userId) {
   }
 }
 
+// ── Voice-note daily limit helpers ─────────────────────────
+// Stored as config key 'voice_daily_limit' per user:
+//   missing / '' / '-1'  → unlimited
+//   '0'                  → voice notes disabled for this user
+//   '1'..'N'             → that many VN sends allowed per UTC day
+// Counts every voice send (manual, recording, voice-studio, AI auto-VN).
+function getVoiceDailyLimit(db, userId) {
+  const raw = getConfig(db, userId, 'voice_daily_limit');
+  if (raw == null || raw === '' || raw === '-1') return null; // unlimited
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function getVoiceSentTodayCount(db, userId) {
+  const row = db.prepare(
+    `SELECT COUNT(*) AS c FROM stats WHERE user_id = ? AND event = 'voice_sent' AND date(created_at) = date('now')`
+  ).get(userId);
+  return row?.c || 0;
+}
+
+// Returns { allowed: boolean, reason?: string, limit?: number, sentToday?: number }
+function checkVoiceLimit(db, userId) {
+  const limit = getVoiceDailyLimit(db, userId);
+  if (limit === null) return { allowed: true };
+  if (limit === 0) return { allowed: false, reason: 'voice_notes_disabled', limit, sentToday: 0 };
+  const sentToday = getVoiceSentTodayCount(db, userId);
+  if (sentToday >= limit) return { allowed: false, reason: 'daily_limit_reached', limit, sentToday };
+  return { allowed: true, limit, sentToday };
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createApiRouter(db) {
