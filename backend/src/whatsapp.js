@@ -3803,24 +3803,35 @@ export function getTelegramCallbackHandlers(userId, db) {
      * WhatsApp, and persist as a `voice` message in DB.
      * Returns { ok: true } or { ok: false, reason }.
      */
-    onSendVN: async (jid) => {
+    onSendVN: async (jid, token) => {
       let lock = null;
       try {
-        const contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
-        if (!contact) return { ok: false, reason: 'contact not found' };
+        // Contact lookup: prefer JID match, fall back to phone derived from JID
+        // (handles @lid vs @s.whatsapp.net drift between message and contact rows).
+        let contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+        if (!contact) {
+          const phone = String(jid || '').split('@')[0];
+          if (phone) {
+            contact = db.prepare('SELECT id, name, phone FROM contacts WHERE phone = ? AND user_id = ? ORDER BY id DESC LIMIT 1').get(phone, userId);
+          }
+        }
+        if (!contact) {
+          debugLog(db, userId, 'telegram_send_vn_no_contact', { jid });
+          return { ok: false, reason: 'contact not found' };
+        }
 
-        // Claim the cached preview with an in-flight lock. The preview is only
-        // committed (deleted) on a successful send so transient failures (network,
-        // OpenAI/ElevenLabs hiccup) leave the user able to retry by tapping again.
-        lock = claimLastPreviewedReply(userId, jid);
+        // Token-based claim: tapping an OLD preview (after a newer one came in)
+        // returns null instead of sending the wrong text. The preview is only
+        // committed on success so transient failures allow a retry.
+        lock = claimPreviewByToken(userId, token);
         if (lock?.busy) {
           debugLog(db, userId, 'telegram_send_vn_busy', { jid });
           return { ok: false, reason: 'voice note already being generated, please wait' };
         }
         const replyText = lock?.text;
         if (!replyText || !replyText.trim()) {
-          debugLog(db, userId, 'telegram_send_vn_duplicate', { jid });
-          return { ok: false, reason: 'already sent (or no previewed reply available)' };
+          debugLog(db, userId, 'telegram_send_vn_expired', { jid });
+          return { ok: false, reason: 'this preview is no longer current — a newer reply was generated' };
         }
 
         const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
