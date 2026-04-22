@@ -640,6 +640,7 @@ export function createApiRouter(db) {
         ai_enabled: row.ai_enabled ?? 1,
         memory_enabled: row.memory_enabled ?? 1,
         last_summary_at: row.last_summary_at || null,
+        timezone: (db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_timezone'").get(req.userId)?.value) || 'America/New_York',
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
