@@ -551,11 +551,10 @@ export function startTelegramPolling(db, userId, handlers) {
           // Routed before the custom-reply text handler so commands and
           // mid-flow replies (phone, code, 2FA, paste-text) work correctly.
           const msgText = update.message?.text;
-          // Re-check userbot env at command time (not just at handler init) so
-          // newly-added TELEGRAM_API_ID / TELEGRAM_API_HASH secrets take effect
-          // without restarting the polling loop.
-          const userbotReady = !!(process.env.TELEGRAM_API_ID && process.env.TELEGRAM_API_HASH);
-          if (msgText && handlers.isAdmin && (userbotReady || handlers.userbotEnabled)) {
+          // handlers.userbotEnabled is a getter that re-reads from DB on
+          // every access, so newly-saved per-user creds (or env secrets) take
+          // effect immediately without restarting the polling loop.
+          if (msgText && handlers.isAdmin && handlers.userbotEnabled) {
             // Plain-text bot replies — no parse_mode means no escaping rules,
             // no risk of literal backslashes leaking into the UI.
             const sendBotMessage = async (t) => {
@@ -565,7 +564,8 @@ export function startTelegramPolling(db, userId, handlers) {
             };
 
             if (msgText.startsWith('/login')) {
-              await userbotStartLogin(userId, incomingChatId, sendBotMessage);
+              const creds = handlers.getUserbotCreds?.() || null;
+              await userbotStartLogin(userId, incomingChatId, sendBotMessage, creds);
               continue;
             }
             if (msgText.startsWith('/cancel')) {
