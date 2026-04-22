@@ -3516,7 +3516,7 @@ export function getTelegramCallbackHandlers(userId, db) {
       const contactName = contact.name || contact.phone || 'Unknown';
       const { generateReply } = await import('./ai.js');
       let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'rewrite', timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
-      replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+      replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
       // Re-schedule with telegram preview
       executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
@@ -3550,7 +3550,7 @@ export function getTelegramCallbackHandlers(userId, db) {
         previousReply,
         timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
       });
-      replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+      replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
       executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
     },
