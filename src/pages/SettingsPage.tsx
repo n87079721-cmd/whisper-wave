@@ -737,6 +737,33 @@ const SettingsPage = () => {
             <p className="text-[11px] text-muted-foreground">
               Voice used when tapping <span className="font-medium">🎤 Send as VN</span> in Telegram. The background sound from above is applied automatically.
             </p>
+
+            {/* Language lock for Telegram VN voice — when set to anything other
+                than Auto we forward `language_code` to ElevenLabs so the v3
+                model speaks the chosen language instead of defaulting to
+                English. Applies to both /send (userbot) and the 🎤 Send as VN
+                button on reply previews & sensitive alerts. */}
+            <label className="text-xs text-muted-foreground block pt-2">
+              Telegram VN voice language
+            </label>
+            <select
+              value={telegramVnVoiceLanguage}
+              onChange={(e) => {
+                const v = e.target.value;
+                setTelegramVnVoiceLanguage(v);
+                api.updateVoiceSettings({ telegramVnVoiceLanguage: v })
+                  .then(() => toast.success(v === 'auto' ? 'Language: Auto' : 'Language saved'))
+                  .catch(() => toast.error('Failed to save'));
+              }}
+              className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-sm"
+            >
+              {LANGUAGES.map(l => (
+                <option key={l.code} value={l.code}>{l.name}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-muted-foreground">
+              Forces the voice to speak in this language. Leave on <span className="font-medium">Auto</span> to let ElevenLabs detect from the text.
+            </p>
           </div>
         </div>
       </motion.div>
