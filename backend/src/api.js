@@ -1155,6 +1155,18 @@ export function createApiRouter(db) {
       const { contactId, text, voiceId, modelId, backgroundSound, bgVolume } = req.body;
       if (!contactId || !text) return res.status(400).json({ error: 'Missing contactId or text' });
 
+      const limitCheck = checkVoiceLimit(db, req.userId);
+      if (!limitCheck.allowed) {
+        return res.status(429).json({
+          error: limitCheck.reason === 'voice_notes_disabled'
+            ? 'Voice notes are disabled for this account by the admin.'
+            : `Daily voice-note limit reached (${limitCheck.sentToday}/${limitCheck.limit}). Try again tomorrow or ask the admin to raise the limit.`,
+          reason: limitCheck.reason,
+          limit: limitCheck.limit,
+          sentToday: limitCheck.sentToday,
+        });
+      }
+
       const apiKey = getConfig(db, req.userId, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
       if (!apiKey) return res.status(400).json({ error: 'ElevenLabs API key not configured.' });
 
