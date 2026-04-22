@@ -357,9 +357,12 @@ export async function sendTestMessage(token, chatIdOrIds) {
   return results.some(r => r.ok);
 }
 
+// Legacy-Markdown escape (parse_mode: 'Markdown'). Only `_ * [ ` need
+// escaping — MarkdownV2's broader set was leaking literal backslashes into
+// rendered messages (e.g. "Lenny \) Mexico", "today\.").
 function escapeMarkdown(text) {
   if (!text) return '';
-  return text.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+  return String(text).replace(/([_*`\[])/g, '\\$1');
 }
 
 /**
