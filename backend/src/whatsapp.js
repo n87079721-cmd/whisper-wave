@@ -2138,7 +2138,7 @@ function decideVoiceNote(db, userId, contactId, replyText) {
 }
 
 // Rewrite reply text via OpenAI to add ElevenLabs v3 expression tags (mirrors /enhance route).
-async function enhanceTextForVoice(openaiKey, text) {
+export async function enhanceTextForVoice(openaiKey, text) {
   const cleanedInput = String(text).replace(/\[[^\]\n]{1,40}\]/g, ' ').replace(/\s+/g, ' ').trim() || String(text).trim();
   const wordCount = cleanedInput.split(/\s+/).length;
   const tagRange = wordCount <= 15 ? '2-3' : wordCount <= 40 ? '4-6' : wordCount <= 80 ? '6-10' : '8-15';
