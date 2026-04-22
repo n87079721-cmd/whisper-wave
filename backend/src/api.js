@@ -1102,7 +1102,12 @@ export function createApiRouter(db) {
       const wa = getWA(req);
       const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId });
       const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
-      const audioBuffer = await generateVoiceNote(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
+      // ALWAYS enhance the text so the VN sounds like a real voice note
+      // (expression tags, fillers, pacing). enhanceTextForVoice safely
+      // returns the original text if the OpenAI call fails or no key is set.
+      const openaiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
+      const speakable = openaiKey ? await enhanceTextForVoice(openaiKey, text) : text;
+      const audioBuffer = await generateVoiceNote(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
 
       const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
       const msgId = getSentMessageId(sendResult);
