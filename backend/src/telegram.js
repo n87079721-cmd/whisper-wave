@@ -260,7 +260,10 @@ export async function sendSensitiveAlert(db, userId, contactName, topic, message
     state.sensitiveAlerts.set(alertToken, { jid, contactName });
     setTimeout(() => { state.sensitiveAlerts.delete(alertToken); }, 24 * 60 * 60 * 1000).unref?.();
     reply_markup = {
-      inline_keyboard: [[{ text: '🤖 Draft AI reply', callback_data: `sensreply_${alertToken}` }]],
+      inline_keyboard: [[
+        { text: '🤖 Draft AI reply', callback_data: `sensreply_${alertToken}` },
+        { text: '🎤 Send VN', callback_data: `sensvn_${alertToken}` },
+      ]],
     };
   }
 
