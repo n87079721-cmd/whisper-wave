@@ -2564,8 +2564,14 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   }
 
   const personaName = getActivePersonaName(db, userId, contactId);
-  debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, persona: personaName, historyLength: messages.length, unrepliedCount });
-  let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName || phone, { unrepliedCount, timezone: tz });
+  debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, persona: personaName, historyLength: messages.length, unrepliedCount, timezone: tz, forceRebatch: !!forceReply });
+  // When this is a forced rebatch (a new message arrived mid-typing and we cancelled
+  // the prior in-flight reply), tell the model so it knows to integrate the LATEST
+  // message into its single combined reply, using the latest local time of day.
+  const promptForGen = forceReply
+    ? `${systemPrompt}\n\n⚠️ REBATCH: A new message just arrived while you were about to reply. Re-read the LAST few messages and reply to the latest one (and the ones above it together) — don't reply to the older context as if nothing changed. Use the current local time of day for tone.`
+    : systemPrompt;
+  let replyText = await generateReply(keyRow.value, messages, promptForGen, contactName || phone, { unrepliedCount, timezone: tz });
   replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
 
   if (isReplyTooSimilar(replyText, recentOutgoing)) {

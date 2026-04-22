@@ -611,7 +611,7 @@ export const api = {
 
   // Contact Memory, Directive & AI Toggle
   getContactMemory(contactId: string) {
-    return requestJson<{ memory: string; active_directive: string; directive_expires: string | null; ai_enabled: number; memory_enabled: number; last_summary_at: string | null }>(`/api/contacts/${contactId}/memory`);
+    return requestJson<{ memory: string; active_directive: string; directive_expires: string | null; ai_enabled: number; memory_enabled: number; last_summary_at: string | null; timezone: string }>(`/api/contacts/${contactId}/memory`);
   },
 
   updateContactMemory(contactId: string, memory: string) {

@@ -82,6 +82,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [contactMemoryEnabled, setContactMemoryEnabled] = useState(true);
   const [lastSummaryAt, setLastSummaryAt] = useState<string | null>(null);
   const [summarizingNow, setSummarizingNow] = useState(false);
+  const [aiTimezone, setAiTimezone] = useState<string>('America/New_York');
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -313,6 +314,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setContactAiEnabled(data.ai_enabled !== 0);
       setContactMemoryEnabled(data.memory_enabled !== 0);
       setLastSummaryAt(data.last_summary_at || null);
+      setAiTimezone(data.timezone || 'America/New_York');
     }).catch(() => {
       setContactMemory('');
       setContactDirective('');
@@ -320,6 +322,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setContactAiEnabled(true);
       setContactMemoryEnabled(true);
       setLastSummaryAt(null);
+      setAiTimezone('America/New_York');
     });
     api.getContactAutoInitiate(selectedContact.id).then(data => {
       setContactAutoInitiate(data.autoInitiate);
@@ -1288,7 +1291,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                         Persistent context the AI remembers about this person.
                         {lastSummaryAt && (
                           <span className="block mt-0.5 italic">
-                            Last summarized: {new Date(lastSummaryAt + (lastSummaryAt.endsWith('Z') ? '' : 'Z')).toLocaleString()}
+                            Last summarized: {new Date(lastSummaryAt + (lastSummaryAt.endsWith('Z') ? '' : 'Z')).toLocaleString('en-US', { timeZone: aiTimezone, dateStyle: 'medium', timeStyle: 'short' })} ({aiTimezone})
                           </span>
                         )}
                       </p>
