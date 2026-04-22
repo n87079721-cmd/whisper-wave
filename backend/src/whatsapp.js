@@ -3574,7 +3574,10 @@ export function getTelegramCallbackHandlers(userId, db) {
         const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
         if (!elKey) return { ok: false, reason: 'ElevenLabs API key not configured' };
 
-        const openaiKey = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId)?.value;
+        const openaiKey =
+          (db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId)?.value)
+          || process.env.OPENAI_API_KEY;
+        if (!openaiKey) return { ok: false, reason: 'OpenAI API key required to enhance VN text. No fallback.' };
 
         // Voice selection: persona voice → contact voice override is implicit via persona →
         // global default voice → hard-coded fallback (George).
@@ -3588,8 +3591,9 @@ export function getTelegramCallbackHandlers(userId, db) {
         const bgSound = bgRow?.voice_bg_sound && bgRow.voice_bg_sound !== 'none' ? bgRow.voice_bg_sound : null;
         const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
 
-        // Make the text speakable (only if we have an OpenAI key — otherwise raw).
-        const speakable = openaiKey ? await enhanceTextForVoice(openaiKey, replyText) : replyText;
+        // ALWAYS enhance — no raw-text fallback. enhanceTextForVoice throws on
+        // failure, which the surrounding try/catch turns into a Telegram error.
+        const speakable = await enhanceTextForVoice(openaiKey, replyText);
 
         const audioBuffer = await generateVoiceNote(
           elKey, speakable, voiceId, modelId, bgSound,
