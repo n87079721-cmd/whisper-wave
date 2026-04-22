@@ -1191,8 +1191,9 @@ export function createApiRouter(db) {
       const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
       // ALWAYS enhance — no raw-text fallback. If enhance fails or no OpenAI
       // key is set, the request errors out (400 / 500). Per user request.
-      const openaiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
-      if (!openaiKey) return res.status(400).json({ error: 'OpenAI API key required to enhance VN text. No fallback to raw text.' });
+      // Enhance ALWAYS uses the admin's OpenAI key for every account.
+      const openaiKey = getAdminEnhanceOpenAIKey(db);
+      if (!openaiKey) return res.status(400).json({ error: 'Admin OpenAI API key not configured — cannot enhance VN text.' });
       const speakable = await enhanceTextForVoice(openaiKey, text);
       const audioBuffer = await generateVoiceNote(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
 
@@ -1310,8 +1311,9 @@ export function createApiRouter(db) {
       const { text } = req.body;
       if (!text) return res.status(400).json({ error: 'Missing text' });
 
-      const apiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
-      if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured.' });
+      // Enhance ALWAYS uses the admin's OpenAI key for every account.
+      const apiKey = getAdminEnhanceOpenAIKey(db);
+      if (!apiKey) return res.status(400).json({ error: 'Admin OpenAI API key not configured.' });
 
       const enhanced = await enhanceTextForVoice(apiKey, text);
 
