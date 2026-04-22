@@ -46,6 +46,10 @@ const SettingsPage = () => {
   const [voiceDefaultBgSound, setVoiceDefaultBgSound] = useState('none');
   const [availableSounds, setAvailableSounds] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [previewingSoundId, setPreviewingSoundId] = useState<string | null>(null);
+  // Per-account voice override used when sending VNs triggered from the
+  // Telegram bridge (button on sensitive alerts and reply previews). Empty
+  // string = no override (falls back to persona/default voice).
+  const [telegramVnVoiceId, setTelegramVnVoiceId] = useState('');
   const soundPreviewRef = useRef<HTMLAudioElement | null>(null);
 
   const togglePreview = (soundId: string) => {
@@ -135,6 +139,7 @@ const SettingsPage = () => {
       setVoiceNoteMaxPerDay(s.maxPerDay);
       setVoiceBgVolume(Math.round((s.bgVolume ?? 0.15) * 100));
       setVoiceDefaultBgSound(s.defaultBgSound || 'none');
+      setTelegramVnVoiceId(s.telegramVnVoiceId || '');
     }).catch(() => {});
     api.getVoices().then(vs => setAvailableVoices(vs.map((v: any) => ({ id: v.id, name: v.name })))).catch(() => {});
     api.getSounds().then(s => setAvailableSounds(s.custom)).catch(() => {});
@@ -702,6 +707,34 @@ const SettingsPage = () => {
           {(telegramTokenExists && telegramChatIdExists) && (
             <p className="text-xs text-primary">✓ Telegram bot configured</p>
           )}
+
+          {/* Telegram VN Voice — per-account override used whenever you tap
+              "🎤 Send as VN" inside Telegram (on sensitive alerts or reply
+              previews). Falls back to the contact's persona voice if blank. */}
+          <div className="pt-3 border-t border-border space-y-2">
+            <label className="text-xs text-muted-foreground block">
+              Telegram VN voice
+            </label>
+            <select
+              value={telegramVnVoiceId}
+              onChange={(e) => {
+                const v = e.target.value;
+                setTelegramVnVoiceId(v);
+                api.updateVoiceSettings({ telegramVnVoiceId: v })
+                  .then(() => toast.success(v ? 'Telegram VN voice saved' : 'Reverted to persona voice'))
+                  .catch(() => toast.error('Failed to save'));
+              }}
+              className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-sm"
+            >
+              <option value="">Use contact's persona voice (default)</option>
+              {availableVoices.map(v => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-muted-foreground">
+              Voice used when tapping <span className="font-medium">🎤 Send as VN</span> in Telegram. The background sound from above is applied automatically.
+            </p>
+          </div>
         </div>
       </motion.div>
 
