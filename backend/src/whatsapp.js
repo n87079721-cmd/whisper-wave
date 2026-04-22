@@ -3856,11 +3856,16 @@ export function getTelegramCallbackHandlers(userId, db) {
         const openaiKey = getAdminEnhanceOpenAIKey(db);
         if (!openaiKey) return { ok: false, reason: 'Admin OpenAI API key not configured — cannot enhance VN text.' };
 
-        // Voice selection: persona voice → contact voice override is implicit via persona →
-        // global default voice → hard-coded fallback (George).
+        // Voice selection priority for Telegram-triggered VNs:
+        //   1. Per-account "Telegram VN Voice" override (Settings page) — explicit
+        //      user choice for what voice to send when using the Telegram bridge.
+        //   2. Persona voice for this contact (existing behavior).
+        //   3. Global default voice.
+        //   4. Hard-coded fallback (George).
+        const telegramVoiceOverride = getConfigValue(db, userId, 'ai_telegram_vn_voice_id', '');
         const personaVoice = getPersonaVoice(db, userId, contact.id);
         const defaultVoiceId = getConfigValue(db, userId, 'ai_default_voice_id', '') || 'JBFqnCBsd6RMkjVDRZzb';
-        const voiceId = personaVoice?.voiceId || defaultVoiceId;
+        const voiceId = telegramVoiceOverride || personaVoice?.voiceId || defaultVoiceId;
         const modelId = personaVoice?.modelId || null;
 
         // Background sound parity with the AI auto-VN path:

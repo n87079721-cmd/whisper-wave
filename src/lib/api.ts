@@ -693,9 +693,9 @@ export const api = {
 
   // ── AI Voice Notes ──
   getVoiceSettings() {
-    return requestJson<{ enabled: boolean; chance: number; maxPerDay: number; bgVolume: number; defaultBgSound: string }>('/api/voice-settings');
+    return requestJson<{ enabled: boolean; chance: number; maxPerDay: number; bgVolume: number; defaultBgSound: string; telegramVnVoiceId: string }>('/api/voice-settings');
   },
-  updateVoiceSettings(payload: { enabled?: boolean; chance?: number; maxPerDay?: number; bgVolume?: number; defaultBgSound?: string }) {
+  updateVoiceSettings(payload: { enabled?: boolean; chance?: number; maxPerDay?: number; bgVolume?: number; defaultBgSound?: string; telegramVnVoiceId?: string }) {
     return requestJson<{ success: boolean }>('/api/voice-settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

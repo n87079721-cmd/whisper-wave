@@ -2215,17 +2215,19 @@ export function createApiRouter(db) {
         maxPerDay: parseInt(getConfig(db, req.userId, 'ai_voice_max_per_day') || '3', 10),
         bgVolume: parseFloat(getConfig(db, req.userId, 'ai_voice_bg_volume') || '0.15'),
         defaultBgSound: getConfig(db, req.userId, 'ai_voice_default_bg_sound') || 'none',
+        telegramVnVoiceId: getConfig(db, req.userId, 'ai_telegram_vn_voice_id') || '',
       });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
   router.put('/voice-settings', (req, res) => {
     try {
-      const { enabled, chance, maxPerDay, bgVolume, defaultBgSound } = req.body || {};
+      const { enabled, chance, maxPerDay, bgVolume, defaultBgSound, telegramVnVoiceId } = req.body || {};
       if (typeof enabled === 'boolean') setConfig(db, req.userId, 'ai_voice_enabled', enabled ? '1' : '0');
       if (Number.isFinite(chance)) setConfig(db, req.userId, 'ai_voice_chance', String(Math.max(0, Math.min(100, chance))));
       if (Number.isFinite(maxPerDay)) setConfig(db, req.userId, 'ai_voice_max_per_day', String(Math.max(0, Math.min(50, maxPerDay))));
       if (Number.isFinite(bgVolume)) setConfig(db, req.userId, 'ai_voice_bg_volume', String(Math.max(0, Math.min(1, bgVolume))));
       if (typeof defaultBgSound === 'string') setConfig(db, req.userId, 'ai_voice_default_bg_sound', defaultBgSound || 'none');
+      if (typeof telegramVnVoiceId === 'string') setConfig(db, req.userId, 'ai_telegram_vn_voice_id', telegramVnVoiceId || '');
       res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
