@@ -7,6 +7,13 @@
 const TELEGRAM_API = 'https://api.telegram.org/bot';
 
 import { detectAndTranslate } from './ai.js';
+import {
+  startLogin as userbotStartLogin,
+  startSend as userbotStartSend,
+  cancelFlow as userbotCancel,
+  feedUserReply as userbotFeedReply,
+  isBusy as userbotIsBusy,
+} from './userbot.js';
 
 // Per-user bot state
 const botInstances = new Map();
