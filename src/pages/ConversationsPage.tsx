@@ -79,6 +79,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [contactAiEnabled, setContactAiEnabled] = useState(true);
   const [contactAutoInitiate, setContactAutoInitiate] = useState(false);
   const [savingMemory, setSavingMemory] = useState(false);
+  const [contactMemoryEnabled, setContactMemoryEnabled] = useState(true);
+  const [lastSummaryAt, setLastSummaryAt] = useState<string | null>(null);
+  const [summarizingNow, setSummarizingNow] = useState(false);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -308,11 +311,15 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setContactDirective(data.active_directive || '');
       setContactDirectiveExpires(data.directive_expires || '');
       setContactAiEnabled(data.ai_enabled !== 0);
+      setContactMemoryEnabled(data.memory_enabled !== 0);
+      setLastSummaryAt(data.last_summary_at || null);
     }).catch(() => {
       setContactMemory('');
       setContactDirective('');
       setContactDirectiveExpires('');
       setContactAiEnabled(true);
+      setContactMemoryEnabled(true);
+      setLastSummaryAt(null);
     });
     api.getContactAutoInitiate(selectedContact.id).then(data => {
       setContactAutoInitiate(data.autoInitiate);
