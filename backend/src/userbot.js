@@ -32,6 +32,15 @@ import { execSync } from 'child_process';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMP_DIR = path.join(__dirname, '..', 'data', 'temp');
 
+// Optional debug logger injected by the bridge so admin-panel viewers can see
+// the full /login + /send lifecycle (stage transitions, errors, etc.).
+let _debugLog = null;
+export function setUserbotDebugLogger(fn) { _debugLog = typeof fn === 'function' ? fn : null; }
+function dlog(userId, action, details = {}) {
+  try { _debugLog?.(userId, `userbot_${action}`, details); } catch {}
+  try { console.log(`🔧 [userbot ${userId}] ${action}`, details); } catch {}
+}
+
 // ── Per-user state ────────────────────────────────────────────────────────
 // userId -> {
 //   stage: 'idle'|'awaiting_phone'|'awaiting_code'|'awaiting_2fa'|'ready'|'awaiting_recipient'|'awaiting_text'|'sending',
