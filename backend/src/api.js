@@ -13,6 +13,21 @@ import { generateVoiceNote, generatePreviewAudio, BG_SOUND_PROMPTS } from './ele
 import multer from 'multer';
 import { execSync } from 'child_process';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
+import { startTelegramPolling, stopTelegramPolling, isTelegramConfigured } from './telegram.js';
+import { getTelegramCallbackHandlers, startConversationStarterLoop } from './whatsapp.js';
+
+// Ensure Telegram polling is running for a user whenever their config supports it.
+// Safe to call repeatedly — startTelegramPolling no-ops if already polling.
+function ensureTelegramPolling(db, userId) {
+  try {
+    if (isTelegramConfigured(db, userId)) {
+      const handlers = getTelegramCallbackHandlers(userId, db);
+      startTelegramPolling(db, userId, handlers);
+    }
+  } catch (err) {
+    console.error(`[${userId}] ensureTelegramPolling error:`, err?.message);
+  }
+}
 import QRCode from 'qrcode';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
