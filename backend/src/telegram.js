@@ -441,6 +441,39 @@ export function startTelegramPolling(db, userId, handlers) {
               continue;
             }
 
+            // ── 🎤 "Send VN" on a sensitive-topic alert ──
+            // Consume the alert token, ask the user to type the VN text,
+            // then on next text reply generate + send via onSendVNDirect.
+            if (action === 'sensvn') {
+              const alert = consumeSensitiveAlert(userId, tokenOrJid);
+              await telegramRequest(token, 'answerCallbackQuery', {
+                callback_query_id: update.callback_query.id,
+                text: alert ? '🎤 Type the VN text' : 'This alert has expired',
+              });
+              if (alert) {
+                state.awaitingVnText.set(alert.jid, { contactName: alert.contactName, at: Date.now() });
+                // Auto-expire after 10 min so stale prompts don't capture unrelated text.
+                setTimeout(() => {
+                  const cur = state.awaitingVnText.get(alert.jid);
+                  if (cur && Date.now() - cur.at >= 10 * 60 * 1000) state.awaitingVnText.delete(alert.jid);
+                }, 10 * 60 * 1000).unref?.();
+                const msgChatId = update.callback_query.message?.chat?.id;
+                const msgId = update.callback_query.message?.message_id;
+                if (msgChatId && msgId) {
+                  telegramRequest(token, 'editMessageReplyMarkup', {
+                    chat_id: msgChatId, message_id: msgId,
+                    reply_markup: { inline_keyboard: [] },
+                  }).catch(() => {});
+                }
+                await telegramRequest(token, 'sendMessage', {
+                  chat_id: incomingChatId,
+                  text: `🎤 Reply with the VN text for *${escapeMarkdown(alert.contactName)}*. v3 tags like \`[whisper]\` are respected; plain text is auto-enhanced.`,
+                  parse_mode: 'Markdown',
+                });
+              }
+              continue;
+            }
+
             // New format: tokenOrJid is a short token. Old format (back-compat
             // for in-flight previews after deploy): tokenOrJid is the jid itself.
             const resolvedJid = resolveJidFromToken(userId, tokenOrJid) || tokenOrJid;
