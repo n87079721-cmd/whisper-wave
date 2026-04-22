@@ -19,8 +19,7 @@ const SettingsPage = () => {
   const [elevenLabsKey, setElevenLabsKey] = useState('');
   const [openaiKey, setOpenaiKey] = useState('');
   const [autoEnabled, setAutoEnabled] = useState(false);
-  const [systemPrompt, setSystemPrompt] = useState('');
-  const [savingPrompt, setSavingPrompt] = useState(false);
+  // System prompt removed — AI only replies for contacts with an assigned persona.
   const [saving, setSaving] = useState(false);
   const [savingOpenai, setSavingOpenai] = useState(false);
   const [keyExists, setKeyExists] = useState(false);
