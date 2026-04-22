@@ -127,6 +127,8 @@ const AdminPage = () => {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [adminTogglingId, setAdminTogglingId] = useState<string | null>(null);
+  const [voiceSavingId, setVoiceSavingId] = useState<string | null>(null);
+  const [voiceDraft, setVoiceDraft] = useState<Record<string, string>>({});
 
   const [debugLogs, setDebugLogs] = useState<DebugEntry[]>([]);
   const [debugLoading, setDebugLoading] = useState(false);
