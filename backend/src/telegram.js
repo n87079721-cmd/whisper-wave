@@ -7,7 +7,19 @@
 const TELEGRAM_API = 'https://api.telegram.org/bot';
 
 // Per-user bot state
-const botInstances = new Map(); // userId -> { polling, offset, awaitingCustom: Map<jid, true>, lastReplies: Map<jid, string> }
+const botInstances = new Map();
+// userId -> {
+//   polling, offset,
+//   awaitingCustom: Map<jid, true>,
+//   lastReplies: Map<jid, string>,             // back-compat: latest preview text per jid (used by /custom edit)
+//   previews: Map<token, { jid, text, messages: [{chat_id, message_id}] }>,  // token-keyed previews
+//   activeTokenByJid: Map<jid, token>,        // newest token for a jid (so we can disable older ones)
+//   vnInFlight: Set<token>,                    // tokens currently being processed
+// }
+
+function makeToken() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
 
 function parseChatIds(raw) {
   if (!raw) return [];
@@ -34,11 +46,21 @@ function getBotConfig(db, userId) {
 
 function getBotState(userId) {
   if (!botInstances.has(userId)) {
-    botInstances.set(userId, { polling: false, offset: 0, awaitingCustom: new Map(), lastReplies: new Map() });
+    botInstances.set(userId, {
+      polling: false, offset: 0,
+      awaitingCustom: new Map(),
+      lastReplies: new Map(),
+      previews: new Map(),
+      activeTokenByJid: new Map(),
+      vnInFlight: new Set(),
+    });
   }
   const inst = botInstances.get(userId);
   if (!inst.lastReplies) inst.lastReplies = new Map();
   if (!inst.awaitingCustom) inst.awaitingCustom = new Map();
+  if (!inst.previews) inst.previews = new Map();
+  if (!inst.activeTokenByJid) inst.activeTokenByJid = new Map();
+  if (!inst.vnInFlight) inst.vnInFlight = new Set();
   return inst;
 }
 
