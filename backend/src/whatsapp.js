@@ -2029,7 +2029,7 @@ function buildContactSystemPrompt(db, userId, contactId) {
     systemPrompt = `🎯 ACTIVE BEHAVIOR DIRECTIVE (must be followed on EVERY reply, no exceptions):\n${directive}\n\n────────\n\n${systemPrompt}\n\n────────\n\n🎯 REMINDER — ACTIVE DIRECTIVE STILL APPLIES: ${directive}`;
   }
   if (memory) {
-    systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON (always reference when relevant):\n${memory}`;
+    systemPrompt += `\n\nMEMORY OF PAST CONVERSATIONS — DO NOT REPEAT QUESTIONS ALREADY ASKED OR ASK FOR INFO ALREADY KNOWN. Build on what's here, don't restart. If they already told you their job/plans/feelings, reference them naturally instead of asking again.\n${memory}`;
   }
   return systemPrompt;
 }
