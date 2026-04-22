@@ -3536,6 +3536,70 @@ export function getTelegramCallbackHandlers(userId, db) {
 
       executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
     },
+    /**
+     * Telegram "🎤 Send as VN" — synthesize the previewed reply as a voice
+     * note using the contact's persona voice (or a sane default), send it on
+     * WhatsApp, and persist as a `voice` message in DB.
+     * Returns { ok: true } or { ok: false, reason }.
+     */
+    onSendVN: async (jid) => {
+      try {
+        const contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+        if (!contact) return { ok: false, reason: 'contact not found' };
+
+        const replyText = getLastPreviewedReply(userId, jid);
+        if (!replyText || !replyText.trim()) return { ok: false, reason: 'no previewed reply to send' };
+
+        const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
+        if (!elKey) return { ok: false, reason: 'ElevenLabs API key not configured' };
+
+        const openaiKey = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId)?.value;
+
+        // Voice selection: persona voice → contact voice override is implicit via persona →
+        // global default voice → hard-coded fallback (George).
+        const personaVoice = getPersonaVoice(db, userId, contact.id);
+        const defaultVoiceId = getConfigValue(db, userId, 'ai_default_voice_id', '') || 'JBFqnCBsd6RMkjVDRZzb';
+        const voiceId = personaVoice?.voiceId || defaultVoiceId;
+        const modelId = personaVoice?.modelId || null;
+
+        // Background sound (per-contact override, else none).
+        const bgRow = db.prepare("SELECT voice_bg_sound FROM contacts WHERE id = ? AND user_id = ?").get(contact.id, userId);
+        const bgSound = bgRow?.voice_bg_sound && bgRow.voice_bg_sound !== 'none' ? bgRow.voice_bg_sound : null;
+        const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
+
+        // Make the text speakable (only if we have an OpenAI key — otherwise raw).
+        const speakable = openaiKey ? await enhanceTextForVoice(openaiKey, replyText) : replyText;
+
+        const audioBuffer = await generateVoiceNote(
+          elKey, speakable, voiceId, modelId, bgSound,
+          Number.isFinite(bgVolume) ? bgVolume : 0.15,
+        );
+
+        const contactName = contact.name || contact.phone || 'Unknown';
+        debugLog(db, userId, 'telegram_send_vn', {
+          jid, contact: contactName, voiceId, bgSound: bgSound || 'none',
+          replyPreview: replyText.slice(0, 80),
+        });
+
+        const sent = await sendVoiceNote(userId, jid, audioBuffer);
+        const replyId = sent?.id?._serialized || uuid();
+        const voiceMedia = persistVoiceNoteBuffer(replyId, audioBuffer);
+
+        db.prepare(`
+          INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
+          VALUES (?, ?, ?, ?, ?, 'voice', 'sent', datetime('now'), 'sent', ?, ?, ?)
+        `).run(replyId, userId, contact.id, jid, replyText, voiceMedia.mediaPath, voiceMedia.mediaName, voiceMedia.mediaMime);
+        db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contact.id);
+        db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(userId);
+        db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'telegram_vn_sent', ?)`).run(userId, JSON.stringify({ contactId: contact.id }));
+
+        emit(userId, 'message', { contactId: contact.id, msgId: replyId });
+        return { ok: true };
+      } catch (err) {
+        debugLog(db, userId, 'telegram_vn_failed', { jid, error: err?.message || String(err) });
+        return { ok: false, reason: err?.message || 'unknown error' };
+      }
+    },
   };
 }
 
