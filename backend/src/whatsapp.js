@@ -3971,6 +3971,7 @@ export function getTelegramCallbackHandlers(userId, db) {
         const audioBuffer = await generateVoiceNote(
           elKey, speakable, voiceId, modelId, bgSound,
           Number.isFinite(bgVolume) ? bgVolume : 0.15,
+          getConfigValue(db, userId, 'ai_telegram_vn_voice_language', 'auto'),
         );
 
         const contactName = contact.name || contact.phone || 'Unknown';
