@@ -263,8 +263,10 @@ export function feedUserReply(userId, text) {
  */
 export async function startSend(userId, recipientRaw, sendBotMessage, sendVnGenerator) {
   const s = states.get(userId);
+  dlog(userId, 'send_start', { recipient: recipientRaw, stage: s?.stage || 'no-state' });
   if (!s || s.stage !== 'ready') {
     await sendBotMessage('⚠️ Not logged in. Send /login first.');
+    dlog(userId, 'send_not_ready', { stage: s?.stage || 'no-state' });
     return;
   }
   if (!recipientRaw?.trim()) {
@@ -279,8 +281,11 @@ export async function startSend(userId, recipientRaw, sendBotMessage, sendVnGene
   let entity;
   try {
     const cleaned = parseRecipient(recipientRaw);
+    dlog(userId, 'send_resolving', { cleaned: String(cleaned) });
     entity = await s.client.getEntity(cleaned);
+    dlog(userId, 'send_resolved', { entityId: String(entity?.id), name: [entity?.firstName, entity?.lastName].filter(Boolean).join(' ') || entity?.username });
   } catch (err) {
+    dlog(userId, 'send_resolve_failed', { error: err?.message });
     await sendBotMessage(`⚠️ Could not resolve recipient: ${err?.message || 'unknown'}\n_Tip: phone numbers only work if you have them in your Telegram contacts._`);
     s.stage = 'ready';
     armIdleTimeout(userId);
@@ -301,11 +306,14 @@ export async function startSend(userId, recipientRaw, sendBotMessage, sendVnGene
   let text;
   try {
     text = await makeAwait(s, 'text');
+    dlog(userId, 'send_got_text', { len: text?.length || 0, preview: (text || '').slice(0, 60) });
   } catch {
+    dlog(userId, 'send_text_aborted', {});
     return; // wiped
   }
 
   if (!text?.trim()) {
+    dlog(userId, 'send_empty_text', {});
     await sendBotMessage('⚠️ Empty text — cancelled.');
     await wipeSession(userId, 'empty_text');
     return;
@@ -316,8 +324,11 @@ export async function startSend(userId, recipientRaw, sendBotMessage, sendVnGene
 
   let audioBuffer;
   try {
+    dlog(userId, 'send_generating_vn', {});
     audioBuffer = await sendVnGenerator(text);
+    dlog(userId, 'send_vn_ready', { bytes: audioBuffer?.length || 0 });
   } catch (err) {
+    dlog(userId, 'send_vn_failed', { error: err?.message, stack: err?.stack?.split('\n').slice(0, 3).join(' | ') });
     await sendBotMessage(`⚠️ VN generation failed: ${err?.message || 'unknown'}`);
     await wipeSession(userId, 'gen_failed');
     return;
@@ -339,6 +350,7 @@ export async function startSend(userId, recipientRaw, sendBotMessage, sendVnGene
   } catch {}
 
   try {
+    dlog(userId, 'send_uploading', { duration: durationSec, bytes: audioBuffer?.length || 0 });
     await s.client.sendFile(entity, {
       file: oggPath,
       voiceNote: true,
@@ -349,8 +361,10 @@ export async function startSend(userId, recipientRaw, sendBotMessage, sendVnGene
         }),
       ],
     });
+    dlog(userId, 'send_uploaded', {});
     await sendBotMessage(`✅ Voice note sent to *${escapeMd(displayName)}*\\.\n_Logging out\\.\\.\\._`);
   } catch (err) {
+    dlog(userId, 'send_upload_failed', { error: err?.message });
     await sendBotMessage(`⚠️ Telegram send failed: ${err?.message || 'unknown'}`);
   } finally {
     try { fs.unlinkSync(oggPath); } catch {}
@@ -361,6 +375,7 @@ export async function startSend(userId, recipientRaw, sendBotMessage, sendVnGene
 /** /cancel — abort any in-flight stage and wipe session. */
 export async function cancelFlow(userId, sendBotMessage) {
   const s = states.get(userId);
+  dlog(userId, 'cancel', { stage: s?.stage || 'idle' });
   if (!s || s.stage === 'idle') {
     await sendBotMessage('Nothing to cancel.');
     return;
