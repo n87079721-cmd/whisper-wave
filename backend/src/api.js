@@ -1209,6 +1209,18 @@ export function createApiRouter(db) {
       const { contactId, jid, data: audioData, mimeType } = req.body;
       if (!audioData || (!contactId && !jid)) return res.status(400).json({ error: 'Missing target or audio data' });
 
+      const limitCheck = checkVoiceLimit(db, req.userId);
+      if (!limitCheck.allowed) {
+        return res.status(429).json({
+          error: limitCheck.reason === 'voice_notes_disabled'
+            ? 'Voice notes are disabled for this account by the admin.'
+            : `Daily voice-note limit reached (${limitCheck.sentToday}/${limitCheck.limit}). Try again tomorrow or ask the admin to raise the limit.`,
+          reason: limitCheck.reason,
+          limit: limitCheck.limit,
+          sentToday: limitCheck.sentToday,
+        });
+      }
+
       const wa = getWA(req);
       const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId, jid });
 
