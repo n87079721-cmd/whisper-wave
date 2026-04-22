@@ -397,6 +397,38 @@ export function startTelegramPolling(db, userId, handlers) {
             const cbData = update.callback_query.data;
             const [action, ...rest] = cbData.split('_');
             const tokenOrJid = rest.join('_');
+
+            // ── 🤖 "Draft AI reply" on a sensitive-topic alert ──
+            // Resolve the alert token → jid, ack the tap, then call onRewrite
+            // which generates a draft and shows the standard preview UI.
+            if (action === 'sensreply') {
+              const alert = consumeSensitiveAlert(userId, tokenOrJid);
+              await telegramRequest(token, 'answerCallbackQuery', {
+                callback_query_id: update.callback_query.id,
+                text: alert ? '🤖 Drafting…' : 'This alert has expired',
+              });
+              if (alert && handlers.onRewrite) {
+                // Strip the button so it can't be tapped twice
+                const msgChatId = update.callback_query.message?.chat?.id;
+                const msgId = update.callback_query.message?.message_id;
+                if (msgChatId && msgId) {
+                  telegramRequest(token, 'editMessageReplyMarkup', {
+                    chat_id: msgChatId, message_id: msgId,
+                    reply_markup: { inline_keyboard: [] },
+                  }).catch(() => {});
+                }
+                try {
+                  await handlers.onRewrite(alert.jid);
+                } catch (err) {
+                  await telegramRequest(token, 'sendMessage', {
+                    chat_id: incomingChatId,
+                    text: `⚠️ Could not draft: ${err?.message || 'error'}`,
+                  });
+                }
+              }
+              continue;
+            }
+
             // New format: tokenOrJid is a short token. Old format (back-compat
             // for in-flight previews after deploy): tokenOrJid is the jid itself.
             const resolvedJid = resolveJidFromToken(userId, tokenOrJid) || tokenOrJid;
