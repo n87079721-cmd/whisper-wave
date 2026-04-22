@@ -1318,6 +1318,20 @@ async function startConnection(userId, db, options = {}) {
           // Increment unread count
           try {
             db.prepare("UPDATE contacts SET unread_count = unread_count + 1 WHERE id = ? AND user_id = ?").run(contactId, userId);
+            // Auto-backfill history for chats that only just appeared (no real prior context).
+            // This avoids the user having to manually tap "Fetch chat history" / "Recover Chats" in Settings.
+            try {
+              if (!inst.autoRecoveredContacts) inst.autoRecoveredContacts = new Set();
+              if (!inst.autoRecoveredContacts.has(contactId)) {
+                const countRow = db.prepare('SELECT COUNT(*) as n FROM messages WHERE contact_id = ? AND user_id = ?').get(contactId, userId);
+                if ((countRow?.n || 0) <= 3) {
+                  inst.autoRecoveredContacts.add(contactId);
+                  setTimeout(() => {
+                    recoverSingleChat(userId, db, contactId).catch(() => {});
+                  }, 1500);
+                }
+              }
+            } catch {}
           } catch {}
 
           db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'message_received', ?)`).run(userId, JSON.stringify({ contactId }));
