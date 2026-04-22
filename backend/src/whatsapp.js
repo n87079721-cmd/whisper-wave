@@ -2407,6 +2407,21 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     return;
   }
 
+  // ── Persona gate ──
+  // If this contact has NO persona assigned from the prompt library, the AI
+  // must stay silent. No global/default system prompt fallback. Applies to
+  // every account (admins + users) since the check is per-contact.
+  try {
+    const personaRow = db.prepare("SELECT prompt_id FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    if (!personaRow?.prompt_id) {
+      debugLog(db, userId, 'skip_no_persona', { contact: contactName || phone });
+      return;
+    }
+  } catch (err) {
+    debugLog(db, userId, 'skip_persona_check_failed', { contact: contactName || phone, error: err?.message });
+    return;
+  }
+
   // ── Sensitive topic detection ──
   const sensitiveEnabled = getConfigValue(db, userId, 'sensitive_topic_detection', 'true');
   if (sensitiveEnabled === 'true') {
