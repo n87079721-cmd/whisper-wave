@@ -2223,6 +2223,24 @@ function isWithinActiveHours(db, userId) {
   return within;
 }
 
+// Strip any leaked stage directions / action tags the AI sometimes inserts when
+// a persona prompt encourages voice-acting style (e.g. "[warmly]", "[smiling]",
+// "(laughs)", "*grins*"). These are fine inside enhanceTextForVoice (which
+// uses them as TTS coaching) but must NEVER appear in the WhatsApp text bubble.
+function stripStageDirections(text) {
+  if (!text) return text;
+  return String(text)
+    // [anything up to 40 chars without a newline]
+    .replace(/\s*\[[^\]\n]{1,40}\]\s*/g, ' ')
+    // (anything up to 40 chars without a newline) — only if it looks like a tone cue
+    // (single short word like "softly", "smiling", "laughs", "warmly")
+    .replace(/\s*\((laughs|laughing|smiles|smiling|softly|warmly|grins|grinning|sighs|sighing|chuckles|chuckling|whispers|whispering|pauses?|excited|excitedly|sad|sadly|happy|happily|sarcastic|sarcastically)\)\s*/gi, ' ')
+    // *grins* / *smiles* style action tags
+    .replace(/\s*\*[^*\n]{1,40}\*\s*/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function calculateDelay(replyLength, speed) {
   // Ranges: [min, max] in milliseconds
   // fast = 3-10 mins, normal = 6-15 mins, slow/celebrity = 30 mins - 2 days
@@ -2572,7 +2590,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     ? `${systemPrompt}\n\n⚠️ REBATCH: A new message just arrived while you were about to reply. Re-read the LAST few messages and reply to the latest one (and the ones above it together) — don't reply to the older context as if nothing changed. Use the current local time of day for tone.`
     : systemPrompt;
   let replyText = await generateReply(keyRow.value, messages, promptForGen, contactName || phone, { unrepliedCount, timezone: tz });
-  replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+  replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
   if (isReplyTooSimilar(replyText, recentOutgoing)) {
     debugLog(db, userId, 'reply_too_similar_regenerating', { contact: contactName || phone, originalReply: replyText.slice(0, 60) });
@@ -2583,7 +2601,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       contactName || phone,
       { timezone: tz },
     );
-    replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+    replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
   }
 
   if (!replyText || isReplyTooSimilar(replyText, recentOutgoing)) {
@@ -3498,7 +3516,7 @@ export function getTelegramCallbackHandlers(userId, db) {
       const contactName = contact.name || contact.phone || 'Unknown';
       const { generateReply } = await import('./ai.js');
       let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'rewrite', timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
-      replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+      replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
       // Re-schedule with telegram preview
       executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
@@ -3532,7 +3550,7 @@ export function getTelegramCallbackHandlers(userId, db) {
         previousReply,
         timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
       });
-      replyText = replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim();
+      replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
       executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
     },
