@@ -2890,7 +2890,11 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
               chance: voiceDecision.chance + '%',
               sentToday: `${voiceDecision.sentToday}/${voiceDecision.maxPerDay}`,
             });
-            const enhanced = await enhanceTextForVoice(keyRow.value, replyText);
+            // Enhance ALWAYS uses the admin's OpenAI key, regardless of which
+            // user's auto-reply this is. Per product rule: "enhance" = admin key.
+            const adminEnhanceKey = getAdminEnhanceOpenAIKey(db);
+            if (!adminEnhanceKey) throw new Error('Admin OpenAI API key not configured — cannot enhance VN text.');
+            const enhanced = await enhanceTextForVoice(adminEnhanceKey, replyText);
             const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
             const audioBuffer = await generateVoiceNote(
               elKey,
