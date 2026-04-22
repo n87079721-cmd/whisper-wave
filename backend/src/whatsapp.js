@@ -3166,23 +3166,17 @@ async function clearSession(userId, db) {
     try { await clientRef.destroy(); } catch {}
   }
 
-  // Wipe user data
+  // Wipe only volatile session state. Keep stored chats/contact history and
+  // per-contact AI settings so logout behaves like a session disconnect, not
+  // an account reset.
   try {
-    db.prepare('DELETE FROM messages WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM stats WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM call_logs WHERE user_id = ?').run(userId);
-    // Preserve per-contact AI learning (memory, directives, language, toggles, prompt_id,
-    // voice prefs, auto_initiate) so they survive logout/relogin. Only clear volatile
-    // session-bound state (unread counters, archive flag, last_seen) and remove group
-    // rows since groups will be re-fetched fresh on next sync.
-    db.prepare('DELETE FROM contacts WHERE user_id = ? AND is_group = 1').run(userId);
+    // Preserve message history, contacts, archives, stats, and call logs across logout.
+    // Only clear unread counters and ephemeral presence/avatar fields.
     db.prepare(`
       UPDATE contacts
       SET unread_count = 0,
-          is_archived = 0,
           last_seen = NULL,
-          avatar_url = NULL,
-          updated_at = datetime('now')
+          avatar_url = NULL
       WHERE user_id = ?
     `).run(userId);
   } catch (err) {
