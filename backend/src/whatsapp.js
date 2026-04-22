@@ -2137,20 +2137,54 @@ function decideVoiceNote(db, userId, contactId, replyText) {
   };
 }
 
-// Rewrite reply text via OpenAI to add ElevenLabs v3 expression tags (mirrors /enhance route).
+// Rewrite reply text via OpenAI to add ElevenLabs v3 expression tags.
+// This is the single source of truth for both the manual Enhance button and
+// Telegram/AI "send as VN" flows so they behave identically.
 export async function enhanceTextForVoice(openaiKey, text) {
-  const cleanedInput = String(text).replace(/\[[^\]\n]{1,40}\]/g, ' ').replace(/\s+/g, ' ').trim() || String(text).trim();
-  const wordCount = cleanedInput.split(/\s+/).length;
-  const tagRange = wordCount <= 15 ? '2-3' : wordCount <= 40 ? '4-6' : wordCount <= 80 ? '6-10' : '8-15';
+  const cleanedInput = String(text)
+    .replace(/\[[^\]\n]{1,40}\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || String(text).trim();
+
   if (!openaiKey) throw new Error('OpenAI API key required to enhance VN text');
-  const baseSystem = `You rewrite short WhatsApp messages into ElevenLabs v3 Human Mode voice-note scripts. RULES (non-negotiable):
-1. You MUST insert exactly ${tagRange} bracketed expression tags inline. Examples: [laughs], [laughs softly], [sighs], [pause], [hesitates], [whispers], [happy], [excited], [thoughtful], [warm], [grins].
-2. At least one tag MUST be a pacing/sound cue ([pause], [sighs], [laughs], [hesitates]).
-3. Tags appear INSIDE the sentence flow, not at the start/end only.
-4. Use contractions, fillers (like, you know, honestly, I mean), self-corrections, trailing thoughts.
-5. Keep the meaning identical. Do not add new facts.
-6. Output ONLY the rewritten line. No quotes, no preface, no explanation.
-If you return text without bracketed tags, you have failed the task.`;
+  if (!cleanedInput) throw new Error('Text required to enhance VN text');
+
+  const wordCount = cleanedInput.split(/\s+/).filter(Boolean).length;
+  const tagRange = wordCount <= 15 ? '2-3' : wordCount <= 40 ? '4-6' : wordCount <= 80 ? '6-10' : '8-15';
+  const minTags = parseInt(tagRange.split('-')[0], 10) || 2;
+
+  const baseSystem = `You rewrite text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note. You ARE this person — you feel things, you react, you breathe.
+
+AVAILABLE EXPRESSION TAGS (use generously where they fit):
+Emotions: [happy] [sad] [angry] [excited] [nervous] [scared] [disgusted] [surprised] [confused] [bored] [proud] [shy] [jealous] [grateful] [hopeful] [disappointed] [embarrassed] [anxious] [frustrated] [amused] [nostalgic] [elated] [resigned] [awe]
+Reactions: [laughing] [crying] [gasping] [sighing] [groaning] [screaming] [giggling] [chuckling] [sniffling] [yawning] [scoffing] [laughs softly] [snickering]
+Delivery: [whispering] [shouting] [singing] [mumbling] [sarcastically] [dramatically] [deadpan] [breathlessly] [cheerfully] [sadly] [angrily] [nervously] [excitedly] [lovingly] [coldly] [mockingly] [matter-of-fact] [wistful] [cautiously] [timidly] [quizzically]
+Physical: [clearing throat] [coughing] [sneezing] [hiccupping] [clicking tongue] [tutting] [blowing raspberry] [kissing teeth] [inhaling sharply] [exhaling deeply] [clapping] [gulping] [panting]
+Pacing cues: [pause] [hesitates] [breathes] [slows down] [drawn out] [continues after a beat] [stammers] [deliberate] [rushed] [emphasized] [understated] ... —
+
+TEXT FILTERS — Make it sound SPOKEN, not typed:
+- Use fillers naturally: "like", "you know", "I mean", "honestly", "basically", "right?", "so yeah", "anyway", "look", "thing is"
+- Use casual contractions and slang: "gonna", "wanna", "kinda", "sorta", "dunno", "lemme", "y'know", "ngl", "tbh", "lowkey"
+- Self-corrections mid-sentence: "I was gonna— actually no, I think..."
+- Trailing thoughts: "but yeah..." or "so... yeah"
+- Verbal reactions: "oh!", "wait", "okay so", "ugh", "hmm", "right right right"
+- Tone shifts within the message — start casual, get serious, or vice versa
+
+EMOTION & DELIVERY RULES:
+- FEEL the text. If it's good news, be genuinely excited. Bad news, let the weight show.
+- Layer emotions: [inhaling sharply] before a revelation, [pause] before something heavy, [laughs softly] after self-deprecation
+- Use tone SHIFTS — start one way, shift mid-message. People don't maintain one emotion throughout.
+- For longer texts: vary the energy. Mix calm reflective moments with bursts of emotion.
+
+RULES:
+- Output ONE rewritten version only — ONLY the enhanced text, no quotes, no explanation
+- Use ${tagRange} expression tags total (scale with length — longer = more tags)
+- At least 2 pacing cues (pauses, breaths, hesitations) per rewrite
+- Break long sentences into shorter spoken fragments
+- Use contractions everywhere (I'm, don't, can't, won't, it's, that's, there's)
+- Match tags to context: happy → [excited] [laughing], bad → [sighing] [sadly], funny → [chuckling] [laughs softly], serious → [clearing throat] [inhaling sharply], awkward → [hesitates] [nervously]
+- If input already had tags, completely rewrite with fresh emotion and new tags
+- Add at least one emotional shift or tonal change in longer texts`;
 
   async function callOpenAI(systemPrompt) {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -2162,7 +2196,7 @@ If you return text without bracketed tags, you have failed the task.`;
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Rewrite this for a natural WhatsApp voice note:\n\n${cleanedInput}` },
         ],
-        temperature: 1.1,
+        temperature: 1.2,
         max_tokens: 1024,
       }),
     });
@@ -2173,19 +2207,21 @@ If you return text without bracketed tags, you have failed the task.`;
     const data = await response.json();
     const out = data.choices?.[0]?.message?.content?.trim();
     if (!out) throw new Error('enhanceTextForVoice returned empty content');
-    return out;
+    return out.replace(/^['"“”]+|['"“”]+$/g, '').replace(/\s+/g, ' ').trim();
   }
 
-  const hasTag = (s) => /\[[a-z][a-z\s]{1,30}\]/i.test(s);
+  const tagMatches = (s) => s.match(/\[[^\]\n]{1,40}\]/g) || [];
+  const countTags = (s) => tagMatches(s).length;
+  const hasPacingCue = (s) => /\[(pause|hesitates|breathes|slows down|drawn out|continues after a beat|stammers|deliberate|rushed|emphasized|understated|laughing|laughs softly|sighing|gasping)\]/i.test(s);
+  const isValidEnhancedText = (s) => countTags(s) >= minTags && hasPacingCue(s);
 
   let out = await callOpenAI(baseSystem);
-  if (!hasTag(out)) {
-    // One retry with even stricter framing.
-    const retrySystem = `${baseSystem}\n\nYour previous attempt had ZERO bracketed tags. That is a hard failure. This time, insert ${tagRange} bracketed tags like [laughs], [sighs], [pause], [hesitates], [warm] inline within the sentence. Output ONLY the rewritten line.`;
+  if (!isValidEnhancedText(out)) {
+    const retrySystem = `${baseSystem}\n\nCRITICAL RETRY INSTRUCTION: your previous attempt failed validation. The rewrite MUST contain at least ${minTags} bracketed tags and at least one pacing/reaction cue such as [pause], [hesitates], [breathes], [laughing], [laughs softly], [sighing], or [gasping]. Output ONLY the rewritten line.`;
     out = await callOpenAI(retrySystem);
   }
-  if (!hasTag(out)) {
-    throw new Error('enhanceTextForVoice produced no expression tags after retry');
+  if (!isValidEnhancedText(out)) {
+    throw new Error(`enhanceTextForVoice produced insufficient tags (${countTags(out)}) or no pacing cues after retry`);
   }
   return out;
 }
@@ -3608,9 +3644,22 @@ export function getTelegramCallbackHandlers(userId, db) {
         const voiceId = personaVoice?.voiceId || defaultVoiceId;
         const modelId = personaVoice?.modelId || null;
 
-        // Background sound (per-contact override, else none).
+        // Background sound parity with the AI auto-VN path:
+        // contact override → global default → none.
         const bgRow = db.prepare("SELECT voice_bg_sound FROM contacts WHERE id = ? AND user_id = ?").get(contact.id, userId);
-        const bgSound = bgRow?.voice_bg_sound && bgRow.voice_bg_sound !== 'none' ? bgRow.voice_bg_sound : null;
+        const globalBgSound = getConfigValue(db, userId, 'ai_voice_default_bg_sound', '') || 'none';
+        const requestedBgSound = (bgRow?.voice_bg_sound && bgRow.voice_bg_sound !== 'none')
+          ? bgRow.voice_bg_sound
+          : ((globalBgSound && globalBgSound !== 'none') ? globalBgSound : null);
+        let bgSound = requestedBgSound;
+        let bgSource = (bgRow?.voice_bg_sound && bgRow.voice_bg_sound !== 'none') ? 'contact' : (requestedBgSound ? 'global' : 'none');
+        if (bgSound?.startsWith('custom-')) {
+          const owned = db.prepare('SELECT 1 FROM custom_sounds WHERE user_id = ? AND sound_id = ?').get(userId, bgSound);
+          if (!owned) {
+            bgSound = null;
+            bgSource = 'none';
+          }
+        }
         const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
 
         // ALWAYS enhance — no raw-text fallback. enhanceTextForVoice throws on
@@ -3623,10 +3672,14 @@ export function getTelegramCallbackHandlers(userId, db) {
         );
 
         const contactName = contact.name || contact.phone || 'Unknown';
+        const enhanceTagCount = (speakable.match(/\[[^\]\n]{1,40}\]/g) || []).length;
         debugLog(db, userId, 'telegram_send_vn', {
-          jid, contact: contactName, voiceId, bgSound: bgSound || 'none',
+          jid, contact: contactName, voiceId, modelId: modelId || 'eleven_v3', bgSound: bgSound || 'none', bgSource,
+          bgVolume: Number.isFinite(bgVolume) ? bgVolume : 0.15,
           replyPreview: replyText.slice(0, 80),
           enhancedPreview: speakable.slice(0, 120),
+          enhancedTagCount,
+          hasEnhancedTags: enhanceTagCount > 0,
           enhanced: speakable !== replyText,
         });
 
