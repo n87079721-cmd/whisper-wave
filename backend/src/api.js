@@ -6,7 +6,7 @@ import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
-import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation, streamMediaForMessage, cancelAllPendingReplies, cancelPendingReplyForContact } from './whatsapp.js';
+import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation, streamMediaForMessage, cancelAllPendingReplies, cancelPendingReplyForContact, triggerConversationSummary } from './whatsapp.js';
 import { initWhatsApp } from './whatsapp.js';
 import { archiveChat, markChatRead, syncArchiveStates } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio, BG_SOUND_PROMPTS } from './elevenlabs.js';
@@ -630,7 +630,7 @@ export function createApiRouter(db) {
   // ── Contact Memory, Directive & AI Toggle ────────────────
   router.get('/contacts/:id/memory', (req, res) => {
     try {
-      const row = db.prepare('SELECT memory, active_directive, directive_expires, ai_enabled FROM contacts WHERE id = ? AND user_id = ?')
+      const row = db.prepare('SELECT memory, active_directive, directive_expires, ai_enabled, memory_enabled, last_summary_at FROM contacts WHERE id = ? AND user_id = ?')
         .get(req.params.id, req.userId);
       if (!row) return res.status(404).json({ error: 'Contact not found' });
       res.json({
@@ -638,6 +638,8 @@ export function createApiRouter(db) {
         active_directive: row.active_directive || '',
         directive_expires: row.directive_expires || null,
         ai_enabled: row.ai_enabled ?? 1,
+        memory_enabled: row.memory_enabled ?? 1,
+        last_summary_at: row.last_summary_at || null,
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -672,6 +674,39 @@ export function createApiRouter(db) {
       db.prepare("UPDATE contacts SET ai_enabled = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
         .run(enabled ? 1 : 0, req.params.id, req.userId);
       res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Per-contact memory toggle: when off, AI receives no memory for this contact AND
+  // summarization is skipped (so noisy contacts don't accumulate junk).
+  router.put('/contacts/:id/memory-toggle', (req, res) => {
+    try {
+      const { enabled } = req.body;
+      db.prepare("UPDATE contacts SET memory_enabled = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+        .run(enabled ? 1 : 0, req.params.id, req.userId);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Manual "Summarize now" — bypasses the 10-msg auto threshold.
+  router.post('/contacts/:id/summarize-now', async (req, res) => {
+    try {
+      const contactId = req.params.id;
+      const contactRow = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE id = ? AND user_id = ?').get(contactId, req.userId);
+      if (!contactRow) return res.status(404).json({ error: 'Contact not found' });
+      const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(req.userId);
+      if (!keyRow?.value) return res.status(400).json({ error: 'OpenAI API key not configured' });
+      const result = await triggerConversationSummary(
+        req.userId, db, contactRow.id, contactRow.jid,
+        contactRow.name || contactRow.phone, keyRow.value, { force: true }
+      );
+      if (!result?.ran) return res.json({ success: false, reason: result?.reason || 'unknown' });
+      const updated = db.prepare('SELECT memory, last_summary_at FROM contacts WHERE id = ? AND user_id = ?').get(contactId, req.userId);
+      res.json({ success: true, memory: updated?.memory || '', last_summary_at: updated?.last_summary_at || null });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -878,6 +913,14 @@ export function createApiRouter(db) {
           status = excluded.status
       `).run(msgId, req.userId, contactRow.id, targetJid, message, new Date().toISOString(), replyToId, replyToContent, replyToSender);
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
+
+      // Build memory from outbound text too (so info you share manually gets captured).
+      try {
+        const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(req.userId);
+        if (keyRow?.value) {
+          triggerConversationSummary(req.userId, db, contactRow.id, targetJid, contactRow.name || contactRow.phone, keyRow.value).catch(() => {});
+        }
+      } catch {}
 
       res.json({ success: true, messageId: msgId, contactId: contactRow.id });
     } catch (err) {
