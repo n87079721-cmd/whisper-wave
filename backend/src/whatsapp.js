@@ -1299,6 +1299,13 @@ async function startConnection(userId, db, options = {}) {
             handleAutoReply(userId, db, contactId, resolvedJid, phone, contactName, msg, resolvedContent).catch(err => {
               console.error('Auto-reply error:', err?.message || err);
             });
+            // Also build memory for chats where auto-reply is OFF, so manual chats summarize too.
+            try {
+              const sumKeyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
+              if (sumKeyRow?.value) {
+                triggerConversationSummary(userId, db, contactId, resolvedJid, contactName || phone, sumKeyRow.value).catch(() => {});
+              }
+            } catch {}
           }
         }
       } catch (err) {
