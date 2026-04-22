@@ -1347,6 +1347,48 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       </div>
                     </div>
 
+                    {/* Reply Language */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <p className="text-sm font-medium text-foreground">Reply Language</p>
+                        {contactReplyLanguage !== 'auto' && (
+                          <button
+                            onClick={async () => {
+                              setContactReplyLanguage('auto');
+                              await api.updateContactReplyLanguage(selectedContact.id, null);
+                              toast.success('Language reset to Auto');
+                            }}
+                            className="text-xs text-destructive hover:underline"
+                          >Clear</button>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-1.5">
+                        AI will reply in this language. Auto = match contact. English = always reply in English (foreign messages still translated to Telegram).
+                      </p>
+                      <select
+                        value={contactReplyLanguage}
+                        onChange={async (e) => {
+                          const next = e.target.value;
+                          setContactReplyLanguage(next);
+                          setSavingLanguage(true);
+                          try {
+                            await api.updateContactReplyLanguage(selectedContact.id, next === 'auto' ? null : next);
+                            toast.success('Reply language saved');
+                          } catch {
+                            toast.error('Failed to save language');
+                          } finally {
+                            setSavingLanguage(false);
+                          }
+                        }}
+                        disabled={savingLanguage}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                      >
+                        {LANGUAGES.map(lang => (
+                          <option key={lang.code} value={lang.code}>{lang.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
                     {/* Directive */}
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
