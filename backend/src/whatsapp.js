@@ -6,7 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
-import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary } from './ai.js';
+import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory } from './ai.js';
 import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply } from './telegram.js';
 import { transcribeAudio, generateVoiceNote } from './elevenlabs.js';
 
@@ -1299,6 +1299,13 @@ async function startConnection(userId, db, options = {}) {
             handleAutoReply(userId, db, contactId, resolvedJid, phone, contactName, msg, resolvedContent).catch(err => {
               console.error('Auto-reply error:', err?.message || err);
             });
+            // Also build memory for chats where auto-reply is OFF, so manual chats summarize too.
+            try {
+              const sumKeyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
+              if (sumKeyRow?.value) {
+                triggerConversationSummary(userId, db, contactId, resolvedJid, contactName || phone, sumKeyRow.value).catch(() => {});
+              }
+            } catch {}
           }
         }
       } catch (err) {
@@ -2029,7 +2036,7 @@ function buildContactSystemPrompt(db, userId, contactId) {
     systemPrompt = `🎯 ACTIVE BEHAVIOR DIRECTIVE (must be followed on EVERY reply, no exceptions):\n${directive}\n\n────────\n\n${systemPrompt}\n\n────────\n\n🎯 REMINDER — ACTIVE DIRECTIVE STILL APPLIES: ${directive}`;
   }
   if (memory) {
-    systemPrompt += `\n\nTHINGS YOU KNOW ABOUT THIS PERSON (always reference when relevant):\n${memory}`;
+    systemPrompt += `\n\nMEMORY OF PAST CONVERSATIONS — DO NOT REPEAT QUESTIONS ALREADY ASKED OR ASK FOR INFO ALREADY KNOWN. Build on what's here, don't restart. If they already told you their job/plans/feelings, reference them naturally instead of asking again.\n${memory}`;
   }
   return systemPrompt;
 }
@@ -3321,9 +3328,22 @@ async function triggerConversationSummary(userId, db, contactId, jid, contactNam
 
     // Append summary to memory
     const existingMemory = contactRow?.memory || '';
-    const newMemory = existingMemory
+    let newMemory = existingMemory
       ? `${existingMemory}\n\n${summary}`
       : summary;
+
+    // Compact if memory is getting bloated to keep prompts tight.
+    if (newMemory.length > 4000) {
+      try {
+        const compacted = await compactMemory(apiKey, newMemory);
+        if (compacted && compacted.length < newMemory.length) {
+          newMemory = compacted;
+          debugLog(db, userId, 'memory_compacted', { contact: contactName, newLength: newMemory.length });
+        }
+      } catch (compactErr) {
+        console.error(`[${userId}] Memory compaction failed:`, compactErr?.message);
+      }
+    }
 
     db.prepare("UPDATE contacts SET memory = ?, last_summary_at = datetime('now') WHERE id = ? AND user_id = ?")
       .run(newMemory, contactId, userId);

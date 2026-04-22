@@ -476,22 +476,23 @@ export async function generateConversationSummary(apiKey, messages, contactName,
       messages: [
         {
           role: 'system',
-          content: `Summarize this WhatsApp conversation in 2-3 sentences. Focus on:
-- Key topics discussed
-- Important decisions or plans made
-- Notable personal info shared
-- Emotional tone
+          content: `Summarize this WhatsApp conversation so the AI does NOT repeat itself next time.
 
-${existingMemory ? `Existing memory (don't repeat what's already known):\n${existingMemory}\n` : ''}
-Format: Start with EXACTLY this date in brackets (do not change it, do not guess): [${dateLabel}]
-Then write the summary right after.
-Example: [${dateLabel}] Talked about their new job at Google. They're excited but nervous about the commute. Planning to grab dinner next Friday.
+${existingMemory ? `EXISTING MEMORY (do NOT restate items already covered here):\n${existingMemory}\n\n` : ''}Output EXACTLY this format and nothing else:
 
-Respond with ONLY the summary, nothing else.`,
+[${dateLabel}] <2-3 sentence narrative of what happened: topics, decisions, tone>
+Asked: <comma-separated list of distinct questions YOU already asked them — keep short, e.g. "their job, weekend plans, how they slept">
+Knows: <comma-separated key facts THEY shared — name, job, family, plans, preferences, feelings>
+Open: <unresolved threads or follow-ups either side promised — or "none">
+
+Rules:
+- Use EXACTLY the date "[${dateLabel}]" — do not change it or guess.
+- If a section has nothing new vs existing memory, write "none".
+- Keep each line tight. No extra commentary, no markdown, no headers other than Asked/Knows/Open.`,
         },
         { role: 'user', content: convoText.slice(-4000) },
       ],
-      max_tokens: 200,
+      max_tokens: 320,
       temperature: 0.3,
     }),
   });
@@ -499,4 +500,49 @@ Respond with ONLY the summary, nothing else.`,
   if (!response.ok) throw new Error('Failed to generate summary');
   const data = await response.json();
   return data.choices?.[0]?.message?.content?.trim() || null;
+}
+
+/**
+ * Compact a bloated memory blob: dedupe Asked/Knows/Open lists,
+ * keep last 3 dated narratives. Returns the compacted string, or
+ * the original on failure.
+ */
+export async function compactMemory(apiKey, memory) {
+  if (!apiKey || !memory) return memory;
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `Compact this conversation memory. Rules:
+- Keep ONLY the 3 most recent dated [Mon DD, YYYY] narrative blocks verbatim.
+- Merge ALL prior Asked / Knows / Open items into 3 deduped consolidated lists at the TOP, before the dated blocks.
+- Drop duplicates and obviously stale items (e.g. "Open" items long since resolved by later narratives).
+- Output format:
+
+Asked (all-time): <deduped comma list>
+Knows (all-time): <deduped comma list>
+Open (current): <unresolved items only, or "none">
+
+<3 most recent dated narrative blocks, newest last, separated by blank lines>
+
+Respond with ONLY the compacted memory, nothing else.`,
+        },
+        { role: 'user', content: memory.slice(-12000) },
+      ],
+      max_tokens: 800,
+      temperature: 0.2,
+    }),
+  });
+
+  if (!response.ok) return memory;
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content?.trim() || memory;
 }
