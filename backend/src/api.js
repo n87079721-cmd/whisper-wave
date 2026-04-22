@@ -1260,11 +1260,27 @@ export function createApiRouter(db) {
       const { text, voiceId, modelId, backgroundSound, bgVolume } = req.body;
       if (!text) return res.status(400).json({ error: 'Missing text' });
 
+      // Voice Studio previews also count against the admin-set daily voice limit,
+      // since each preview burns ElevenLabs character quota.
+      const limitCheck = checkVoiceLimit(db, req.userId);
+      if (!limitCheck.allowed) {
+        return res.status(429).json({
+          error: limitCheck.reason === 'voice_notes_disabled'
+            ? 'Voice notes (including Voice Studio) are disabled for this account by the admin.'
+            : `Daily voice-note limit reached (${limitCheck.sentToday}/${limitCheck.limit}). This includes Voice Studio previews. Try again tomorrow or ask the admin to raise the limit.`,
+          reason: limitCheck.reason,
+          limit: limitCheck.limit,
+          sentToday: limitCheck.sentToday,
+        });
+      }
+
       const apiKey = getConfig(db, req.userId, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
       if (!apiKey) return res.status(400).json({ error: 'ElevenLabs API key not configured' });
 
       const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
       const audioBuffer = await generatePreviewAudio(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
+      // Count this preview toward today's usage so the limit truly caps Voice Studio activity.
+      try { db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(req.userId); } catch {}
       res.set('Content-Type', 'audio/mpeg');
       res.send(audioBuffer);
     } catch (err) {
