@@ -135,6 +135,44 @@ const HUMAN_VOICE_SETTINGS = {
   speed: 0.9,
 };
 
+// Map our internal language NAMES (from src/lib/languages.ts `code`) to the
+// ISO 639-1 codes ElevenLabs `language_code` expects. When a user picks a
+// non-auto language for their Telegram VN voice we forward this so v3 doesn't
+// guess from the prompt content (which often defaults to English).
+// Anything not in this map silently falls back to auto-detect.
+export const LANGUAGE_NAME_TO_ISO = {
+  afrikaans: 'af', albanian: 'sq', amharic: 'am', arabic: 'ar', armenian: 'hy',
+  assamese: 'as', azerbaijani: 'az', basque: 'eu', belarusian: 'be', bengali: 'bn',
+  bosnian: 'bs', bulgarian: 'bg', burmese: 'my', cantonese: 'yue', catalan: 'ca',
+  cebuano: 'ceb', chinese: 'zh', mandarin: 'zh', croatian: 'hr', czech: 'cs',
+  danish: 'da', dutch: 'nl', english: 'en', estonian: 'et', filipino: 'tl',
+  finnish: 'fi', french: 'fr', galician: 'gl', georgian: 'ka', german: 'de',
+  greek: 'el', gujarati: 'gu', haitian: 'ht', hausa: 'ha', hebrew: 'he',
+  hindi: 'hi', hungarian: 'hu', icelandic: 'is', igbo: 'ig', indonesian: 'id',
+  irish: 'ga', italian: 'it', japanese: 'ja', javanese: 'jv', kannada: 'kn',
+  kazakh: 'kk', khmer: 'km', kinyarwanda: 'rw', korean: 'ko', kurdish: 'ku',
+  kyrgyz: 'ky', lao: 'lo', latvian: 'lv', lithuanian: 'lt', luxembourgish: 'lb',
+  macedonian: 'mk', malagasy: 'mg', malay: 'ms', malayalam: 'ml', maltese: 'mt',
+  maori: 'mi', marathi: 'mr', mongolian: 'mn', nepali: 'ne', norwegian: 'no',
+  odia: 'or', pashto: 'ps', persian: 'fa', polish: 'pl', portuguese: 'pt',
+  punjabi: 'pa', romanian: 'ro', russian: 'ru', samoan: 'sm', serbian: 'sr',
+  shona: 'sn', sindhi: 'sd', sinhala: 'si', slovak: 'sk', slovenian: 'sl',
+  somali: 'so', spanish: 'es', sundanese: 'su', swahili: 'sw', swedish: 'sv',
+  tagalog: 'tl', tajik: 'tg', tamil: 'ta', tatar: 'tt', telugu: 'te', thai: 'th',
+  turkish: 'tr', turkmen: 'tk', ukrainian: 'uk', urdu: 'ur', uyghur: 'ug',
+  uzbek: 'uz', vietnamese: 'vi', welsh: 'cy', xhosa: 'xh', yiddish: 'yi',
+  yoruba: 'yo', zulu: 'zu',
+};
+
+export function resolveLanguageIso(value) {
+  if (!value) return null;
+  const v = String(value).trim().toLowerCase();
+  if (!v || v === 'auto') return null;
+  // Already an ISO code? Pass through (2- or 3-letter).
+  if (/^[a-z]{2,3}(-[a-z]{2,4})?$/.test(v) && !LANGUAGE_NAME_TO_ISO[v]) return v;
+  return LANGUAGE_NAME_TO_ISO[v] || null;
+}
+
 function normalizeSpeechText(text) {
   return String(text || '')
     .replace(/\r\n/g, '\n')
@@ -145,7 +183,7 @@ function normalizeSpeechText(text) {
     .trim();
 }
 
-export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgroundSound, bgVolume = 0.15) {
+export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgroundSound, bgVolume = 0.15, languageCode = null) {
   if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
   const ffmpeg = getFfmpeg();
@@ -157,6 +195,13 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgrou
   try {
     const model = modelId || 'eleven_v3';
     const preparedText = normalizeSpeechText(text);
+    const iso = resolveLanguageIso(languageCode);
+    const requestBody = {
+      text: preparedText,
+      model_id: model,
+      voice_settings: HUMAN_VOICE_SETTINGS,
+    };
+    if (iso) requestBody.language_code = iso;
 
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
@@ -166,11 +211,7 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgrou
           'xi-api-key': apiKey,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          text: preparedText,
-          model_id: model,
-          voice_settings: HUMAN_VOICE_SETTINGS,
-        }),
+        body: JSON.stringify(requestBody),
       }
     );
 

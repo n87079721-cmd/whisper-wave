@@ -64,6 +64,7 @@ function getBotState(userId) {
       activeTokenByJid: new Map(),
       vnInFlight: new Set(),
       sensitiveAlerts: new Map(),
+      awaitingVnText: new Map(),
     });
   }
   const inst = botInstances.get(userId);
@@ -73,6 +74,7 @@ function getBotState(userId) {
   if (!inst.activeTokenByJid) inst.activeTokenByJid = new Map();
   if (!inst.vnInFlight) inst.vnInFlight = new Set();
   if (!inst.sensitiveAlerts) inst.sensitiveAlerts = new Map();
+  if (!inst.awaitingVnText) inst.awaitingVnText = new Map();
   return inst;
 }
 
@@ -258,7 +260,10 @@ export async function sendSensitiveAlert(db, userId, contactName, topic, message
     state.sensitiveAlerts.set(alertToken, { jid, contactName });
     setTimeout(() => { state.sensitiveAlerts.delete(alertToken); }, 24 * 60 * 60 * 1000).unref?.();
     reply_markup = {
-      inline_keyboard: [[{ text: '🤖 Draft AI reply', callback_data: `sensreply_${alertToken}` }]],
+      inline_keyboard: [[
+        { text: '🤖 Draft AI reply', callback_data: `sensreply_${alertToken}` },
+        { text: '🎤 Send VN', callback_data: `sensvn_${alertToken}` },
+      ]],
     };
   }
 
@@ -436,6 +441,39 @@ export function startTelegramPolling(db, userId, handlers) {
               continue;
             }
 
+            // ── 🎤 "Send VN" on a sensitive-topic alert ──
+            // Consume the alert token, ask the user to type the VN text,
+            // then on next text reply generate + send via onSendVNDirect.
+            if (action === 'sensvn') {
+              const alert = consumeSensitiveAlert(userId, tokenOrJid);
+              await telegramRequest(token, 'answerCallbackQuery', {
+                callback_query_id: update.callback_query.id,
+                text: alert ? '🎤 Type the VN text' : 'This alert has expired',
+              });
+              if (alert) {
+                state.awaitingVnText.set(alert.jid, { contactName: alert.contactName, at: Date.now() });
+                // Auto-expire after 10 min so stale prompts don't capture unrelated text.
+                setTimeout(() => {
+                  const cur = state.awaitingVnText.get(alert.jid);
+                  if (cur && Date.now() - cur.at >= 10 * 60 * 1000) state.awaitingVnText.delete(alert.jid);
+                }, 10 * 60 * 1000).unref?.();
+                const msgChatId = update.callback_query.message?.chat?.id;
+                const msgId = update.callback_query.message?.message_id;
+                if (msgChatId && msgId) {
+                  telegramRequest(token, 'editMessageReplyMarkup', {
+                    chat_id: msgChatId, message_id: msgId,
+                    reply_markup: { inline_keyboard: [] },
+                  }).catch(() => {});
+                }
+                await telegramRequest(token, 'sendMessage', {
+                  chat_id: incomingChatId,
+                  text: `🎤 Reply with the VN text for *${escapeMarkdown(alert.contactName)}*. v3 tags like \`[whisper]\` are respected; plain text is auto-enhanced.`,
+                  parse_mode: 'Markdown',
+                });
+              }
+              continue;
+            }
+
             // New format: tokenOrJid is a short token. Old format (back-compat
             // for in-flight previews after deploy): tokenOrJid is the jid itself.
             const resolvedJid = resolveJidFromToken(userId, tokenOrJid) || tokenOrJid;
@@ -550,6 +588,34 @@ export function startTelegramPolling(db, userId, handlers) {
 
           // Handle text messages (custom reply instructions)
           if (update.message?.text && !update.message.text.startsWith('/')) {
+            // Sensitive-alert "🎤 Send VN" pending input takes priority over
+            // custom-reply pending input — both could theoretically be active
+            // for different jids, but the most-recent prompt wins.
+            const vnEntries = [...state.awaitingVnText.entries()];
+            if (vnEntries.length > 0 && handlers.onSendVNDirect) {
+              const [jid, meta] = vnEntries[vnEntries.length - 1];
+              state.awaitingVnText.delete(jid);
+              await telegramRequest(token, 'sendMessage', {
+                chat_id: incomingChatId,
+                text: `🎤 Generating voice note for ${meta?.contactName || 'contact'}…`,
+              });
+              try {
+                const result = await handlers.onSendVNDirect(jid, update.message.text);
+                await telegramRequest(token, 'sendMessage', {
+                  chat_id: incomingChatId,
+                  text: result?.ok
+                    ? `✅ Voice note sent.`
+                    : `⚠️ Could not send VN: ${result?.reason || 'unknown error'}`,
+                });
+              } catch (err) {
+                await telegramRequest(token, 'sendMessage', {
+                  chat_id: incomingChatId,
+                  text: `⚠️ VN failed: ${err?.message || 'error'}`,
+                });
+              }
+              continue;
+            }
+
             // Check if we're awaiting custom instructions for any jid
             const awaitingEntries = [...state.awaitingCustom.entries()];
             if (awaitingEntries.length > 0 && handlers.onCustom) {
@@ -585,6 +651,7 @@ export function stopTelegramPolling(userId) {
   if (state) {
     state.polling = false;
     state.awaitingCustom.clear();
+    state.awaitingVnText?.clear?.();
   }
 }
 
