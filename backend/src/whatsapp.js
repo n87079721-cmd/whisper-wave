@@ -1199,10 +1199,30 @@ async function startConnection(userId, db, options = {}) {
         // Resolve phone and name
         const phone = '+' + phoneFromJid(isFromMe ? toJid(msg.to) : jid);
         const resolvedJid = isFromMe ? toJid(msg.to) : jid;
-        const contactName = contact?.pushname || contact?.name || contact?.shortName || null;
-        const candidate = getNameCandidate(
-          { name: contactName, pushName: contact?.pushname, notify: contact?.shortName }
+        let contactName = contact?.name || contact?.pushname || contact?.shortName || contact?.verifiedName || null;
+        let candidate = getNameCandidate(
+          { name: contact?.name, pushName: contact?.pushname, notify: contact?.shortName, verifiedName: contact?.verifiedName }
         );
+
+        // If we still don't have a real name, force-fetch the contact card from WhatsApp.
+        // This avoids the "shows as phone number until you tap Recover Chats" problem for new chats.
+        if (!candidate?.name || isPhoneLikeName(candidate.name, phone)) {
+          try {
+            const target = isFromMe ? toJid(msg.to) : jid;
+            const fresh = typeof inst.client.getContactById === 'function'
+              ? await inst.client.getContactById(target)
+              : null;
+            if (fresh) {
+              const freshCandidate = getNameCandidate(
+                { name: fresh.name, pushName: fresh.pushname, notify: fresh.shortName, verifiedName: fresh.verifiedName }
+              );
+              if (freshCandidate?.name && !isPhoneLikeName(freshCandidate.name, phone)) {
+                candidate = freshCandidate;
+                contactName = freshCandidate.name;
+              }
+            }
+          } catch {}
+        }
 
         const contactId = getOrCreateContact(db, userId, resolvedJid, phone, candidate, isGroup);
         if (!contactId) return;
