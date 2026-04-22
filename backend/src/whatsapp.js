@@ -1347,6 +1347,15 @@ async function startConnection(userId, db, options = {}) {
                 triggerConversationSummary(userId, db, contactId, resolvedJid, contactName || phone, sumKeyRow.value).catch(() => {});
               }
             } catch {}
+
+            // Detect non-English inbound text (incl. VN transcripts) and forward
+            // an English translation to Telegram. Fire-and-forget; respects
+            // per-user Telegram config and silently no-ops when not set.
+            try {
+              if (resolvedContent && String(resolvedContent).trim()) {
+                maybeAlertForeignLanguage(db, userId, contactId, contactName || phone, resolvedContent).catch(() => {});
+              }
+            } catch {}
           }
         }
       } catch (err) {
