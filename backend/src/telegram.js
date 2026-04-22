@@ -588,6 +588,34 @@ export function startTelegramPolling(db, userId, handlers) {
 
           // Handle text messages (custom reply instructions)
           if (update.message?.text && !update.message.text.startsWith('/')) {
+            // Sensitive-alert "🎤 Send VN" pending input takes priority over
+            // custom-reply pending input — both could theoretically be active
+            // for different jids, but the most-recent prompt wins.
+            const vnEntries = [...state.awaitingVnText.entries()];
+            if (vnEntries.length > 0 && handlers.onSendVNDirect) {
+              const [jid, meta] = vnEntries[vnEntries.length - 1];
+              state.awaitingVnText.delete(jid);
+              await telegramRequest(token, 'sendMessage', {
+                chat_id: incomingChatId,
+                text: `🎤 Generating voice note for ${meta?.contactName || 'contact'}…`,
+              });
+              try {
+                const result = await handlers.onSendVNDirect(jid, update.message.text);
+                await telegramRequest(token, 'sendMessage', {
+                  chat_id: incomingChatId,
+                  text: result?.ok
+                    ? `✅ Voice note sent.`
+                    : `⚠️ Could not send VN: ${result?.reason || 'unknown error'}`,
+                });
+              } catch (err) {
+                await telegramRequest(token, 'sendMessage', {
+                  chat_id: incomingChatId,
+                  text: `⚠️ VN failed: ${err?.message || 'error'}`,
+                });
+              }
+              continue;
+            }
+
             // Check if we're awaiting custom instructions for any jid
             const awaitingEntries = [...state.awaitingCustom.entries()];
             if (awaitingEntries.length > 0 && handlers.onCustom) {
