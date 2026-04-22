@@ -2223,6 +2223,24 @@ function isWithinActiveHours(db, userId) {
   return within;
 }
 
+// Strip any leaked stage directions / action tags the AI sometimes inserts when
+// a persona prompt encourages voice-acting style (e.g. "[warmly]", "[smiling]",
+// "(laughs)", "*grins*"). These are fine inside enhanceTextForVoice (which
+// uses them as TTS coaching) but must NEVER appear in the WhatsApp text bubble.
+function stripStageDirections(text) {
+  if (!text) return text;
+  return String(text)
+    // [anything up to 40 chars without a newline]
+    .replace(/\s*\[[^\]\n]{1,40}\]\s*/g, ' ')
+    // (anything up to 40 chars without a newline) — only if it looks like a tone cue
+    // (single short word like "softly", "smiling", "laughs", "warmly")
+    .replace(/\s*\((laughs|laughing|smiles|smiling|softly|warmly|grins|grinning|sighs|sighing|chuckles|chuckling|whispers|whispering|pauses?|excited|excitedly|sad|sadly|happy|happily|sarcastic|sarcastically)\)\s*/gi, ' ')
+    // *grins* / *smiles* style action tags
+    .replace(/\s*\*[^*\n]{1,40}\*\s*/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function calculateDelay(replyLength, speed) {
   // Ranges: [min, max] in milliseconds
   // fast = 3-10 mins, normal = 6-15 mins, slow/celebrity = 30 mins - 2 days
