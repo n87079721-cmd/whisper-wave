@@ -3683,7 +3683,7 @@ export function getTelegramCallbackHandlers(userId, db) {
           bgVolume: Number.isFinite(bgVolume) ? bgVolume : 0.15,
           replyPreview: replyText.slice(0, 80),
           enhancedPreview: speakable.slice(0, 120),
-          enhancedTagCount,
+          enhancedTagCount: enhanceTagCount,
           hasEnhancedTags: enhanceTagCount > 0,
           enhanced: speakable !== replyText,
         });
