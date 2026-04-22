@@ -227,31 +227,31 @@ export async function startLogin(userId, chatId, sendBotMessage, creds = null) {
  */
 export function feedUserReply(userId, text) {
   const s = states.get(userId);
-  if (!s) return false;
+  if (!s) return null;
   const trimmed = (text || '').trim();
-  if (!trimmed) return false;
+  if (!trimmed) return null;
 
   if (s.stage === 'awaiting_phone' && s.pendingResolvers.phone) {
     s.pendingResolvers.phone.resolve(trimmed);
     delete s.pendingResolvers.phone;
-    return true;
+    return 'phone';
   }
   if (s.stage === 'awaiting_code' && s.pendingResolvers.code) {
     s.pendingResolvers.code.resolve(trimmed.replace(/\s+/g, ''));
     delete s.pendingResolvers.code;
-    return true;
+    return 'code';
   }
   if (s.stage === 'awaiting_2fa' && s.pendingResolvers.password) {
     s.pendingResolvers.password.resolve(trimmed);
     delete s.pendingResolvers.password;
-    return true;
+    return 'password';
   }
   if (s.stage === 'awaiting_text' && s.pendingResolvers.text) {
     s.pendingResolvers.text.resolve(text); // preserve formatting/tags
     delete s.pendingResolvers.text;
-    return true;
+    return 'text';
   }
-  return false;
+  return null;
 }
 
 /**
