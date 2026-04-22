@@ -3736,8 +3736,19 @@ export function getTelegramCallbackHandlers(userId, db) {
   const adminRow = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
   const isAdmin = !!adminRow?.is_admin;
 
+  // Wire userbot internal logging into the same debug_log table the Admin
+  // panel reads from, so /login and /send lifecycle events show up live.
+  // Best-effort dynamic import — failure here must not block normal handlers.
+  import('./userbot.js').then(mod => {
+    mod.setUserbotDebugLogger?.((uid, action, details) => {
+      debugLog(db, uid, action, details);
+    });
+  }).catch(() => {});
+
   return {
     isAdmin,
+    /** Logger for the Telegram polling loop itself (command receipts, etc.). */
+    debugLog: (action, details = {}) => debugLog(db, userId, action, details),
     // Userbot is "enabled" when EITHER per-user creds (Settings) or global env
     // secrets are present. Re-read from DB on every property access so toggling
     // creds in Settings takes effect without restarting the polling loop.
