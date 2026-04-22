@@ -2528,14 +2528,11 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
 async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestResolvedContent, latestMessageId, forceReply = false }) {
   const inst = getInstance(userId);
 
-  // Falls back to the admin's OpenAI key so every sub-account gets the
-  // same AI auto-reply + VN enhancement out of the box, with no setup.
-  const sharedOpenAIKey = getSharedOpenAIKey(db, userId);
-  if (!sharedOpenAIKey) {
+  const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
+  if (!keyRow?.value) {
     debugLog(db, userId, 'skip_no_api_key', { contact: contactName || phone });
     return;
   }
-  const keyRow = { value: sharedOpenAIKey };
 
   // ── Persona gate ──
   // If this contact has NO persona assigned from the prompt library, the AI
