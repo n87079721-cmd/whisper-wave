@@ -13,6 +13,21 @@ import { generateVoiceNote, generatePreviewAudio, BG_SOUND_PROMPTS } from './ele
 import multer from 'multer';
 import { execSync } from 'child_process';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
+import { startTelegramPolling, stopTelegramPolling, isTelegramConfigured } from './telegram.js';
+import { getTelegramCallbackHandlers, startConversationStarterLoop } from './whatsapp.js';
+
+// Ensure Telegram polling is running for a user whenever their config supports it.
+// Safe to call repeatedly — startTelegramPolling no-ops if already polling.
+function ensureTelegramPolling(db, userId) {
+  try {
+    if (isTelegramConfigured(db, userId)) {
+      const handlers = getTelegramCallbackHandlers(userId, db);
+      startTelegramPolling(db, userId, handlers);
+    }
+  } catch (err) {
+    console.error(`[${userId}] ensureTelegramPolling error:`, err?.message);
+  }
+}
 import QRCode from 'qrcode';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,6 +44,14 @@ export function createApiRouter(db) {
       if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
       const user = registerUser(db, username, password, displayName);
       const token = createToken(user.id);
+      // Kick off background loops for the new user — Telegram polling will
+      // start as soon as they configure a bot token + chat id.
+      try {
+        startConversationStarterLoop(user.id, db);
+        ensureTelegramPolling(db, user.id);
+      } catch (e) {
+        console.error('post-register init error:', e?.message);
+      }
       res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, isAdmin: !!user.isAdmin } });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -1387,6 +1410,18 @@ export function createApiRouter(db) {
     if (key === 'automation_enabled' && value !== 'true') {
       const cancelled = cancelAllPendingReplies(req.userId);
       return res.json({ success: true, cancelledReplies: cancelled });
+    }
+
+    // If Telegram credentials were just saved, (re)start the polling loop
+    // immediately so the user doesn't have to restart the backend.
+    if (key === 'telegram_bot_token' || key === 'telegram_chat_id') {
+      try {
+        // Stop any existing loop so a new token is picked up cleanly
+        stopTelegramPolling(req.userId);
+        ensureTelegramPolling(db, req.userId);
+      } catch (e) {
+        console.error('telegram restart error:', e?.message);
+      }
     }
 
     res.json({ success: true });
