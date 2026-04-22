@@ -6,6 +6,8 @@
 
 const TELEGRAM_API = 'https://api.telegram.org/bot';
 
+import { detectAndTranslate } from './ai.js';
+
 // Per-user bot state
 const botInstances = new Map();
 // userId -> {
@@ -170,7 +172,26 @@ export async function sendReplyPreview(db, userId, contactName, replyText, jid, 
   // Show which persona produced this reply so the user can verify the right
   // character/prompt is active for this contact.
   const personaLine = persona ? `🎭 _${escapeMarkdown(persona)}_\n` : '';
-  const text = `💬 Reply to *${escapeMarkdown(contactName)}*:\n${personaLine}\n${escapeMarkdown(replyText)}`;
+
+  // If the reply is in a non-English language, also show an English translation
+  // so the user can read what's about to be sent. Best-effort, fire-and-forget
+  // safe — falls back to original-only on any failure.
+  let translationBlock = '';
+  try {
+    const apiKey = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId)?.value || process.env.OPENAI_API_KEY;
+    if (apiKey) {
+      const det = await detectAndTranslate(apiKey, replyText);
+      if (det && !det.isEnglish && det.englishTranslation) {
+        translationBlock =
+          `\n\n*Original \\(${escapeMarkdown(det.language)}\\):*\n${escapeMarkdown(replyText)}` +
+          `\n\n*English:*\n${escapeMarkdown(det.englishTranslation)}`;
+      }
+    }
+  } catch {}
+
+  const text = translationBlock
+    ? `💬 Reply to *${escapeMarkdown(contactName)}*:\n${personaLine}${translationBlock}`
+    : `💬 Reply to *${escapeMarkdown(contactName)}*:\n${personaLine}\n${escapeMarkdown(replyText)}`;
   const keyboard = {
     inline_keyboard: [
       [
