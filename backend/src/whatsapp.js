@@ -3169,9 +3169,22 @@ async function clearSession(userId, db) {
   // Wipe user data
   try {
     db.prepare('DELETE FROM messages WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM contacts WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM stats WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM call_logs WHERE user_id = ?').run(userId);
+    // Preserve per-contact AI learning (memory, directives, language, toggles, prompt_id,
+    // voice prefs, auto_initiate) so they survive logout/relogin. Only clear volatile
+    // session-bound state (unread counters, archive flag, last_seen) and remove group
+    // rows since groups will be re-fetched fresh on next sync.
+    db.prepare('DELETE FROM contacts WHERE user_id = ? AND is_group = 1').run(userId);
+    db.prepare(`
+      UPDATE contacts
+      SET unread_count = 0,
+          is_archived = 0,
+          last_seen = NULL,
+          avatar_url = NULL,
+          updated_at = datetime('now')
+      WHERE user_id = ?
+    `).run(userId);
   } catch (err) {
     console.error('Failed to clear DB tables:', err?.message || err);
   }
