@@ -3350,7 +3350,7 @@ export async function triggerConversationSummary(userId, db, contactId, jid, con
     // Compact if memory is getting bloated to keep prompts tight.
     if (newMemory.length > 4000) {
       try {
-        const compacted = await compactMemory(apiKey, newMemory);
+        const compacted = await compactMemory(apiKey, newMemory, { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
         if (compacted && compacted.length < newMemory.length) {
           newMemory = compacted;
           debugLog(db, userId, 'memory_compacted', { contact: contactName, newLength: newMemory.length });

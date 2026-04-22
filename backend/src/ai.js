@@ -540,8 +540,11 @@ Rules:
  * keep last 3 dated narratives. Returns the compacted string, or
  * the original on failure.
  */
-export async function compactMemory(apiKey, memory) {
+export async function compactMemory(apiKey, memory, { timezone } = {}) {
   if (!apiKey || !memory) return memory;
+  // Stamp the compaction with the phone owner's local time so future reads
+  // know exactly when the consolidation happened in their timezone.
+  const t = buildTimeContext(timezone);
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -554,7 +557,7 @@ export async function compactMemory(apiKey, memory) {
       messages: [
         {
           role: 'system',
-          content: `Compact this conversation memory. Rules:
+          content: `Compact this conversation memory. Today is ${t.todayFull} (${t.clockTime} ${t.timeLabel}, ${t.tz}). Rules:
 - Keep ONLY the 3 most recent dated [Mon DD, YYYY] narrative blocks verbatim.
 - Merge ALL prior Asked / Knows / Open items into 3 deduped consolidated lists at the TOP, before the dated blocks.
 - Drop duplicates and obviously stale items (e.g. "Open" items long since resolved by later narratives).
