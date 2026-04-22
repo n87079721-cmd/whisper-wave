@@ -2142,29 +2142,51 @@ export async function enhanceTextForVoice(openaiKey, text) {
   const cleanedInput = String(text).replace(/\[[^\]\n]{1,40}\]/g, ' ').replace(/\s+/g, ' ').trim() || String(text).trim();
   const wordCount = cleanedInput.split(/\s+/).length;
   const tagRange = wordCount <= 15 ? '2-3' : wordCount <= 40 ? '4-6' : wordCount <= 80 ? '6-10' : '8-15';
-  const systemPrompt = `Rewrite this text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note. Use ${tagRange} expression tags total (e.g. [happy] [pause] [sighs] [laughs softly] [hesitates]). Add at least 2 pacing cues. Use casual contractions, fillers (like, you know, honestly), self-corrections, trailing thoughts. Keep meaning identical. Output ONLY the rewritten text — no quotes, no explanation.`;
   if (!openaiKey) throw new Error('OpenAI API key required to enhance VN text');
-  // No silent fallback — if enhance fails, throw so the caller aborts the VN.
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Rewrite this for a natural WhatsApp voice note:\n\n${cleanedInput}` },
-      ],
-      temperature: 1.1,
-      max_tokens: 1024,
-    }),
-  });
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`enhanceTextForVoice failed: HTTP ${response.status} ${body.slice(0, 200)}`);
+  const baseSystem = `You rewrite short WhatsApp messages into ElevenLabs v3 Human Mode voice-note scripts. RULES (non-negotiable):
+1. You MUST insert exactly ${tagRange} bracketed expression tags inline. Examples: [laughs], [laughs softly], [sighs], [pause], [hesitates], [whispers], [happy], [excited], [thoughtful], [warm], [grins].
+2. At least one tag MUST be a pacing/sound cue ([pause], [sighs], [laughs], [hesitates]).
+3. Tags appear INSIDE the sentence flow, not at the start/end only.
+4. Use contractions, fillers (like, you know, honestly, I mean), self-corrections, trailing thoughts.
+5. Keep the meaning identical. Do not add new facts.
+6. Output ONLY the rewritten line. No quotes, no preface, no explanation.
+If you return text without bracketed tags, you have failed the task.`;
+
+  async function callOpenAI(systemPrompt) {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Rewrite this for a natural WhatsApp voice note:\n\n${cleanedInput}` },
+        ],
+        temperature: 1.1,
+        max_tokens: 1024,
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`enhanceTextForVoice failed: HTTP ${response.status} ${body.slice(0, 200)}`);
+    }
+    const data = await response.json();
+    const out = data.choices?.[0]?.message?.content?.trim();
+    if (!out) throw new Error('enhanceTextForVoice returned empty content');
+    return out;
   }
-  const data = await response.json();
-  const out = data.choices?.[0]?.message?.content?.trim();
-  if (!out) throw new Error('enhanceTextForVoice returned empty content');
+
+  const hasTag = (s) => /\[[a-z][a-z\s]{1,30}\]/i.test(s);
+
+  let out = await callOpenAI(baseSystem);
+  if (!hasTag(out)) {
+    // One retry with even stricter framing.
+    const retrySystem = `${baseSystem}\n\nYour previous attempt had ZERO bracketed tags. That is a hard failure. This time, insert ${tagRange} bracketed tags like [laughs], [sighs], [pause], [hesitates], [warm] inline within the sentence. Output ONLY the rewritten line.`;
+    out = await callOpenAI(retrySystem);
+  }
+  if (!hasTag(out)) {
+    throw new Error('enhanceTextForVoice produced no expression tags after retry');
+  }
   return out;
 }
 
