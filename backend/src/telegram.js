@@ -506,6 +506,48 @@ export function startTelegramPolling(db, userId, handlers) {
             }
           }
 
+          // ── Userbot commands (/login, /send, /cancel) ──────────────────
+          // Routed before the custom-reply text handler so commands and
+          // mid-flow replies (phone, code, 2FA, paste-text) work correctly.
+          const msgText = update.message?.text;
+          if (msgText && handlers.userbotEnabled && handlers.isAdmin) {
+            const sendBotMessage = async (t) => {
+              try {
+                await telegramRequest(token, 'sendMessage', {
+                  chat_id: incomingChatId, text: t, parse_mode: 'MarkdownV2',
+                });
+              } catch {
+                // Fallback to plain text if MarkdownV2 escaping is wrong
+                await telegramRequest(token, 'sendMessage', {
+                  chat_id: incomingChatId, text: t.replace(/\\/g, ''),
+                });
+              }
+            };
+
+            if (msgText.startsWith('/login')) {
+              await userbotStartLogin(userId, incomingChatId, sendBotMessage);
+              continue;
+            }
+            if (msgText.startsWith('/cancel')) {
+              await userbotCancel(userId, sendBotMessage);
+              continue;
+            }
+            if (msgText.startsWith('/send')) {
+              const recipient = msgText.replace(/^\/send\s*/, '').trim();
+              if (handlers.onUserbotSend) {
+                await handlers.onUserbotSend(userId, recipient, sendBotMessage);
+              }
+              continue;
+            }
+            // If userbot is mid-flow (awaiting phone/code/2FA/text), consume
+            // this plain text as that input — DO NOT also feed it to the
+            // custom-reply handler.
+            if (userbotIsBusy(userId) && !msgText.startsWith('/')) {
+              const consumed = userbotFeedReply(userId, msgText);
+              if (consumed) continue;
+            }
+          }
+
           // Handle text messages (custom reply instructions)
           if (update.message?.text && !update.message.text.startsWith('/')) {
             // Check if we're awaiting custom instructions for any jid
