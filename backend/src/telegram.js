@@ -68,6 +68,32 @@ export function consumeLastPreviewedReply(userId, jid) {
   return text;
 }
 
+/**
+ * Try to claim the previewed reply for a jid for sending. Returns the text and
+ * a release() function. Until release(commit=true) is called the preview stays
+ * cached so a retry/re-tap can succeed if the in-flight send fails. If another
+ * caller already holds the lock, returns { busy: true } so the UI can tell the
+ * user "VN already in progress" instead of "already sent".
+ */
+export function claimLastPreviewedReply(userId, jid) {
+  const state = botInstances.get(userId);
+  if (!state?.lastReplies) return { text: null };
+  if (!state.vnInFlight) state.vnInFlight = new Set();
+  if (state.vnInFlight.has(jid)) return { busy: true };
+  const text = state.lastReplies.get(jid);
+  if (!text) return { text: null };
+  state.vnInFlight.add(jid);
+  return {
+    text,
+    release: (commit) => {
+      const s = botInstances.get(userId);
+      if (!s) return;
+      s.vnInFlight?.delete(jid);
+      if (commit) s.lastReplies?.delete(jid);
+    },
+  };
+}
+
 async function telegramRequest(token, method, body = {}) {
   const res = await fetch(`${TELEGRAM_API}${token}/${method}`, {
     method: 'POST',
