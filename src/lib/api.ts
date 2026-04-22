@@ -525,6 +525,8 @@ export const api = {
       is_current: boolean;
       is_admin?: boolean;
       isAdmin?: boolean;
+      voice_daily_limit?: number | null;
+      voice_sent_today?: number;
     }>>('/api/admin/users');
   },
 
@@ -538,6 +540,17 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isAdmin }),
     });
+  },
+
+  adminSetUserVoiceLimit(userId: string, limit: number | null) {
+    return requestJson<{ success: boolean; voice_daily_limit: number | null; voice_sent_today: number }>(
+      `/api/admin/users/${userId}/voice-limit`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit }),
+      }
+    );
   },
 
   adminGetDebugLogs(limit = 200, userId?: string) {
