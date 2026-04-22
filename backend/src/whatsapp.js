@@ -3176,8 +3176,7 @@ async function clearSession(userId, db) {
       UPDATE contacts
       SET unread_count = 0,
           last_seen = NULL,
-          avatar_url = NULL,
-          updated_at = datetime('now')
+          avatar_url = NULL
       WHERE user_id = ?
     `).run(userId);
   } catch (err) {
