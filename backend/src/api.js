@@ -55,14 +55,7 @@ export function createApiRouter(db) {
       if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
       const user = registerUser(db, username, password, displayName);
       const token = createToken(user.id);
-      // Kick off background loops for the new user — Telegram polling will
-      // start as soon as they configure a bot token + chat id.
-      try {
-        startConversationStarterLoop(user.id, db);
-        ensureTelegramPolling(db, user.id);
-      } catch (e) {
-        console.error('post-register init error:', e?.message);
-      }
+      ensureUserBackgroundServices(db, user.id);
       res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, isAdmin: !!user.isAdmin } });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -75,6 +68,7 @@ export function createApiRouter(db) {
       if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
       const user = loginUser(db, username, password);
       const token = createToken(user.id);
+      ensureUserBackgroundServices(db, user.id);
       // Don't auto-start WhatsApp on login — user clicks Connect on dashboard
       res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, isAdmin: !!user.isAdmin } });
     } catch (err) {
@@ -85,6 +79,7 @@ export function createApiRouter(db) {
   router.get('/auth/me', auth, (req, res) => {
     // Silently refresh the token on every check-in so active sessions never expire
     const refreshedToken = createToken(req.userId);
+    ensureUserBackgroundServices(db, req.userId);
     res.json({
       token: refreshedToken,
       user: {
@@ -1432,6 +1427,14 @@ export function createApiRouter(db) {
         ensureTelegramPolling(db, req.userId);
       } catch (e) {
         console.error('telegram restart error:', e?.message);
+      }
+    }
+
+    if (key === 'conversation_starters') {
+      try {
+        ensureUserBackgroundServices(db, req.userId);
+      } catch (e) {
+        console.error('conversation starter restart error:', e?.message);
       }
     }
 
