@@ -229,6 +229,26 @@ const AdminPage = () => {
     }
   };
 
+  const saveVoiceLimit = async (target: UserAccount, limit: number | null) => {
+    setVoiceSavingId(target.id);
+    try {
+      const res = await api.adminSetUserVoiceLimit(target.id, limit);
+      setUsers((prev) => prev.map((u) => (u.id === target.id
+        ? { ...u, voice_daily_limit: res.voice_daily_limit, voice_sent_today: res.voice_sent_today }
+        : u)));
+      setVoiceDraft((d) => { const next = { ...d }; delete next[target.id]; return next; });
+      const label =
+        res.voice_daily_limit === null ? 'unlimited' :
+        res.voice_daily_limit === 0 ? 'disabled' :
+        `${res.voice_daily_limit}/day`;
+      toast.success(`Voice notes set to ${label} for ${target.display_name || target.username}`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update voice limit');
+    } finally {
+      setVoiceSavingId(null);
+    }
+  };
+
   const formatDate = (ts: string) => {
     try {
       return new Date(ts).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
