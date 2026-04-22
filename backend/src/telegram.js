@@ -230,7 +230,7 @@ export async function sendReplyPreview(db, userId, contactName, replyText, jid, 
 /**
  * Send a sensitive topic alert to the user's Telegram.
  */
-export async function sendSensitiveAlert(db, userId, contactName, topic, messagePreview) {
+export async function sendSensitiveAlert(db, userId, contactName, topic, messagePreview, jid = null, { isAdmin = false } = {}) {
   const { token, chatIds } = getBotConfig(db, userId);
   if (!token || chatIds.length === 0) return;
 
@@ -240,23 +240,20 @@ export async function sendSensitiveAlert(db, userId, contactName, topic, message
   const text = `🚨 *Sensitive Topic Detected*\n\nFrom: *${escapeMarkdown(contactName)}*\nTopic: ${escapeMarkdown(topic)}\n\nMessage: _${escapeMarkdown(messagePreview.slice(0, 200))}_\n\nAI reply is paused. Tap below to draft a reply, or respond manually.`;
 
   // Mint a token tying this alert to the jid so the button callback can locate
-  // the contact and trigger the existing onRewrite handler (which already
-  // generates a draft and shows it in the standard preview UI).
-  const alertToken = makeToken();
-  const state = getBotState(userId);
-  // Resolve the contact's jid for this alert. We accept a hint from the caller
-  // via a side-channel: the caller passes the jid as the optional 5th arg.
-  // (Kept backward-compatible: undefined just means no button.)
-  const jid = arguments[5] || null;
-  if (jid) {
+  // the contact and trigger the existing onRewrite handler (which generates a
+  // draft and shows it in the standard preview UI). The button is only added
+  // when the caller passes a jid AND the user is an admin — non-admins still
+  // see the alert text but no actionable button.
+  let reply_markup;
+  if (jid && isAdmin) {
+    const alertToken = makeToken();
+    const state = getBotState(userId);
     state.sensitiveAlerts.set(alertToken, { jid, contactName });
-    // Auto-expire after 24h to avoid unbounded growth
     setTimeout(() => { state.sensitiveAlerts.delete(alertToken); }, 24 * 60 * 60 * 1000).unref?.();
+    reply_markup = {
+      inline_keyboard: [[{ text: '🤖 Draft AI reply', callback_data: `sensreply_${alertToken}` }]],
+    };
   }
-
-  const reply_markup = jid ? {
-    inline_keyboard: [[{ text: '🤖 Draft AI reply', callback_data: `sensreply_${alertToken}` }]],
-  } : undefined;
 
   await Promise.all(chatIds.map(async (cid) => {
     try {
