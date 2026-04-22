@@ -2203,7 +2203,9 @@ RULES:
 - Use contractions everywhere (I'm, don't, can't, won't, it's, that's, there's)
 - Match tags to context: happy → [excited] [laughing], bad → [sighing] [sadly], funny → [chuckling] [laughs softly], serious → [clearing throat] [inhaling sharply], awkward → [hesitates] [nervously]
 - If input already had tags, completely rewrite with fresh emotion and new tags
-- Add at least one emotional shift or tonal change in longer texts`;
+- Add at least one emotional shift or tonal change in longer texts
+- NEVER add greetings like "hey", "hi", "hello", "yo", "hey [name]", "hi [name]" at the start — this is mid-conversation, not a new chat. Do NOT invent or insert names. Start directly with the content/reaction.
+- Do NOT add sign-offs like "talk soon", "later", "bye" unless they were in the original text.`;
 
   async function callOpenAI(systemPrompt) {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
