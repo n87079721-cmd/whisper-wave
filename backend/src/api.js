@@ -689,7 +689,7 @@ export function createApiRouter(db) {
   // ── Contact Memory, Directive & AI Toggle ────────────────
   router.get('/contacts/:id/memory', (req, res) => {
     try {
-      const row = db.prepare('SELECT memory, active_directive, directive_expires, ai_enabled, memory_enabled, last_summary_at FROM contacts WHERE id = ? AND user_id = ?')
+      const row = db.prepare('SELECT memory, active_directive, directive_expires, ai_enabled, memory_enabled, last_summary_at, reply_language FROM contacts WHERE id = ? AND user_id = ?')
         .get(req.params.id, req.userId);
       if (!row) return res.status(404).json({ error: 'Contact not found' });
       res.json({
@@ -699,6 +699,7 @@ export function createApiRouter(db) {
         ai_enabled: row.ai_enabled ?? 1,
         memory_enabled: row.memory_enabled ?? 1,
         last_summary_at: row.last_summary_at || null,
+        reply_language: row.reply_language || null,
         timezone: (db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_timezone'").get(req.userId)?.value) || 'America/New_York',
       });
     } catch (err) {
@@ -747,6 +748,21 @@ export function createApiRouter(db) {
       db.prepare("UPDATE contacts SET memory_enabled = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
         .run(enabled ? 1 : 0, req.params.id, req.userId);
       res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Per-contact reply language lock. Body: { language: string | null }
+  // "auto", null, or empty string all clear the lock (no language enforcement).
+  router.put('/contacts/:id/reply-language', (req, res) => {
+    try {
+      let { language } = req.body;
+      if (!language || language === 'auto') language = null;
+      else language = String(language).toLowerCase();
+      db.prepare("UPDATE contacts SET reply_language = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+        .run(language, req.params.id, req.userId);
+      res.json({ success: true, reply_language: language });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

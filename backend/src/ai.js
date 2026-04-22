@@ -212,7 +212,7 @@ export function shouldAlsoReplyAfterReaction(unrepliedCount = 0, messageText = '
  * @param {string} contactName - Name of the contact for context
  * @returns {Promise<string>} The generated reply text
  */
-export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions, previousReply, timezone } = {}) {
+export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions, previousReply, timezone, replyLanguage } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
   const tz = timezone || 'America/New_York';
 
@@ -224,6 +224,16 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
 
   if (hasCustomPersona) {
     prompt = `🔒 PRIORITY PERSONA — FOLLOW THIS EXACTLY. This persona, memory, and behavior instruction OVERRIDE every other style guideline. If anything below contradicts these, the persona wins.\n\n${prompt}\n\n🔒 END PRIORITY PERSONA.\n\n📚 BEFORE YOU REPLY — READ THE PERSONA CAREFULLY.\n• Treat every fact in the persona above as TRUE about you (your name, schedule, tour dates, locations, job, family, hobbies, opinions, dislikes, etc.).\n• If the contact asks ANYTHING factual ("when is your tour?", "where are you?", "what do you do?", "are you free Friday?"), SCAN the persona text above for the answer FIRST, then answer using the persona's facts.\n• If a date or time is in the persona, COMPARE it to the "Today" date provided below before answering past/future questions ("is it soon?", "did it already happen?", "how many days until…?"). Do the math.\n• Never say "I don't know" about something the persona text actually states. Re-read the persona if unsure.\n• Stay in character. Honor the memory. Obey the active behavior instruction (directive) on every reply, not just the first one.`;
+  }
+
+  // Per-contact reply language lock. `null` / "auto" = no lock (current behavior).
+  if (replyLanguage && replyLanguage !== 'auto') {
+    const langKey = String(replyLanguage).toLowerCase();
+    if (langKey === 'english') {
+      prompt += `\n\n🌐 LANGUAGE LOCK: Always reply in English. If the contact wrote in another language, you understood them but reply only in English. Do NOT translate the contact's words back to them — just respond naturally in English.`;
+    } else {
+      prompt += `\n\n🌐 LANGUAGE LOCK: Reply in ${replyLanguage} only, regardless of what language the contact uses. Keep the persona's tone, style, and length rules — just express them in ${replyLanguage}. If the persona uses a name in another script, transliterate it naturally.`;
+    }
   }
 
   // Hint the AI to address all unreplied messages when there are multiple
@@ -567,4 +577,74 @@ Respond with ONLY the compacted memory, nothing else.`,
   if (!response.ok) return memory;
   const data = await response.json();
   return data.choices?.[0]?.message?.content?.trim() || memory;
+}
+
+/**
+ * Detect whether a piece of text is in English; if not, also return an
+ * English translation. Single round-trip with gpt-4o-mini in JSON mode.
+ * Returns null when input is unsuitable for detection (too short, emoji-only,
+ * URL-only) or when the API fails (caller should silently fall back).
+ * Shape: { language, languageCode, isEnglish, englishTranslation }
+ */
+export async function detectAndTranslate(apiKey, text) {
+  if (!apiKey || !text) return null;
+
+  // Strip the voice-note transcript prefix so language detection reads the
+ // actual spoken content, not our wrapper.
+  let cleaned = String(text).trim();
+  cleaned = cleaned.replace(/^🎤\s*\[Voice note\]:\s*"?/i, '').replace(/"$/, '').trim();
+
+  // Skip obviously-not-text inputs
+  if (cleaned.length < 3) return null;
+  // Strip URLs and emoji/symbols — if nothing meaningful remains, skip.
+  const stripped = cleaned
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}\u200d\ufe0f]/gu, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .trim();
+  if (stripped.length < 3) return null;
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a language detector and translator. Given a short message, identify its language and (if not English) provide an English translation.
+
+Rules:
+- "language": full English name of the detected language (e.g. "Yoruba", "French", "Naija Pidgin", "Mandarin Chinese"). For Nigerian Pidgin / broken English, use "Naija Pidgin", not "English".
+- "languageCode": short lowercase tag matching the name (e.g. "yoruba", "french", "naija-pidgin", "mandarin").
+- "isEnglish": true ONLY for standard English (US, UK, etc.). Naija Pidgin, Jamaican Patois, etc. are NOT English.
+- "englishTranslation": natural fluent English translation of the message. If isEnglish is true, repeat the original message verbatim.
+
+Respond ONLY with a JSON object: {"language": "...", "languageCode": "...", "isEnglish": bool, "englishTranslation": "..."}`,
+          },
+          { role: 'user', content: cleaned.slice(0, 1000) },
+        ],
+        max_tokens: 300,
+        temperature: 0.1,
+        response_format: { type: 'json_object' },
+      }),
+    });
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    const result = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+    if (typeof result.isEnglish !== 'boolean' || !result.language) return null;
+    return {
+      language: String(result.language),
+      languageCode: String(result.languageCode || result.language).toLowerCase(),
+      isEnglish: !!result.isEnglish,
+      englishTranslation: String(result.englishTranslation || cleaned),
+    };
+  } catch {
+    return null;
+  }
 }

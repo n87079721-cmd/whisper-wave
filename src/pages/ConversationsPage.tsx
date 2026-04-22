@@ -4,6 +4,7 @@ import { api, type Contact, type Message, type Voice, type Prompt } from '@/lib/
 import { toast } from 'sonner';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
+import { LANGUAGES } from '@/lib/languages';
 
 interface ConversationsPageProps {
   initialContact?: Contact | null;
@@ -83,6 +84,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [lastSummaryAt, setLastSummaryAt] = useState<string | null>(null);
   const [summarizingNow, setSummarizingNow] = useState(false);
   const [aiTimezone, setAiTimezone] = useState<string>('America/New_York');
+  const [contactReplyLanguage, setContactReplyLanguage] = useState<string>('auto');
+  const [savingLanguage, setSavingLanguage] = useState(false);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -315,6 +318,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setContactMemoryEnabled(data.memory_enabled !== 0);
       setLastSummaryAt(data.last_summary_at || null);
       setAiTimezone(data.timezone || 'America/New_York');
+      setContactReplyLanguage(data.reply_language || 'auto');
     }).catch(() => {
       setContactMemory('');
       setContactDirective('');
@@ -323,6 +327,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setContactMemoryEnabled(true);
       setLastSummaryAt(null);
       setAiTimezone('America/New_York');
+      setContactReplyLanguage('auto');
     });
     api.getContactAutoInitiate(selectedContact.id).then(data => {
       setContactAutoInitiate(data.autoInitiate);
@@ -1340,6 +1345,48 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                           className="px-3 py-1.5 text-xs rounded-md border border-input bg-background hover:bg-secondary disabled:opacity-50"
                         >{summarizingNow ? 'Summarizing…' : 'Summarize now'}</button>
                       </div>
+                    </div>
+
+                    {/* Reply Language */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <p className="text-sm font-medium text-foreground">Reply Language</p>
+                        {contactReplyLanguage !== 'auto' && (
+                          <button
+                            onClick={async () => {
+                              setContactReplyLanguage('auto');
+                              await api.updateContactReplyLanguage(selectedContact.id, null);
+                              toast.success('Language reset to Auto');
+                            }}
+                            className="text-xs text-destructive hover:underline"
+                          >Clear</button>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-1.5">
+                        AI will reply in this language. Auto = match contact. English = always reply in English (foreign messages still translated to Telegram).
+                      </p>
+                      <select
+                        value={contactReplyLanguage}
+                        onChange={async (e) => {
+                          const next = e.target.value;
+                          setContactReplyLanguage(next);
+                          setSavingLanguage(true);
+                          try {
+                            await api.updateContactReplyLanguage(selectedContact.id, next === 'auto' ? null : next);
+                            toast.success('Reply language saved');
+                          } catch {
+                            toast.error('Failed to save language');
+                          } finally {
+                            setSavingLanguage(false);
+                          }
+                        }}
+                        disabled={savingLanguage}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                      >
+                        {LANGUAGES.map(lang => (
+                          <option key={lang.code} value={lang.code}>{lang.name}</option>
+                        ))}
+                      </select>
                     </div>
 
                     {/* Directive */}

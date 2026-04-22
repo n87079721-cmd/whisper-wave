@@ -6,8 +6,8 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
-import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory } from './ai.js';
-import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, consumeLastPreviewedReply, sendVoiceNoteTranscript } from './telegram.js';
+import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory, detectAndTranslate } from './ai.js';
+import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, consumeLastPreviewedReply, sendVoiceNoteTranscript, sendForeignLanguageAlert } from './telegram.js';
 import { transcribeAudio, generateVoiceNote } from './elevenlabs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1347,6 +1347,15 @@ async function startConnection(userId, db, options = {}) {
                 triggerConversationSummary(userId, db, contactId, resolvedJid, contactName || phone, sumKeyRow.value).catch(() => {});
               }
             } catch {}
+
+            // Detect non-English inbound text (incl. VN transcripts) and forward
+            // an English translation to Telegram. Fire-and-forget; respects
+            // per-user Telegram config and silently no-ops when not set.
+            try {
+              if (resolvedContent && String(resolvedContent).trim()) {
+                maybeAlertForeignLanguage(db, userId, contactId, contactName || phone, resolvedContent).catch(() => {});
+              }
+            } catch {}
           }
         }
       } catch (err) {
@@ -2087,6 +2096,65 @@ function buildContactSystemPrompt(db, userId, contactId) {
 }
 
 /**
+ * Look up the per-contact "Reply Language" lock. Returns the stored value
+ * (lowercase, e.g. "english", "yoruba") or null when no lock is set
+ * (which means: behave normally / match contact).
+ */
+function getContactReplyLanguage(db, userId, contactId) {
+  try {
+    const row = db.prepare('SELECT reply_language FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+    return row?.reply_language || null;
+  } catch {
+    return null;
+  }
+}
+
+// In-memory cache of the most recently detected language per (userId, contactId).
+// Used to skip redundant gpt-4o-mini detection calls when a contact sends a
+// rapid burst of messages in the same language. 5-minute TTL.
+const FOREIGN_LANG_CACHE_TTL_MS = 5 * 60 * 1000;
+const foreignLangCache = new Map(); // key `${userId}:${contactId}` -> { isEnglish, language, at }
+
+function getCachedForeignLangResult(userId, contactId) {
+  const key = `${userId}:${contactId}`;
+  const entry = foreignLangCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.at > FOREIGN_LANG_CACHE_TTL_MS) {
+    foreignLangCache.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+function setCachedForeignLangResult(userId, contactId, value) {
+  foreignLangCache.set(`${userId}:${contactId}`, { ...value, at: Date.now() });
+}
+
+/**
+ * If `text` is non-English, forward an alert to Telegram with the original +
+ * an English translation. Fire-and-forget; never throws. Caches the last
+ * detection per contact for 5 minutes to avoid redundant gpt-4o-mini calls
+ * during rapid-fire bursts in the same language.
+ */
+async function maybeAlertForeignLanguage(db, userId, contactId, contactName, text) {
+  try {
+    if (!isTelegramConfigured(db, userId)) return;
+    const apiKey = getConfigValue(db, userId, 'openai_api_key', '') || process.env.OPENAI_API_KEY;
+    if (!apiKey) return;
+    if (!text || !String(text).trim()) return;
+    const result = await detectAndTranslate(apiKey, text);
+    if (!result) return;
+    setCachedForeignLangResult(userId, contactId, { isEnglish: result.isEnglish, language: result.language });
+    if (result.isEnglish) return;
+    // Strip the [Voice note] wrapper from "original" so it reads cleanly in Telegram.
+    const cleanedOriginal = String(text).replace(/^🎤\s*\[Voice note\]:\s*"?/i, '').replace(/"$/, '').trim();
+    await sendForeignLanguageAlert(db, userId, contactName, cleanedOriginal, result.language, result.englishTranslation);
+  } catch (err) {
+    console.log(`🌍 [${userId}] Foreign-language alert failed: ${err?.message}`);
+  }
+}
+
+/**
  * Look up which persona (from the prompt library) is currently driving a contact's
  * AI replies. Returns the persona name, or 'Default' when no library prompt is set
  * (i.e. the global system prompt is in use). Returns null only on DB errors.
@@ -2708,6 +2776,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   }
 
   const personaName = getActivePersonaName(db, userId, contactId);
+  const replyLanguage = getContactReplyLanguage(db, userId, contactId);
   debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, persona: personaName, historyLength: messages.length, unrepliedCount, timezone: tz, forceRebatch: !!forceReply });
   // When this is a forced rebatch (a new message arrived mid-typing and we cancelled
   // the prior in-flight reply), tell the model so it knows to integrate the LATEST
@@ -2715,7 +2784,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const promptForGen = forceReply
     ? `${systemPrompt}\n\n⚠️ REBATCH: A new message just arrived while you were about to reply. Re-read the LAST few messages and reply to the latest one (and the ones above it together) — don't reply to the older context as if nothing changed. Use the current local time of day for tone.`
     : systemPrompt;
-  let replyText = await generateReply(keyRow.value, messages, promptForGen, contactName || phone, { unrepliedCount, timezone: tz });
+  let replyText = await generateReply(keyRow.value, messages, promptForGen, contactName || phone, { unrepliedCount, timezone: tz, replyLanguage });
   replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
   if (isReplyTooSimilar(replyText, recentOutgoing)) {
@@ -2725,7 +2794,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       messages,
       `${systemPrompt}\n\nIMPORTANT: Do not repeat or closely paraphrase any recent outgoing reply. Make the next reply clearly different in wording and energy.`,
       contactName || phone,
-      { timezone: tz },
+      { timezone: tz, replyLanguage },
     );
     replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
   }
@@ -3639,7 +3708,11 @@ export function getTelegramCallbackHandlers(userId, db) {
       const systemPrompt = buildContactSystemPrompt(db, userId, contact.id);
       const contactName = contact.name || contact.phone || 'Unknown';
       const { generateReply } = await import('./ai.js');
-      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'rewrite', timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
+      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, {
+        mode: 'rewrite',
+        timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
+        replyLanguage: getContactReplyLanguage(db, userId, contact.id),
+      });
       replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
       // Re-schedule with telegram preview
@@ -3673,6 +3746,7 @@ export function getTelegramCallbackHandlers(userId, db) {
         customInstructions: instructions,
         previousReply,
         timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
+        replyLanguage: getContactReplyLanguage(db, userId, contact.id),
       });
       replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
