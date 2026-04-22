@@ -2665,34 +2665,32 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
           let replyId;
 
           if (voiceDecision.send && elKey) {
-            try {
-              debugLog(db, userId, 'voice_note_decision', {
-                contact: contactName || phone,
-                voiceId: voiceDecision.voiceId,
-                bgSound: voiceDecision.bgSound,
-                chance: voiceDecision.chance + '%',
-                sentToday: `${voiceDecision.sentToday}/${voiceDecision.maxPerDay}`,
-              });
-              const enhanced = await enhanceTextForVoice(keyRow.value, replyText);
-              const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
-              const audioBuffer = await generateVoiceNote(
-                elKey,
-                enhanced,
-                voiceDecision.voiceId,
-                voiceDecision.modelId,
-                voiceDecision.bgSound && voiceDecision.bgSound !== 'none' ? voiceDecision.bgSound : null,
-                Number.isFinite(bgVolume) ? bgVolume : 0.15,
-              );
-              debugLog(db, userId, 'sending_reply', { contact: contactName || phone, mode: 'voice', replyPreview: replyText.slice(0, 80) });
-              sent = await sendVoiceNote(userId, jid, audioBuffer);
-              replyId = sent?.id?._serialized || uuid();
-              voiceMedia = persistVoiceNoteBuffer(replyId, audioBuffer);
-              db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contactId);
-              sentAsVoice = true;
-            } catch (vErr) {
-              debugLog(db, userId, 'voice_note_failed_fallback_text', { contact: contactName || phone, error: vErr?.message || String(vErr) });
-              // Fall through to text path below
-            }
+            // No fallback: if VN was chosen, it MUST be sent as a VN.
+            // Any failure aborts the reply entirely (the message is dropped,
+            // not silently sent as text). The user explicitly asked for this.
+            debugLog(db, userId, 'voice_note_decision', {
+              contact: contactName || phone,
+              voiceId: voiceDecision.voiceId,
+              bgSound: voiceDecision.bgSound,
+              chance: voiceDecision.chance + '%',
+              sentToday: `${voiceDecision.sentToday}/${voiceDecision.maxPerDay}`,
+            });
+            const enhanced = await enhanceTextForVoice(keyRow.value, replyText);
+            const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
+            const audioBuffer = await generateVoiceNote(
+              elKey,
+              enhanced,
+              voiceDecision.voiceId,
+              voiceDecision.modelId,
+              voiceDecision.bgSound && voiceDecision.bgSound !== 'none' ? voiceDecision.bgSound : null,
+              Number.isFinite(bgVolume) ? bgVolume : 0.15,
+            );
+            debugLog(db, userId, 'sending_reply', { contact: contactName || phone, mode: 'voice', replyPreview: replyText.slice(0, 80) });
+            sent = await sendVoiceNote(userId, jid, audioBuffer);
+            replyId = sent?.id?._serialized || uuid();
+            voiceMedia = persistVoiceNoteBuffer(replyId, audioBuffer);
+            db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contactId);
+            sentAsVoice = true;
           } else if (!voiceDecision.send) {
             // Quiet log only when interesting (skip global_disabled to avoid noise)
             if (voiceDecision.reason && voiceDecision.reason !== 'global_disabled' && voiceDecision.reason !== 'contact_disabled') {
