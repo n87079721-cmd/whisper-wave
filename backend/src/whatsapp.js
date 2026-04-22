@@ -3604,6 +3604,8 @@ export function getTelegramCallbackHandlers(userId, db) {
         debugLog(db, userId, 'telegram_send_vn', {
           jid, contact: contactName, voiceId, bgSound: bgSound || 'none',
           replyPreview: replyText.slice(0, 80),
+          enhancedPreview: speakable.slice(0, 120),
+          enhanced: speakable !== replyText,
         });
 
         const sent = await sendVoiceNote(userId, jid, audioBuffer);
