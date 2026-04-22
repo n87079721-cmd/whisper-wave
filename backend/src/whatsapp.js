@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
 import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory } from './ai.js';
-import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply } from './telegram.js';
+import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, consumeLastPreviewedReply } from './telegram.js';
 import { transcribeAudio, generateVoiceNote } from './elevenlabs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -3626,8 +3626,13 @@ export function getTelegramCallbackHandlers(userId, db) {
         const contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
         if (!contact) return { ok: false, reason: 'contact not found' };
 
-        const replyText = getLastPreviewedReply(userId, jid);
-        if (!replyText || !replyText.trim()) return { ok: false, reason: 'no previewed reply to send' };
+        // Idempotency: atomically consume the cached preview so re-taps of the
+        // same Telegram button (even days later) cannot fire a second VN.
+        const replyText = consumeLastPreviewedReply(userId, jid);
+        if (!replyText || !replyText.trim()) {
+          debugLog(db, userId, 'telegram_send_vn_duplicate', { jid });
+          return { ok: false, reason: 'already sent (or no previewed reply available)' };
+        }
 
         const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
         if (!elKey) return { ok: false, reason: 'ElevenLabs API key not configured' };

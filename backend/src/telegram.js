@@ -52,6 +52,22 @@ export function getLastPreviewedReply(userId, jid) {
   return state.lastReplies.get(jid) || null;
 }
 
+/**
+ * Atomically consume a previewed reply for a jid. Returns the text if it was
+ * still available (and removes it so it can never be sent twice), or null if
+ * it was already consumed / never existed. This is the idempotency guard for
+ * the "🎤 Send as VN" button — re-tapping the same Telegram message (even days
+ * later) will return null instead of sending the VN again.
+ */
+export function consumeLastPreviewedReply(userId, jid) {
+  const state = botInstances.get(userId);
+  if (!state?.lastReplies) return null;
+  const text = state.lastReplies.get(jid);
+  if (!text) return null;
+  state.lastReplies.delete(jid);
+  return text;
+}
+
 async function telegramRequest(token, method, body = {}) {
   const res = await fetch(`${TELEGRAM_API}${token}/${method}`, {
     method: 'POST',
