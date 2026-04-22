@@ -129,7 +129,9 @@ export async function startLogin(userId, chatId, sendBotMessage, creds = null) {
     String(creds?.apiId ?? process.env.TELEGRAM_API_ID ?? ''), 10
   );
   const apiHash = String(creds?.apiHash ?? process.env.TELEGRAM_API_HASH ?? '');
+  dlog(userId, 'login_start', { hasCreds: !!creds, apiIdSet: !!apiId, apiHashSet: !!apiHash });
   if (!apiId || !apiHash) {
+    dlog(userId, 'login_missing_creds', {});
     await sendBotMessage('⚠️ Userbot not configured. Add your Telegram API ID and API Hash in Settings → Telegram Userbot, or set the TELEGRAM_API_ID / TELEGRAM_API_HASH environment secrets.');
     return;
   }
@@ -137,6 +139,7 @@ export async function startLogin(userId, chatId, sendBotMessage, creds = null) {
   // If already mid-flow, refuse politely
   const existing = states.get(userId);
   if (existing && existing.stage !== 'idle') {
+    dlog(userId, 'login_busy', { stage: existing.stage });
     await sendBotMessage(`⚠️ Already in stage "${existing.stage}". Send /cancel to abort first.`);
     return;
   }
@@ -164,6 +167,7 @@ export async function startLogin(userId, chatId, sendBotMessage, creds = null) {
   s.loginPromise = client.start({
     phoneNumber: async () => {
       const v = await makeAwait(s, 'phone');
+      dlog(userId, 'login_got_phone', { len: v.length });
       s.stage = 'awaiting_code';
       await sendBotMessage('💬 Enter the login code Telegram just sent you (digits only):');
       armIdleTimeout(userId);
@@ -171,6 +175,7 @@ export async function startLogin(userId, chatId, sendBotMessage, creds = null) {
     },
     phoneCode: async () => {
       const v = await makeAwait(s, 'code');
+      dlog(userId, 'login_got_code', { len: v.length });
       // Note: GramJS may invoke phoneCode multiple times if first attempt
       // was wrong; our Promise model handles only one attempt then aborts.
       return v;
@@ -180,10 +185,12 @@ export async function startLogin(userId, chatId, sendBotMessage, creds = null) {
       await sendBotMessage('🔐 2FA enabled. Enter your two-step verification password:');
       armIdleTimeout(userId);
       const v = await makeAwait(s, 'password');
+      dlog(userId, 'login_got_password', { len: v.length });
       return v;
     },
     onError: async (err) => {
       console.error(`[userbot ${userId}] login error:`, err?.message);
+      dlog(userId, 'login_error', { error: err?.message || String(err) });
       await sendBotMessage(`⚠️ Login failed: ${err?.message || 'unknown error'}`);
       await wipeSession(userId, 'login_error');
     },
@@ -194,18 +201,21 @@ export async function startLogin(userId, chatId, sendBotMessage, creds = null) {
       const name = [me.firstName, me.lastName].filter(Boolean).join(' ') || me.username || me.phone || 'unknown';
       s.stage = 'ready';
       armIdleTimeout(userId);
+      dlog(userId, 'login_ready', { name, username: me.username || null });
       await sendBotMessage(
         `✅ Logged in as *${escapeMd(name)}*${me.username ? ` (@${escapeMd(me.username)})` : ''}\\.\n\n` +
         `Now send: \`/send <@username|+phone|id|t.me/user>\`\n` +
         `_Session auto\\-wipes after one VN send or 5 min idle\\._`
       );
     } catch (err) {
+      dlog(userId, 'login_getme_failed', { error: err?.message });
       await sendBotMessage(`⚠️ Logged in but couldn't fetch identity: ${err?.message}`);
       await wipeSession(userId, 'getme_failed');
     }
   }).catch(async (err) => {
     if (err?.message?.includes('session wiped')) return; // expected on /cancel
     console.error(`[userbot ${userId}] login chain failed:`, err?.message);
+    dlog(userId, 'login_chain_failed', { error: err?.message });
     await sendBotMessage(`⚠️ Login failed: ${err?.message || 'unknown error'}`);
     await wipeSession(userId, 'login_chain_error').catch(() => {});
   });
