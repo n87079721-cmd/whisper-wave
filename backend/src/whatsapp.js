@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
 import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory } from './ai.js';
-import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, consumeLastPreviewedReply } from './telegram.js';
+import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, consumeLastPreviewedReply, sendVoiceNoteTranscript } from './telegram.js';
 import { transcribeAudio, generateVoiceNote } from './elevenlabs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1243,6 +1243,13 @@ async function startConnection(userId, db, options = {}) {
                 if (transcript) {
                   resolvedContent = `🎤 [Voice note]: "${transcript}"`;
                   console.log(`🎤 [${userId}] Transcribed voice note from ${contactId}: "${transcript.slice(0, 80)}..."`);
+                  // Forward transcript to Telegram (fire-and-forget; respects per-user bot config)
+                  try {
+                    sendVoiceNoteTranscript(db, userId, contactName || candidate || phone, transcript)
+                      .catch(err => console.log(`🎤 [${userId}] Telegram VN forward failed: ${err?.message}`));
+                  } catch (tgErr) {
+                    console.log(`🎤 [${userId}] Telegram VN forward error: ${tgErr?.message}`);
+                  }
                 }
               }
             } catch (transcribeErr) {

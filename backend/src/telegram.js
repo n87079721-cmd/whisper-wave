@@ -146,6 +146,30 @@ export async function sendSensitiveAlert(db, userId, contactName, topic, message
 }
 
 /**
+ * Forward a transcribed inbound voice note to the user's Telegram chats.
+ * Called for every received WhatsApp voice note that we successfully transcribe.
+ */
+export async function sendVoiceNoteTranscript(db, userId, contactName, transcript) {
+  const { token, chatIds } = getBotConfig(db, userId);
+  if (!token || chatIds.length === 0) return;
+  if (!transcript || !transcript.trim()) return;
+
+  const text = `🎤 *Voice note from ${escapeMarkdown(contactName || 'Unknown')}*\n\n_${escapeMarkdown(transcript.trim())}_`;
+
+  await Promise.all(chatIds.map(async (cid) => {
+    try {
+      await telegramRequest(token, 'sendMessage', {
+        chat_id: cid,
+        text,
+        parse_mode: 'Markdown',
+      });
+    } catch (err) {
+      console.error(`[${userId}] Failed to forward VN transcript to ${cid}:`, err?.message);
+    }
+  }));
+}
+
+/**
  * Send a test message to verify the bot token and chat IDs.
  * Accepts a single chat ID string or a multi-id string (comma/newline separated).
  * Returns true if at least one chat ID accepted the message.
