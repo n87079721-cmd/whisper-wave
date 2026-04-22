@@ -3808,10 +3808,10 @@ export function getTelegramCallbackHandlers(userId, db) {
         const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
         if (!elKey) return { ok: false, reason: 'ElevenLabs API key not configured' };
 
-        const openaiKey =
-          (db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId)?.value)
-          || process.env.OPENAI_API_KEY;
-        if (!openaiKey) return { ok: false, reason: 'OpenAI API key required to enhance VN text. No fallback.' };
+        // Enhance ALWAYS uses the admin's OpenAI key (and admin enhance prompt),
+        // regardless of which user owns this Telegram bridge. Per product rule.
+        const openaiKey = getAdminEnhanceOpenAIKey(db);
+        if (!openaiKey) return { ok: false, reason: 'Admin OpenAI API key not configured — cannot enhance VN text.' };
 
         // Voice selection: persona voice → contact voice override is implicit via persona →
         // global default voice → hard-coded fallback (George).
