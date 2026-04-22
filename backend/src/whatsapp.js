@@ -3328,9 +3328,22 @@ async function triggerConversationSummary(userId, db, contactId, jid, contactNam
 
     // Append summary to memory
     const existingMemory = contactRow?.memory || '';
-    const newMemory = existingMemory
+    let newMemory = existingMemory
       ? `${existingMemory}\n\n${summary}`
       : summary;
+
+    // Compact if memory is getting bloated to keep prompts tight.
+    if (newMemory.length > 4000) {
+      try {
+        const compacted = await compactMemory(apiKey, newMemory);
+        if (compacted && compacted.length < newMemory.length) {
+          newMemory = compacted;
+          debugLog(db, userId, 'memory_compacted', { contact: contactName, newLength: newMemory.length });
+        }
+      } catch (compactErr) {
+        console.error(`[${userId}] Memory compaction failed:`, compactErr?.message);
+      }
+    }
 
     db.prepare("UPDATE contacts SET memory = ?, last_summary_at = datetime('now') WHERE id = ? AND user_id = ?")
       .run(newMemory, contactId, userId);
