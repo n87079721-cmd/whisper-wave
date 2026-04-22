@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation, streamMediaForMessage, cancelAllPendingReplies, cancelPendingReplyForContact, triggerConversationSummary } from './whatsapp.js';
 import { initWhatsApp } from './whatsapp.js';
-import { archiveChat, markChatRead, syncArchiveStates, enhanceTextForVoice } from './whatsapp.js';
+import { archiveChat, markChatRead, syncArchiveStates, enhanceTextForVoice, getAdminEnhanceOpenAIKey } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio, BG_SOUND_PROMPTS } from './elevenlabs.js';
 import multer from 'multer';
 import { execSync } from 'child_process';
@@ -1189,10 +1189,11 @@ export function createApiRouter(db) {
       const wa = getWA(req);
       const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId });
       const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
-      // ALWAYS enhance — no raw-text fallback. If enhance fails or no OpenAI
-      // key is set, the request errors out (400 / 500). Per user request.
-      const openaiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
-      if (!openaiKey) return res.status(400).json({ error: 'OpenAI API key required to enhance VN text. No fallback to raw text.' });
+      // ALWAYS enhance using the ADMIN's OpenAI key + global enhance prompt,
+      // so every account (incl. new users) produces identical enhancement
+      // style. No raw-text fallback — request errors out if no admin key.
+      const openaiKey = getAdminEnhanceOpenAIKey(db, req.userId);
+      if (!openaiKey) return res.status(400).json({ error: 'Admin OpenAI API key required to enhance VN text. Ask an admin to configure it.' });
       const speakable = await enhanceTextForVoice(openaiKey, text);
       const audioBuffer = await generateVoiceNote(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
 
@@ -1310,8 +1311,10 @@ export function createApiRouter(db) {
       const { text } = req.body;
       if (!text) return res.status(400).json({ error: 'Missing text' });
 
-      const apiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
-      if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured.' });
+      // Manual Enhance button → use the ADMIN's OpenAI key + global prompt
+      // so every account produces the same enhancement style.
+      const apiKey = getAdminEnhanceOpenAIKey(db, req.userId);
+      if (!apiKey) return res.status(400).json({ error: 'Admin OpenAI API key not configured. Ask an admin to set it.' });
 
       const enhanced = await enhanceTextForVoice(apiKey, text);
 
