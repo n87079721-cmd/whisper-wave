@@ -2087,6 +2087,65 @@ function buildContactSystemPrompt(db, userId, contactId) {
 }
 
 /**
+ * Look up the per-contact "Reply Language" lock. Returns the stored value
+ * (lowercase, e.g. "english", "yoruba") or null when no lock is set
+ * (which means: behave normally / match contact).
+ */
+function getContactReplyLanguage(db, userId, contactId) {
+  try {
+    const row = db.prepare('SELECT reply_language FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+    return row?.reply_language || null;
+  } catch {
+    return null;
+  }
+}
+
+// In-memory cache of the most recently detected language per (userId, contactId).
+// Used to skip redundant gpt-4o-mini detection calls when a contact sends a
+// rapid burst of messages in the same language. 5-minute TTL.
+const FOREIGN_LANG_CACHE_TTL_MS = 5 * 60 * 1000;
+const foreignLangCache = new Map(); // key `${userId}:${contactId}` -> { isEnglish, language, at }
+
+function getCachedForeignLangResult(userId, contactId) {
+  const key = `${userId}:${contactId}`;
+  const entry = foreignLangCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.at > FOREIGN_LANG_CACHE_TTL_MS) {
+    foreignLangCache.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+function setCachedForeignLangResult(userId, contactId, value) {
+  foreignLangCache.set(`${userId}:${contactId}`, { ...value, at: Date.now() });
+}
+
+/**
+ * If `text` is non-English, forward an alert to Telegram with the original +
+ * an English translation. Fire-and-forget; never throws. Caches the last
+ * detection per contact for 5 minutes to avoid redundant gpt-4o-mini calls
+ * during rapid-fire bursts in the same language.
+ */
+async function maybeAlertForeignLanguage(db, userId, contactId, contactName, text) {
+  try {
+    if (!isTelegramConfigured(db, userId)) return;
+    const apiKey = getConfigValue(db, userId, 'openai_api_key', '') || process.env.OPENAI_API_KEY;
+    if (!apiKey) return;
+    if (!text || !String(text).trim()) return;
+    const result = await detectAndTranslate(apiKey, text);
+    if (!result) return;
+    setCachedForeignLangResult(userId, contactId, { isEnglish: result.isEnglish, language: result.language });
+    if (result.isEnglish) return;
+    // Strip the [Voice note] wrapper from "original" so it reads cleanly in Telegram.
+    const cleanedOriginal = String(text).replace(/^🎤\s*\[Voice note\]:\s*"?/i, '').replace(/"$/, '').trim();
+    await sendForeignLanguageAlert(db, userId, contactName, cleanedOriginal, result.language, result.englishTranslation);
+  } catch (err) {
+    console.log(`🌍 [${userId}] Foreign-language alert failed: ${err?.message}`);
+  }
+}
+
+/**
  * Look up which persona (from the prompt library) is currently driving a contact's
  * AI replies. Returns the persona name, or 'Default' when no library prompt is set
  * (i.e. the global system prompt is in use). Returns null only on DB errors.
