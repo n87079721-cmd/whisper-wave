@@ -14,7 +14,8 @@ import multer from 'multer';
 import { execSync } from 'child_process';
 import { authMiddleware, registerUser, loginUser, createToken } from './auth.js';
 import { startTelegramPolling, stopTelegramPolling, isTelegramConfigured } from './telegram.js';
-import { getTelegramCallbackHandlers, startConversationStarterLoop } from './whatsapp.js';
+import { getTelegramCallbackHandlers, startConversationStarterLoop, stopConversationStarterLoop } from './whatsapp.js';
+import QRCode from 'qrcode';
 
 // Ensure Telegram polling is running for a user whenever their config supports it.
 // Safe to call repeatedly — startTelegramPolling no-ops if already polling.
@@ -28,7 +29,17 @@ function ensureTelegramPolling(db, userId) {
     console.error(`[${userId}] ensureTelegramPolling error:`, err?.message);
   }
 }
-import QRCode from 'qrcode';
+
+function ensureUserBackgroundServices(db, userId) {
+  try {
+    const startersEnabled = getConfig(db, userId, 'conversation_starters') === 'true';
+    if (startersEnabled) startConversationStarterLoop(userId, db);
+    else stopConversationStarterLoop(userId);
+    ensureTelegramPolling(db, userId);
+  } catch (err) {
+    console.error(`[${userId}] ensureUserBackgroundServices error:`, err?.message);
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
