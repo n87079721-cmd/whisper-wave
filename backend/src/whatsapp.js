@@ -3766,13 +3766,20 @@ export function getTelegramCallbackHandlers(userId, db) {
      * Returns { ok: true } or { ok: false, reason }.
      */
     onSendVN: async (jid) => {
+      let lock = null;
       try {
         const contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
         if (!contact) return { ok: false, reason: 'contact not found' };
 
-        // Idempotency: atomically consume the cached preview so re-taps of the
-        // same Telegram button (even days later) cannot fire a second VN.
-        const replyText = consumeLastPreviewedReply(userId, jid);
+        // Claim the cached preview with an in-flight lock. The preview is only
+        // committed (deleted) on a successful send so transient failures (network,
+        // OpenAI/ElevenLabs hiccup) leave the user able to retry by tapping again.
+        lock = claimLastPreviewedReply(userId, jid);
+        if (lock?.busy) {
+          debugLog(db, userId, 'telegram_send_vn_busy', { jid });
+          return { ok: false, reason: 'voice note already being generated, please wait' };
+        }
+        const replyText = lock?.text;
         if (!replyText || !replyText.trim()) {
           debugLog(db, userId, 'telegram_send_vn_duplicate', { jid });
           return { ok: false, reason: 'already sent (or no previewed reply available)' };
