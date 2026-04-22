@@ -2008,6 +2008,24 @@ function getConfigValue(db, userId, key, fallback) {
   return row?.value ?? fallback;
 }
 
+// Shared OpenAI key resolver: user's own key → primary admin's key → env.
+// This lets every sub-account use AI auto-reply + VN enhancement with the
+// same quality as the admin, without each user pasting their own key.
+function getSharedOpenAIKey(db, userId) {
+  const own = getConfigValue(db, userId, 'openai_api_key', '');
+  if (own) return own;
+  try {
+    const admin = db.prepare(
+      'SELECT id FROM users WHERE is_admin = 1 ORDER BY created_at ASC LIMIT 1'
+    ).get();
+    if (admin && admin.id !== userId) {
+      const adminKey = getConfigValue(db, admin.id, 'openai_api_key', '');
+      if (adminKey) return adminKey;
+    }
+  } catch {}
+  return process.env.OPENAI_API_KEY || null;
+}
+
 /**
  * Build the full system prompt for a contact: persona (or global) + memory + active directive.
  * Directive is wrapped at the top AND repeated at the bottom so the model can't drift away from it.
