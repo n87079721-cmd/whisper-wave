@@ -94,9 +94,7 @@ const SettingsPage = () => {
     api.getConfig('automation_enabled').then(data => {
       setAutoEnabled(data.value === 'true');
     }).catch(() => {});
-    api.getConfig('ai_system_prompt').then(data => {
-      if (data.exists) setSystemPrompt(data.value || '');
-    }).catch(() => {});
+    // ai_system_prompt removed — personas drive every reply.
     api.getConfig('ai_reply_chance').then(data => {
       if (data.exists) setReplyChance(parseInt(data.value || '70', 10));
     }).catch(() => {});
