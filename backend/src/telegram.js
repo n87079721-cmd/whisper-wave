@@ -148,9 +148,24 @@ export async function sendReplyPreview(db, userId, contactName, replyText, jid, 
   const { token, chatIds } = getBotConfig(db, userId);
   if (!token || chatIds.length === 0) return;
 
-  // Remember this draft so /custom can edit/extend it later
   const state = getBotState(userId);
+  // Remember this draft so /custom can edit/extend it later (back-compat helper)
   state.lastReplies.set(jid, replyText);
+
+  // Disable any prior preview for this jid so its buttons can't fire wrong text.
+  const oldToken = state.activeTokenByJid.get(jid);
+  if (oldToken) {
+    const old = state.previews.get(oldToken);
+    state.previews.delete(oldToken);
+    if (old?.messages?.length) {
+      disablePreviewMessages(token, old.messages).catch(() => {});
+    }
+  }
+
+  // Mint a fresh token for THIS preview
+  const previewToken = makeToken();
+  state.activeTokenByJid.set(jid, previewToken);
+  state.previews.set(previewToken, { jid, text: replyText, messages: [] });
 
   // Show which persona produced this reply so the user can verify the right
   // character/prompt is active for this contact.
@@ -159,24 +174,29 @@ export async function sendReplyPreview(db, userId, contactName, replyText, jid, 
   const keyboard = {
     inline_keyboard: [
       [
-        { text: '❌ Cancel', callback_data: `cancel_${jid}` },
-        { text: '🔄 Rewrite', callback_data: `rewrite_${jid}` },
-        { text: '✏️ Custom', callback_data: `custom_${jid}` },
+        { text: '❌ Cancel', callback_data: `cancel_${previewToken}` },
+        { text: '🔄 Rewrite', callback_data: `rewrite_${previewToken}` },
+        { text: '✏️ Custom', callback_data: `custom_${previewToken}` },
       ],
       [
-        { text: '🎤 Send as VN', callback_data: `vn_${jid}` },
+        { text: '🎤 Send as VN', callback_data: `vn_${previewToken}` },
       ],
     ],
   };
 
   await Promise.all(chatIds.map(async (cid) => {
     try {
-      await telegramRequest(token, 'sendMessage', {
+      const res = await telegramRequest(token, 'sendMessage', {
         chat_id: cid,
         text,
         parse_mode: 'Markdown',
         reply_markup: keyboard,
       });
+      const message_id = res?.result?.message_id;
+      if (message_id) {
+        const entry = state.previews.get(previewToken);
+        if (entry) entry.messages.push({ chat_id: cid, message_id });
+      }
     } catch (err) {
       console.error(`[${userId}] Failed to send Telegram preview to ${cid}:`, err?.message);
     }
