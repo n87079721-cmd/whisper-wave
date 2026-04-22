@@ -222,6 +222,33 @@ export function startTelegramPolling(db, userId, handlers) {
                 chat_id: incomingChatId,
                 text: `✏️ Tell me how you want to respond:`,
               });
+            } else if (action === 'vn' && handlers.onSendVN) {
+              // User pressed "Send as VN" — cancel pending text send, then synthesize
+              // the previewed reply as a voice note and send it.
+              if (handlers.onCancel) await handlers.onCancel(jid);
+              await telegramRequest(token, 'sendMessage', {
+                chat_id: incomingChatId,
+                text: `🎤 Generating voice note...`,
+              });
+              try {
+                const result = await handlers.onSendVN(jid);
+                if (result && result.ok) {
+                  await telegramRequest(token, 'sendMessage', {
+                    chat_id: incomingChatId,
+                    text: `✅ Voice note sent.`,
+                  });
+                } else {
+                  await telegramRequest(token, 'sendMessage', {
+                    chat_id: incomingChatId,
+                    text: `⚠️ Could not send VN: ${result?.reason || 'unknown error'}`,
+                  });
+                }
+              } catch (err) {
+                await telegramRequest(token, 'sendMessage', {
+                  chat_id: incomingChatId,
+                  text: `⚠️ VN failed: ${err?.message || 'error'}`,
+                });
+              }
             }
           }
 
