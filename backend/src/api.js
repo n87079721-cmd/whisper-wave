@@ -1488,7 +1488,7 @@ export function createApiRouter(db) {
 
   router.get('/config/:key', (req, res) => {
     const val = getConfig(db, req.userId, req.params.key);
-    if (req.params.key.includes('api_key') && val) {
+    if ((req.params.key.includes('api_key') || req.params.key.includes('api_hash')) && val) {
       res.json({ value: val.slice(0, 6) + '...' + val.slice(-4), exists: true });
     } else {
       res.json({ value: val, exists: !!val });

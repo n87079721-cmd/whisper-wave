@@ -3738,7 +3738,20 @@ export function getTelegramCallbackHandlers(userId, db) {
 
   return {
     isAdmin,
-    userbotEnabled: !!(process.env.TELEGRAM_API_ID && process.env.TELEGRAM_API_HASH),
+    // Userbot is "enabled" when EITHER per-user creds (Settings) or global env
+    // secrets are present. Re-read from DB on every property access so toggling
+    // creds in Settings takes effect without restarting the polling loop.
+    get userbotEnabled() {
+      const id = getConfigValue(db, userId, 'telegram_userbot_api_id', '');
+      const hash = getConfigValue(db, userId, 'telegram_userbot_api_hash', '');
+      return !!((id && hash) || (process.env.TELEGRAM_API_ID && process.env.TELEGRAM_API_HASH));
+    },
+    /** Per-user creds bundle for the userbot login flow. */
+    getUserbotCreds() {
+      const apiId = getConfigValue(db, userId, 'telegram_userbot_api_id', '') || null;
+      const apiHash = getConfigValue(db, userId, 'telegram_userbot_api_hash', '') || null;
+      return apiId && apiHash ? { apiId, apiHash } : null;
+    },
 
     /**
      * /send handler: parses recipient, prompts user to paste text, generates

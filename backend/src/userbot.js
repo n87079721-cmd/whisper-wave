@@ -112,11 +112,16 @@ export function getStage(userId) {
  * Begin /login flow. Returns immediately; bot prompts user step-by-step.
  * Caller (polling loop) supplies `sendBotMessage(text)` to talk back to user.
  */
-export async function startLogin(userId, chatId, sendBotMessage) {
-  const apiId = parseInt(process.env.TELEGRAM_API_ID || '', 10);
-  const apiHash = process.env.TELEGRAM_API_HASH || '';
+export async function startLogin(userId, chatId, sendBotMessage, creds = null) {
+  // Per-user creds (saved from Settings) take priority over global env-secret
+  // fallback. Either form is accepted so admins can self-serve without ever
+  // touching server env vars.
+  const apiId = parseInt(
+    String(creds?.apiId ?? process.env.TELEGRAM_API_ID ?? ''), 10
+  );
+  const apiHash = String(creds?.apiHash ?? process.env.TELEGRAM_API_HASH ?? '');
   if (!apiId || !apiHash) {
-    await sendBotMessage('⚠️ Userbot not configured. Admin must set TELEGRAM_API_ID and TELEGRAM_API_HASH secrets.');
+    await sendBotMessage('⚠️ Userbot not configured. Add your Telegram API ID and API Hash in Settings → Telegram Userbot, or set the TELEGRAM_API_ID / TELEGRAM_API_HASH environment secrets.');
     return;
   }
 
