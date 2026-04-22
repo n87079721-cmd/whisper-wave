@@ -781,6 +781,100 @@ const SettingsPage = () => {
         </div>
       </motion.div>
 
+      {/* Telegram Userbot — personal MTProto creds for /login + /send VN flow.
+          Per-user, stored in DB; falls back to TELEGRAM_API_ID / TELEGRAM_API_HASH
+          env secrets when blank. Both values must be filled to activate. */}
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.135 }} className="glass rounded-xl p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center"><Bot className="w-5 h-5 text-primary" /></div>
+          <div>
+            <h3 className="font-semibold text-foreground text-sm">Telegram Userbot (advanced)</h3>
+            <p className="text-xs text-muted-foreground">Lets <code>/login</code> + <code>/send</code> work in your Telegram bot</p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">API ID</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={userbotApiId}
+              onChange={(e) => setUserbotApiId(e.target.value.replace(/\D/g, ''))}
+              placeholder={userbotApiIdExists ? '••••••' : '12345678'}
+              className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-sm font-mono"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">API Hash</label>
+            <input
+              type="password"
+              value={userbotApiHash}
+              onChange={(e) => setUserbotApiHash(e.target.value.trim())}
+              placeholder={userbotApiHashExists ? '••••••••••••••••' : '0123456789abcdef0123456789abcdef'}
+              className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-sm font-mono"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                setSavingUserbot(true);
+                try {
+                  if (userbotApiId) {
+                    await api.setConfig('telegram_userbot_api_id', userbotApiId);
+                    setUserbotApiIdExists(true);
+                    setUserbotApiId('');
+                  }
+                  if (userbotApiHash) {
+                    await api.setConfig('telegram_userbot_api_hash', userbotApiHash);
+                    setUserbotApiHashExists(true);
+                    setUserbotApiHash('');
+                  }
+                  toast.success('Userbot credentials saved');
+                } catch {
+                  toast.error('Failed to save');
+                } finally { setSavingUserbot(false); }
+              }}
+              disabled={savingUserbot || (!userbotApiId && !userbotApiHash)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40"
+            >
+              {savingUserbot ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Save
+            </button>
+            {(userbotApiIdExists || userbotApiHashExists) && (
+              <button
+                onClick={async () => {
+                  if (!confirm('Clear saved Telegram userbot credentials?')) return;
+                  try {
+                    await api.setConfig('telegram_userbot_api_id', '');
+                    await api.setConfig('telegram_userbot_api_hash', '');
+                    setUserbotApiIdExists(false);
+                    setUserbotApiHashExists(false);
+                    toast.success('Cleared');
+                  } catch { toast.error('Failed to clear'); }
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-secondary text-foreground text-sm hover:bg-secondary/80 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" /> Clear
+              </button>
+            )}
+          </div>
+
+          {(userbotApiIdExists && userbotApiHashExists) && (
+            <p className="text-xs text-primary">✓ Userbot ready — send <code>/login</code> in your Telegram bot</p>
+          )}
+
+          <div className="text-[11px] text-muted-foreground space-y-1 pt-2 border-t border-border">
+            <p><span className="font-medium text-foreground">Where to get these:</span></p>
+            <p>1. Go to <a href="https://my.telegram.org/auth" target="_blank" rel="noreferrer" className="text-primary underline">my.telegram.org</a> → log in with your phone</p>
+            <p>2. Click <span className="font-medium">"API development tools"</span> → create an app (any name/short name)</p>
+            <p>3. Copy the <span className="font-medium">api_id</span> and <span className="font-medium">api_hash</span> shown</p>
+            <p className="pt-1 italic">Stored encrypted per account. Used only when you send <code>/login</code> from your Telegram bot.</p>
+          </div>
+        </div>
+      </motion.div>
+
       {/* AI Intelligence Features */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }} className="glass rounded-xl p-6 space-y-4">
         <div className="flex items-center gap-3">
