@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Dice5, Gauge, RefreshCw, MessageSquare, AlertTriangle, Database, Plus, Trash2, Pencil, X, BookOpen, Send, Bot, Sparkles, MessageCircle, Play, Pause } from 'lucide-react';
+import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Dice5, Gauge, RefreshCw, AlertTriangle, Database, Plus, Trash2, Pencil, X, BookOpen, Send, Bot, Sparkles, MessageCircle, Play, Pause } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api, type SyncDiagnostics, type Prompt } from '@/lib/api';
 import { toast } from 'sonner';
@@ -19,8 +19,7 @@ const SettingsPage = () => {
   const [elevenLabsKey, setElevenLabsKey] = useState('');
   const [openaiKey, setOpenaiKey] = useState('');
   const [autoEnabled, setAutoEnabled] = useState(false);
-  const [systemPrompt, setSystemPrompt] = useState('');
-  const [savingPrompt, setSavingPrompt] = useState(false);
+  // System prompt removed — AI only replies for contacts with an assigned persona.
   const [saving, setSaving] = useState(false);
   const [savingOpenai, setSavingOpenai] = useState(false);
   const [keyExists, setKeyExists] = useState(false);
@@ -95,9 +94,7 @@ const SettingsPage = () => {
     api.getConfig('automation_enabled').then(data => {
       setAutoEnabled(data.value === 'true');
     }).catch(() => {});
-    api.getConfig('ai_system_prompt').then(data => {
-      if (data.exists) setSystemPrompt(data.value || '');
-    }).catch(() => {});
+    // ai_system_prompt removed — personas drive every reply.
     api.getConfig('ai_reply_chance').then(data => {
       if (data.exists) setReplyChance(parseInt(data.value || '70', 10));
     }).catch(() => {});
@@ -592,28 +589,7 @@ const SettingsPage = () => {
                 <p className="text-[10px] text-muted-foreground">Currently: <span className="font-medium text-foreground">{activeHoursStart}</span> to <span className="font-medium text-foreground">{activeHoursEnd}</span> ({activeTimezone.split('/').pop()?.replace('_', ' ')})</p>
               </div>
 
-              {/* System Prompt */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-muted-foreground" />
-                  <label className="text-sm font-medium text-foreground">AI System Prompt</label>
-                </div>
-                <p className="text-xs text-muted-foreground">Leave empty for the default celebrity persona.</p>
-                <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)}
-                  placeholder="Leave empty for default celebrity persona, or customize..."
-                  rows={4}
-                  className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none" />
-                <button onClick={async () => {
-                  setSavingPrompt(true);
-                  try { await api.setConfig('ai_system_prompt', systemPrompt); toast.success('System prompt saved'); }
-                  catch { toast.error('Failed to save prompt'); }
-                  finally { setSavingPrompt(false); }
-                }} disabled={savingPrompt}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40">
-                  {savingPrompt ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  {savingPrompt ? 'Saving...' : 'Save Prompt'}
-                </button>
-              </div>
+              {/* System Prompt removed — AI replies only when a persona is assigned to the contact via the Prompt Library. */}
 
               {/* Prompt Library */}
               <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
