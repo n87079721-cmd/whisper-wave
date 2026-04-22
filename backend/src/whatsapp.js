@@ -3852,9 +3852,12 @@ export function getTelegramCallbackHandlers(userId, db) {
         db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'telegram_vn_sent', ?)`).run(userId, JSON.stringify({ contactId: contact.id }));
 
         emit(userId, 'message', { contactId: contact.id, msgId: replyId });
+        lock?.release?.(true);
         return { ok: true };
       } catch (err) {
         debugLog(db, userId, 'telegram_vn_failed', { jid, error: err?.message || String(err) });
+        // Keep the preview cached so the user can retry by tapping the button again.
+        lock?.release?.(false);
         return { ok: false, reason: err?.message || 'unknown error' };
       }
     },
