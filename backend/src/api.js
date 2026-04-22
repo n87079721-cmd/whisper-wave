@@ -41,6 +41,36 @@ function ensureUserBackgroundServices(db, userId) {
   }
 }
 
+// ── Voice-note daily limit helpers ─────────────────────────
+// Stored as config key 'voice_daily_limit' per user:
+//   missing / '' / '-1'  → unlimited
+//   '0'                  → voice notes disabled for this user
+//   '1'..'N'             → that many VN sends allowed per UTC day
+// Counts every voice send (manual, recording, voice-studio, AI auto-VN).
+function getVoiceDailyLimit(db, userId) {
+  const raw = getConfig(db, userId, 'voice_daily_limit');
+  if (raw == null || raw === '' || raw === '-1') return null; // unlimited
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function getVoiceSentTodayCount(db, userId) {
+  const row = db.prepare(
+    `SELECT COUNT(*) AS c FROM stats WHERE user_id = ? AND event = 'voice_sent' AND date(created_at) = date('now')`
+  ).get(userId);
+  return row?.c || 0;
+}
+
+// Returns { allowed: boolean, reason?: string, limit?: number, sentToday?: number }
+function checkVoiceLimit(db, userId) {
+  const limit = getVoiceDailyLimit(db, userId);
+  if (limit === null) return { allowed: true };
+  if (limit === 0) return { allowed: false, reason: 'voice_notes_disabled', limit, sentToday: 0 };
+  const sentToday = getVoiceSentTodayCount(db, userId);
+  if (sentToday >= limit) return { allowed: false, reason: 'daily_limit_reached', limit, sentToday };
+  return { allowed: true, limit, sentToday };
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createApiRouter(db) {
@@ -1125,6 +1155,18 @@ export function createApiRouter(db) {
       const { contactId, text, voiceId, modelId, backgroundSound, bgVolume } = req.body;
       if (!contactId || !text) return res.status(400).json({ error: 'Missing contactId or text' });
 
+      const limitCheck = checkVoiceLimit(db, req.userId);
+      if (!limitCheck.allowed) {
+        return res.status(429).json({
+          error: limitCheck.reason === 'voice_notes_disabled'
+            ? 'Voice notes are disabled for this account by the admin.'
+            : `Daily voice-note limit reached (${limitCheck.sentToday}/${limitCheck.limit}). Try again tomorrow or ask the admin to raise the limit.`,
+          reason: limitCheck.reason,
+          limit: limitCheck.limit,
+          sentToday: limitCheck.sentToday,
+        });
+      }
+
       const apiKey = getConfig(db, req.userId, 'elevenlabs_api_key') || process.env.ELEVENLABS_API_KEY;
       if (!apiKey) return res.status(400).json({ error: 'ElevenLabs API key not configured.' });
 
@@ -1166,6 +1208,18 @@ export function createApiRouter(db) {
     try {
       const { contactId, jid, data: audioData, mimeType } = req.body;
       if (!audioData || (!contactId && !jid)) return res.status(400).json({ error: 'Missing target or audio data' });
+
+      const limitCheck = checkVoiceLimit(db, req.userId);
+      if (!limitCheck.allowed) {
+        return res.status(429).json({
+          error: limitCheck.reason === 'voice_notes_disabled'
+            ? 'Voice notes are disabled for this account by the admin.'
+            : `Daily voice-note limit reached (${limitCheck.sentToday}/${limitCheck.limit}). Try again tomorrow or ask the admin to raise the limit.`,
+          reason: limitCheck.reason,
+          limit: limitCheck.limit,
+          sentToday: limitCheck.sentToday,
+        });
+      }
 
       const wa = getWA(req);
       const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId, jid });
@@ -1823,7 +1877,18 @@ export function createApiRouter(db) {
         ORDER BY u.created_at ASC
       `).all();
 
-      res.json(users.map(u => ({ ...u, is_admin: !!u.is_admin, isAdmin: !!u.is_admin, is_current: u.id === req.userId })));
+      res.json(users.map(u => {
+        const limit = getVoiceDailyLimit(db, u.id);
+        const sentToday = getVoiceSentTodayCount(db, u.id);
+        return {
+          ...u,
+          is_admin: !!u.is_admin,
+          isAdmin: !!u.is_admin,
+          is_current: u.id === req.userId,
+          voice_daily_limit: limit,            // null = unlimited, 0 = disabled, n>0 = cap
+          voice_sent_today: sentToday,
+        };
+      }));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1903,6 +1968,35 @@ export function createApiRouter(db) {
       }
       db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(isAdmin ? 1 : 0, targetId);
       res.json({ success: true, isAdmin: !!isAdmin });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Admin: Set per-user daily voice-note limit ─────────
+  // Body: { limit: number | null }
+  //   null  → unlimited
+  //   0     → disable voice notes entirely for this user
+  //   n > 0 → cap that many voice notes per day
+  router.put('/admin/users/:userId/voice-limit', (req, res) => {
+    try {
+      if (!req.isAdmin) return res.status(403).json({ error: 'Admin access required' });
+      const targetId = req.params.userId;
+      const target = db.prepare('SELECT id FROM users WHERE id = ?').get(targetId);
+      if (!target) return res.status(404).json({ error: 'User not found' });
+
+      const { limit } = req.body || {};
+      let stored;
+      if (limit === null || limit === undefined || limit === '' || limit === -1) {
+        stored = '-1'; // unlimited
+      } else {
+        const n = parseInt(limit, 10);
+        if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'Limit must be a non-negative integer, or null for unlimited' });
+        stored = String(Math.min(n, 1000));
+      }
+      setConfig(db, targetId, 'voice_daily_limit', stored);
+      const effective = stored === '-1' ? null : parseInt(stored, 10);
+      res.json({ success: true, voice_daily_limit: effective, voice_sent_today: getVoiceSentTodayCount(db, targetId) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

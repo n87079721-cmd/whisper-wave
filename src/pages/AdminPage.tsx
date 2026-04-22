@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap, Ban, ChevronDown, ChevronUp, Send } from 'lucide-react';
+import { Users, Trash2, Loader2, Shield, RefreshCw, AlertTriangle, Bug, Clock, Bot, XCircle, CheckCircle2, MessageSquare, Zap, Ban, ChevronDown, ChevronUp, Send, Mic, Infinity as InfinityIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -18,6 +18,8 @@ interface UserAccount {
   is_current: boolean;
   is_admin?: boolean;
   isAdmin?: boolean;
+  voice_daily_limit?: number | null;
+  voice_sent_today?: number;
 }
 
 interface DebugEntry {
@@ -125,6 +127,8 @@ const AdminPage = () => {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [adminTogglingId, setAdminTogglingId] = useState<string | null>(null);
+  const [voiceSavingId, setVoiceSavingId] = useState<string | null>(null);
+  const [voiceDraft, setVoiceDraft] = useState<Record<string, string>>({});
 
   const [debugLogs, setDebugLogs] = useState<DebugEntry[]>([]);
   const [debugLoading, setDebugLoading] = useState(false);
@@ -222,6 +226,26 @@ const AdminPage = () => {
       toast.error(err.message || 'Failed to update admin');
     } finally {
       setAdminTogglingId(null);
+    }
+  };
+
+  const saveVoiceLimit = async (target: UserAccount, limit: number | null) => {
+    setVoiceSavingId(target.id);
+    try {
+      const res = await api.adminSetUserVoiceLimit(target.id, limit);
+      setUsers((prev) => prev.map((u) => (u.id === target.id
+        ? { ...u, voice_daily_limit: res.voice_daily_limit, voice_sent_today: res.voice_sent_today }
+        : u)));
+      setVoiceDraft((d) => { const next = { ...d }; delete next[target.id]; return next; });
+      const label =
+        res.voice_daily_limit === null ? 'unlimited' :
+        res.voice_daily_limit === 0 ? 'disabled' :
+        `${res.voice_daily_limit}/day`;
+      toast.success(`Voice notes set to ${label} for ${target.display_name || target.username}`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update voice limit');
+    } finally {
+      setVoiceSavingId(null);
     }
   };
 
@@ -356,6 +380,68 @@ const AdminPage = () => {
                       🧠 {u.memory_count || 0} memories • 🎯 {u.directive_count || 0} directives • 🎭 {u.persona_count || 0} personas
                     </p>
                   ) : null}
+                  {/* Per-user voice-note daily limit (admin) */}
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <Mic className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                    <span className="text-[10px] text-muted-foreground">Voice/day:</span>
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                      u.voice_daily_limit === null || u.voice_daily_limit === undefined
+                        ? 'bg-emerald-500/15 text-emerald-500'
+                        : u.voice_daily_limit === 0
+                          ? 'bg-destructive/15 text-destructive'
+                          : 'bg-primary/10 text-primary'
+                    }`}>
+                      {u.voice_daily_limit === null || u.voice_daily_limit === undefined
+                        ? 'Unlimited'
+                        : u.voice_daily_limit === 0
+                          ? 'Disabled'
+                          : `${u.voice_sent_today ?? 0} / ${u.voice_daily_limit}`}
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={1000}
+                      placeholder="set"
+                      value={voiceDraft[u.id] ?? ''}
+                      onChange={(e) => setVoiceDraft((d) => ({ ...d, [u.id]: e.target.value }))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const v = parseInt((voiceDraft[u.id] ?? '').toString(), 10);
+                          if (Number.isFinite(v) && v > 0) saveVoiceLimit(u, v);
+                        }
+                      }}
+                      className="w-14 h-6 px-1.5 rounded-md bg-secondary border border-border text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      disabled={voiceSavingId === u.id}
+                    />
+                    <button
+                      onClick={() => {
+                        const v = parseInt((voiceDraft[u.id] ?? '').toString(), 10);
+                        if (Number.isFinite(v) && v > 0) saveVoiceLimit(u, v);
+                        else toast.error('Enter a number greater than 0');
+                      }}
+                      disabled={voiceSavingId === u.id || !voiceDraft[u.id]}
+                      className="px-1.5 h-6 rounded-md text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-40"
+                    >
+                      Set
+                    </button>
+                    <button
+                      onClick={() => saveVoiceLimit(u, null)}
+                      disabled={voiceSavingId === u.id}
+                      className="flex items-center gap-0.5 px-1.5 h-6 rounded-md text-[10px] font-medium bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors disabled:opacity-40"
+                      title="Remove cap (unlimited)"
+                    >
+                      <InfinityIcon className="w-2.5 h-2.5" /> Unlimited
+                    </button>
+                    <button
+                      onClick={() => saveVoiceLimit(u, 0)}
+                      disabled={voiceSavingId === u.id}
+                      className="px-1.5 h-6 rounded-md text-[10px] font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-40"
+                      title="Block all voice notes for this account"
+                    >
+                      Disable
+                    </button>
+                    {voiceSavingId === u.id && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+                  </div>
                 </div>
                 <div className="flex-shrink-0 flex items-center gap-1">
                   {!u.is_current && (

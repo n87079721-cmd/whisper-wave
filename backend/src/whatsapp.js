@@ -2081,6 +2081,18 @@ function getPersonaVoice(db, userId, contactId) {
 function decideVoiceNote(db, userId, contactId, replyText) {
   // Master + contact toggles
   if (getConfigValue(db, userId, 'ai_voice_enabled', '0') !== '1') return { send: false, reason: 'global_disabled' };
+  // Admin-imposed account-wide daily VN cap (counts ALL voice sends, not just AI).
+  const acctLimitRaw = getConfigValue(db, userId, 'voice_daily_limit', '');
+  if (acctLimitRaw !== '' && acctLimitRaw !== '-1') {
+    const acctLimit = parseInt(acctLimitRaw, 10);
+    if (Number.isFinite(acctLimit) && acctLimit >= 0) {
+      if (acctLimit === 0) return { send: false, reason: 'account_voice_disabled' };
+      const sentTodayAll = db.prepare(
+        `SELECT COUNT(*) AS c FROM stats WHERE user_id = ? AND event = 'voice_sent' AND date(created_at) = date('now')`
+      ).get(userId)?.c || 0;
+      if (sentTodayAll >= acctLimit) return { send: false, reason: 'account_daily_limit_hit', sentTodayAll, acctLimit };
+    }
+  }
   const row = db.prepare("SELECT voice_enabled, voice_max_per_day, voice_bg_sound FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
   if (!row || row.voice_enabled !== 1) return { send: false, reason: 'contact_disabled' };
 
