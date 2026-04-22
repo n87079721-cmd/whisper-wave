@@ -6,6 +6,7 @@ import { api, type SyncDiagnostics, type Prompt } from '@/lib/api';
 import { toast } from 'sonner';
 import { Slider } from '@/components/ui/slider';
 import { useWhatsAppStatus, type SyncState } from '@/hooks/useWhatsAppStatus';
+import { LANGUAGES } from '@/lib/languages';
 
 const SPEED_OPTIONS = [
   { id: 'fast', label: 'Quick', desc: '3–10 mins', emoji: '⚡' },
@@ -50,6 +51,7 @@ const SettingsPage = () => {
   // Telegram bridge (button on sensitive alerts and reply previews). Empty
   // string = no override (falls back to persona/default voice).
   const [telegramVnVoiceId, setTelegramVnVoiceId] = useState('');
+  const [telegramVnVoiceLanguage, setTelegramVnVoiceLanguage] = useState('auto');
   const soundPreviewRef = useRef<HTMLAudioElement | null>(null);
 
   const togglePreview = (soundId: string) => {
@@ -140,6 +142,7 @@ const SettingsPage = () => {
       setVoiceBgVolume(Math.round((s.bgVolume ?? 0.15) * 100));
       setVoiceDefaultBgSound(s.defaultBgSound || 'none');
       setTelegramVnVoiceId(s.telegramVnVoiceId || '');
+      setTelegramVnVoiceLanguage((s as any).telegramVnVoiceLanguage || 'auto');
     }).catch(() => {});
     api.getVoices().then(vs => setAvailableVoices(vs.map((v: any) => ({ id: v.id, name: v.name })))).catch(() => {});
     api.getSounds().then(s => setAvailableSounds(s.custom)).catch(() => {});
