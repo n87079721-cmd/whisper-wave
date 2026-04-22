@@ -566,7 +566,11 @@ export function startTelegramPolling(db, userId, handlers) {
             if (msgText.startsWith('/login')) {
               const creds = handlers.getUserbotCreds?.() || null;
               handlers.debugLog?.('telegram_cmd_login', { hasCreds: !!creds });
-              await userbotStartLogin(userId, incomingChatId, sendBotMessage, creds);
+              // Fire-and-forget: startLogin awaits user text replies (phone/code/2FA)
+              // which are delivered by THIS same polling loop. Awaiting it here
+              // would deadlock the loop — the replies would never arrive.
+              userbotStartLogin(userId, incomingChatId, sendBotMessage, creds)
+                .catch(err => console.error(`[${userId}] userbot login error:`, err?.message));
               continue;
             }
             if (msgText.startsWith('/cancel')) {
@@ -578,7 +582,10 @@ export function startTelegramPolling(db, userId, handlers) {
               const recipient = msgText.replace(/^\/send\s*/, '').trim();
               handlers.debugLog?.('telegram_cmd_send', { recipient });
               if (handlers.onUserbotSend) {
-                await handlers.onUserbotSend(userId, recipient, sendBotMessage);
+                // Fire-and-forget — see /login note. /send awaits the pasted
+                // text reply which must be delivered by this polling loop.
+                handlers.onUserbotSend(userId, recipient, sendBotMessage)
+                  .catch(err => console.error(`[${userId}] userbot send error:`, err?.message));
               }
               continue;
             }
