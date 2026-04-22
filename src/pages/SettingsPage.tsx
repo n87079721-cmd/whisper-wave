@@ -589,28 +589,7 @@ const SettingsPage = () => {
                 <p className="text-[10px] text-muted-foreground">Currently: <span className="font-medium text-foreground">{activeHoursStart}</span> to <span className="font-medium text-foreground">{activeHoursEnd}</span> ({activeTimezone.split('/').pop()?.replace('_', ' ')})</p>
               </div>
 
-              {/* System Prompt */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-muted-foreground" />
-                  <label className="text-sm font-medium text-foreground">AI System Prompt</label>
-                </div>
-                <p className="text-xs text-muted-foreground">Leave empty for the default celebrity persona.</p>
-                <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)}
-                  placeholder="Leave empty for default celebrity persona, or customize..."
-                  rows={4}
-                  className="w-full px-4 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none" />
-                <button onClick={async () => {
-                  setSavingPrompt(true);
-                  try { await api.setConfig('ai_system_prompt', systemPrompt); toast.success('System prompt saved'); }
-                  catch { toast.error('Failed to save prompt'); }
-                  finally { setSavingPrompt(false); }
-                }} disabled={savingPrompt}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-40">
-                  {savingPrompt ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  {savingPrompt ? 'Saving...' : 'Save Prompt'}
-                </button>
-              </div>
+              {/* System Prompt removed — AI replies only when a persona is assigned to the contact via the Prompt Library. */}
 
               {/* Prompt Library */}
               <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
