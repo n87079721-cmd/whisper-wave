@@ -1311,8 +1311,10 @@ export function createApiRouter(db) {
       const { text } = req.body;
       if (!text) return res.status(400).json({ error: 'Missing text' });
 
-      const apiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
-      if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured.' });
+      // Manual Enhance button → use the ADMIN's OpenAI key + global prompt
+      // so every account produces the same enhancement style.
+      const apiKey = getAdminEnhanceOpenAIKey(db, req.userId);
+      if (!apiKey) return res.status(400).json({ error: 'Admin OpenAI API key not configured. Ask an admin to set it.' });
 
       const enhanced = await enhanceTextForVoice(apiKey, text);
 
