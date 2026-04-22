@@ -651,6 +651,7 @@ export function stopTelegramPolling(userId) {
   if (state) {
     state.polling = false;
     state.awaitingCustom.clear();
+    state.awaitingVnText?.clear?.();
   }
 }
 
