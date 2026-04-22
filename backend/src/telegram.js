@@ -342,8 +342,12 @@ export function startTelegramPolling(db, userId, handlers) {
           // Handle callback queries (button presses)
           if (update.callback_query) {
             const cbData = update.callback_query.data;
-            const [action, ...jidParts] = cbData.split('_');
-            const jid = jidParts.join('_');
+            const [action, ...rest] = cbData.split('_');
+            const tokenOrJid = rest.join('_');
+            // New format: tokenOrJid is a short token. Old format (back-compat
+            // for in-flight previews after deploy): tokenOrJid is the jid itself.
+            const resolvedJid = resolveJidFromToken(userId, tokenOrJid) || tokenOrJid;
+            const jid = resolvedJid;
 
             // Acknowledge the callback
             await telegramRequest(token, 'answerCallbackQuery', {
@@ -379,8 +383,18 @@ export function startTelegramPolling(db, userId, handlers) {
                 text: `🎤 Generating voice note...`,
               });
               try {
-                const result = await handlers.onSendVN(jid);
+                const result = await handlers.onSendVN(jid, tokenOrJid);
                 if (result && result.ok) {
+                  // Strip the inline keyboard from the original preview so it
+                  // cannot be re-tapped (prevents accidental duplicate sends).
+                  const msgChatId = update.callback_query.message?.chat?.id;
+                  const msgId = update.callback_query.message?.message_id;
+                  if (msgChatId && msgId) {
+                    telegramRequest(token, 'editMessageReplyMarkup', {
+                      chat_id: msgChatId, message_id: msgId,
+                      reply_markup: { inline_keyboard: [] },
+                    }).catch(() => {});
+                  }
                   await telegramRequest(token, 'sendMessage', {
                     chat_id: incomingChatId,
                     text: `✅ Voice note sent.`,
