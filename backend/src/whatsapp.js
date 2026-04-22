@@ -6,7 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
-import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary } from './ai.js';
+import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory } from './ai.js';
 import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply } from './telegram.js';
 import { transcribeAudio, generateVoiceNote } from './elevenlabs.js';
 
