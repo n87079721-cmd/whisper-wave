@@ -1973,6 +1973,35 @@ export function createApiRouter(db) {
     }
   });
 
+  // ── Admin: Set per-user daily voice-note limit ─────────
+  // Body: { limit: number | null }
+  //   null  → unlimited
+  //   0     → disable voice notes entirely for this user
+  //   n > 0 → cap that many voice notes per day
+  router.put('/admin/users/:userId/voice-limit', (req, res) => {
+    try {
+      if (!req.isAdmin) return res.status(403).json({ error: 'Admin access required' });
+      const targetId = req.params.userId;
+      const target = db.prepare('SELECT id FROM users WHERE id = ?').get(targetId);
+      if (!target) return res.status(404).json({ error: 'User not found' });
+
+      const { limit } = req.body || {};
+      let stored;
+      if (limit === null || limit === undefined || limit === '' || limit === -1) {
+        stored = '-1'; // unlimited
+      } else {
+        const n = parseInt(limit, 10);
+        if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'Limit must be a non-negative integer, or null for unlimited' });
+        stored = String(Math.min(n, 1000));
+      }
+      setConfig(db, targetId, 'voice_daily_limit', stored);
+      const effective = stored === '-1' ? null : parseInt(stored, 10);
+      res.json({ success: true, voice_daily_limit: effective, voice_sent_today: getVoiceSentTodayCount(db, targetId) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Admin: Debug logs ─────────────────────────────────
   router.get('/admin/debug-logs', (req, res) => {
     try {
