@@ -3621,7 +3621,8 @@ export async function triggerConversationSummary(userId, db, contactId, jid, con
 
 // ── Conversation Starter Loop ──
 
-const starterIntervals = new Map(); // userId -> timer
+const starterIntervals = new Map();      // userId -> 2h setInterval handle
+const starterKickoffTimeouts = new Map(); // userId -> 5min setTimeout handle
 
 export function startConversationStarterLoop(userId, db) {
   stopConversationStarterLoop(userId);
@@ -3692,12 +3693,20 @@ export function startConversationStarterLoop(userId, db) {
     }
   };
 
+  // Always clear any prior timers first so repeated calls (e.g. settings save)
+  // never stack multiple intervals/timeouts for the same user.
+  stopConversationStarterLoop(userId);
+
   // Run every 2 hours
   const interval = setInterval(run, 2 * 60 * 60 * 1000);
   starterIntervals.set(userId, interval);
 
-  // Also run once after 5 minutes
-  setTimeout(run, 5 * 60 * 1000);
+  // Also run once after 5 minutes — track the handle so logout/disable cancels it.
+  const kickoff = setTimeout(() => {
+    starterKickoffTimeouts.delete(userId);
+    run();
+  }, 5 * 60 * 1000);
+  starterKickoffTimeouts.set(userId, kickoff);
 }
 
 export function stopConversationStarterLoop(userId) {
@@ -3705,6 +3714,11 @@ export function stopConversationStarterLoop(userId) {
   if (timer) {
     clearInterval(timer);
     starterIntervals.delete(userId);
+  }
+  const kickoff = starterKickoffTimeouts.get(userId);
+  if (kickoff) {
+    clearTimeout(kickoff);
+    starterKickoffTimeouts.delete(userId);
   }
 }
 
