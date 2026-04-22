@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation, streamMediaForMessage, cancelAllPendingReplies, cancelPendingReplyForContact, triggerConversationSummary } from './whatsapp.js';
 import { initWhatsApp } from './whatsapp.js';
-import { archiveChat, markChatRead, syncArchiveStates } from './whatsapp.js';
+import { archiveChat, markChatRead, syncArchiveStates, enhanceTextForVoice } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio, BG_SOUND_PROMPTS } from './elevenlabs.js';
 import multer from 'multer';
 import { execSync } from 'child_process';
@@ -1102,7 +1102,12 @@ export function createApiRouter(db) {
       const wa = getWA(req);
       const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId });
       const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
-      const audioBuffer = await generateVoiceNote(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
+      // ALWAYS enhance the text so the VN sounds like a real voice note
+      // (expression tags, fillers, pacing). enhanceTextForVoice safely
+      // returns the original text if the OpenAI call fails or no key is set.
+      const openaiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
+      const speakable = openaiKey ? await enhanceTextForVoice(openaiKey, text) : text;
+      const audioBuffer = await generateVoiceNote(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
 
       const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
       const msgId = getSentMessageId(sendResult);

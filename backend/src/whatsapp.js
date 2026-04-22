@@ -2138,7 +2138,7 @@ function decideVoiceNote(db, userId, contactId, replyText) {
 }
 
 // Rewrite reply text via OpenAI to add ElevenLabs v3 expression tags (mirrors /enhance route).
-async function enhanceTextForVoice(openaiKey, text) {
+export async function enhanceTextForVoice(openaiKey, text) {
   const cleanedInput = String(text).replace(/\[[^\]\n]{1,40}\]/g, ' ').replace(/\s+/g, ' ').trim() || String(text).trim();
   const wordCount = cleanedInput.split(/\s+/).length;
   const tagRange = wordCount <= 15 ? '2-3' : wordCount <= 40 ? '4-6' : wordCount <= 80 ? '6-10' : '8-15';
@@ -3571,7 +3571,9 @@ export function getTelegramCallbackHandlers(userId, db) {
         const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
         if (!elKey) return { ok: false, reason: 'ElevenLabs API key not configured' };
 
-        const openaiKey = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId)?.value;
+        const openaiKey =
+          (db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId)?.value)
+          || process.env.OPENAI_API_KEY;
 
         // Voice selection: persona voice → contact voice override is implicit via persona →
         // global default voice → hard-coded fallback (George).
@@ -3585,8 +3587,13 @@ export function getTelegramCallbackHandlers(userId, db) {
         const bgSound = bgRow?.voice_bg_sound && bgRow.voice_bg_sound !== 'none' ? bgRow.voice_bg_sound : null;
         const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
 
-        // Make the text speakable (only if we have an OpenAI key — otherwise raw).
+        // ALWAYS run the text through enhanceTextForVoice so VNs sound like
+        // a real voice note (expression tags, fillers, pacing). The helper
+        // safely returns the original text if anything goes wrong.
         const speakable = openaiKey ? await enhanceTextForVoice(openaiKey, replyText) : replyText;
+        if (!openaiKey) {
+          debugLog(db, userId, 'telegram_vn_enhance_skipped', { jid, reason: 'no_openai_key' });
+        }
 
         const audioBuffer = await generateVoiceNote(
           elKey, speakable, voiceId, modelId, bgSound,
