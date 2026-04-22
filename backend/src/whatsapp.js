@@ -2143,24 +2143,29 @@ async function enhanceTextForVoice(openaiKey, text) {
   const wordCount = cleanedInput.split(/\s+/).length;
   const tagRange = wordCount <= 15 ? '2-3' : wordCount <= 40 ? '4-6' : wordCount <= 80 ? '6-10' : '8-15';
   const systemPrompt = `Rewrite this text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note. Use ${tagRange} expression tags total (e.g. [happy] [pause] [sighs] [laughs softly] [hesitates]). Add at least 2 pacing cues. Use casual contractions, fillers (like, you know, honestly), self-corrections, trailing thoughts. Keep meaning identical. Output ONLY the rewritten text — no quotes, no explanation.`;
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Rewrite this for a natural WhatsApp voice note:\n\n${cleanedInput}` },
-        ],
-        temperature: 1.1,
-        max_tokens: 1024,
-      }),
-    });
-    if (!response.ok) return text;
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content?.trim() || text;
-  } catch { return text; }
+  if (!openaiKey) throw new Error('OpenAI API key required to enhance VN text');
+  // No silent fallback — if enhance fails, throw so the caller aborts the VN.
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Rewrite this for a natural WhatsApp voice note:\n\n${cleanedInput}` },
+      ],
+      temperature: 1.1,
+      max_tokens: 1024,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`enhanceTextForVoice failed: HTTP ${response.status} ${body.slice(0, 200)}`);
+  }
+  const data = await response.json();
+  const out = data.choices?.[0]?.message?.content?.trim();
+  if (!out) throw new Error('enhanceTextForVoice returned empty content');
+  return out;
 }
 
 // Persist outgoing voice note buffer to disk like the manual send route does.
