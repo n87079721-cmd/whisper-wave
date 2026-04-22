@@ -210,6 +210,9 @@ function ensureCurrentTables(db) {
     if (!cols.has('memory_enabled')) {
       db.exec("ALTER TABLE contacts ADD COLUMN memory_enabled INTEGER DEFAULT 1");
     }
+    if (!cols.has('reply_language')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN reply_language TEXT DEFAULT NULL");
+    }
   } catch {}
 
   try {
