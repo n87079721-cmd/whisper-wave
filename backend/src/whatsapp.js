@@ -3731,7 +3731,63 @@ export function stopConversationStarterLoop(userId) {
 // ── Telegram callback handlers for reply preview ──
 
 export function getTelegramCallbackHandlers(userId, db) {
+  // Userbot is admin-only. Compute once per handler creation; the bot-poll
+  // loop also re-checks admin per update so demoting takes effect quickly.
+  const adminRow = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
+  const isAdmin = !!adminRow?.is_admin;
+
   return {
+    isAdmin,
+    userbotEnabled: !!(process.env.TELEGRAM_API_ID && process.env.TELEGRAM_API_HASH),
+
+    /**
+     * /send handler: parses recipient, prompts user to paste text, generates
+     * ElevenLabs VN (tag-aware), sends via userbot, wipes session.
+     */
+    onUserbotSend: async (uid, recipientRaw, sendBotMessage) => {
+      const { startSend: ubStartSend } = await import('./userbot.js');
+      await ubStartSend(uid, recipientRaw, sendBotMessage, async (pastedText) => {
+        // Same generation pipeline as the WhatsApp Send-as-VN button:
+        //   1. Tag detection → skip enhance if tags present
+        //   2. Else admin-enhance with shared admin OpenAI key
+        //   3. Generate via ElevenLabs v3 with the user's Telegram VN voice
+        //   4. Apply background sound if configured
+        const elKey = getConfigValue(db, uid, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
+        if (!elKey) throw new Error('ElevenLabs API key not configured');
+
+        const hasV3Tags = /\[[A-Za-z][A-Za-z0-9 _-]{0,28}\]/.test(pastedText);
+        let speakable = pastedText;
+        if (!hasV3Tags) {
+          const openaiKey = getAdminEnhanceOpenAIKey(db);
+          if (!openaiKey) throw new Error('No tags found and admin OpenAI key is not configured for auto-enhancement.');
+          speakable = await enhanceTextForVoice(openaiKey, pastedText);
+        }
+
+        // Voice: per-user Telegram VN voice → global default → fallback.
+        const telegramVoice = getConfigValue(db, uid, 'ai_telegram_vn_voice_id', '');
+        const defaultVoiceId = getConfigValue(db, uid, 'ai_default_voice_id', '') || 'JBFqnCBsd6RMkjVDRZzb';
+        const voiceId = telegramVoice || defaultVoiceId;
+
+        // Background sound: account-level default only (no per-contact concept here)
+        let bgSound = getConfigValue(db, uid, 'ai_voice_default_bg_sound', '') || 'none';
+        if (bgSound === 'none') bgSound = null;
+        if (bgSound?.startsWith('custom-')) {
+          const owned = db.prepare('SELECT 1 FROM custom_sounds WHERE user_id = ? AND sound_id = ?').get(uid, bgSound);
+          if (!owned) bgSound = null;
+        }
+        const bgVolume = parseFloat(getConfigValue(db, uid, 'ai_voice_bg_volume', '0.15'));
+
+        debugLog(db, uid, 'userbot_vn_generate', {
+          recipient: recipientRaw, voiceId, bgSound: bgSound || 'none',
+          hadTags: hasV3Tags, enhanced: speakable !== pastedText,
+          textPreview: pastedText.slice(0, 80),
+          speakablePreview: speakable.slice(0, 120),
+        });
+
+        return generateVoiceNote(elKey, speakable, voiceId, null, bgSound, Number.isFinite(bgVolume) ? bgVolume : 0.15);
+      });
+    },
+
     onCancel: (jid) => {
       clearPendingAutoReply(userId, jid);
       const contact = db.prepare('SELECT name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
