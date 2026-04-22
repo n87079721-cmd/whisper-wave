@@ -7,7 +7,19 @@
 const TELEGRAM_API = 'https://api.telegram.org/bot';
 
 // Per-user bot state
-const botInstances = new Map(); // userId -> { polling, offset, awaitingCustom: Map<jid, true>, lastReplies: Map<jid, string> }
+const botInstances = new Map();
+// userId -> {
+//   polling, offset,
+//   awaitingCustom: Map<jid, true>,
+//   lastReplies: Map<jid, string>,             // back-compat: latest preview text per jid (used by /custom edit)
+//   previews: Map<token, { jid, text, messages: [{chat_id, message_id}] }>,  // token-keyed previews
+//   activeTokenByJid: Map<jid, token>,        // newest token for a jid (so we can disable older ones)
+//   vnInFlight: Set<token>,                    // tokens currently being processed
+// }
+
+function makeToken() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
 
 function parseChatIds(raw) {
   if (!raw) return [];
@@ -34,11 +46,21 @@ function getBotConfig(db, userId) {
 
 function getBotState(userId) {
   if (!botInstances.has(userId)) {
-    botInstances.set(userId, { polling: false, offset: 0, awaitingCustom: new Map(), lastReplies: new Map() });
+    botInstances.set(userId, {
+      polling: false, offset: 0,
+      awaitingCustom: new Map(),
+      lastReplies: new Map(),
+      previews: new Map(),
+      activeTokenByJid: new Map(),
+      vnInFlight: new Set(),
+    });
   }
   const inst = botInstances.get(userId);
   if (!inst.lastReplies) inst.lastReplies = new Map();
   if (!inst.awaitingCustom) inst.awaitingCustom = new Map();
+  if (!inst.previews) inst.previews = new Map();
+  if (!inst.activeTokenByJid) inst.activeTokenByJid = new Map();
+  if (!inst.vnInFlight) inst.vnInFlight = new Set();
   return inst;
 }
 
@@ -53,45 +75,57 @@ export function getLastPreviewedReply(userId, jid) {
 }
 
 /**
- * Atomically consume a previewed reply for a jid. Returns the text if it was
- * still available (and removes it so it can never be sent twice), or null if
- * it was already consumed / never existed. This is the idempotency guard for
- * the "🎤 Send as VN" button — re-tapping the same Telegram message (even days
- * later) will return null instead of sending the VN again.
+ * Token-based claim. Each Telegram preview message carries its own short token,
+ * so re-tapping an OLD preview's button (after a newer reply was generated) will
+ * NOT pick up the newer text — it will fail cleanly with "expired".
+ * Returns { text, jid, release(commit) } or { busy: true } / { text: null }.
  */
-export function consumeLastPreviewedReply(userId, jid) {
+export function claimPreviewByToken(userId, token) {
   const state = botInstances.get(userId);
-  if (!state?.lastReplies) return null;
-  const text = state.lastReplies.get(jid);
-  if (!text) return null;
-  state.lastReplies.delete(jid);
-  return text;
-}
-
-/**
- * Try to claim the previewed reply for a jid for sending. Returns the text and
- * a release() function. Until release(commit=true) is called the preview stays
- * cached so a retry/re-tap can succeed if the in-flight send fails. If another
- * caller already holds the lock, returns { busy: true } so the UI can tell the
- * user "VN already in progress" instead of "already sent".
- */
-export function claimLastPreviewedReply(userId, jid) {
-  const state = botInstances.get(userId);
-  if (!state?.lastReplies) return { text: null };
-  if (!state.vnInFlight) state.vnInFlight = new Set();
-  if (state.vnInFlight.has(jid)) return { busy: true };
-  const text = state.lastReplies.get(jid);
-  if (!text) return { text: null };
-  state.vnInFlight.add(jid);
+  if (!state?.previews) return { text: null };
+  const entry = state.previews.get(token);
+  if (!entry) return { text: null };
+  if (state.vnInFlight.has(token)) return { busy: true };
+  state.vnInFlight.add(token);
   return {
-    text,
+    text: entry.text,
+    jid: entry.jid,
+    messages: entry.messages,
     release: (commit) => {
       const s = botInstances.get(userId);
       if (!s) return;
-      s.vnInFlight?.delete(jid);
-      if (commit) s.lastReplies?.delete(jid);
+      s.vnInFlight.delete(token);
+      if (commit) {
+        s.previews.delete(token);
+        // Only clear activeTokenByJid if this WAS the active one
+        if (s.activeTokenByJid.get(entry.jid) === token) {
+          s.activeTokenByJid.delete(entry.jid);
+        }
+      }
     },
   };
+}
+
+/** Look up just the jid for a token (used by Cancel/Rewrite/Custom callbacks). */
+export function resolveJidFromToken(userId, token) {
+  const state = botInstances.get(userId);
+  if (!state?.previews) return null;
+  return state.previews.get(token)?.jid || null;
+}
+
+/**
+ * Disable an old preview's inline keyboard in Telegram so it can no longer be
+ * tapped. Best-effort — silently ignores errors (message too old, deleted, etc.).
+ */
+async function disablePreviewMessages(token, messages) {
+  if (!messages?.length) return;
+  await Promise.all(messages.map(async ({ chat_id, message_id }) => {
+    try {
+      await telegramRequest(token, 'editMessageReplyMarkup', {
+        chat_id, message_id, reply_markup: { inline_keyboard: [] },
+      });
+    } catch {}
+  }));
 }
 
 async function telegramRequest(token, method, body = {}) {
@@ -114,9 +148,24 @@ export async function sendReplyPreview(db, userId, contactName, replyText, jid, 
   const { token, chatIds } = getBotConfig(db, userId);
   if (!token || chatIds.length === 0) return;
 
-  // Remember this draft so /custom can edit/extend it later
   const state = getBotState(userId);
+  // Remember this draft so /custom can edit/extend it later (back-compat helper)
   state.lastReplies.set(jid, replyText);
+
+  // Disable any prior preview for this jid so its buttons can't fire wrong text.
+  const oldToken = state.activeTokenByJid.get(jid);
+  if (oldToken) {
+    const old = state.previews.get(oldToken);
+    state.previews.delete(oldToken);
+    if (old?.messages?.length) {
+      disablePreviewMessages(token, old.messages).catch(() => {});
+    }
+  }
+
+  // Mint a fresh token for THIS preview
+  const previewToken = makeToken();
+  state.activeTokenByJid.set(jid, previewToken);
+  state.previews.set(previewToken, { jid, text: replyText, messages: [] });
 
   // Show which persona produced this reply so the user can verify the right
   // character/prompt is active for this contact.
@@ -125,24 +174,29 @@ export async function sendReplyPreview(db, userId, contactName, replyText, jid, 
   const keyboard = {
     inline_keyboard: [
       [
-        { text: '❌ Cancel', callback_data: `cancel_${jid}` },
-        { text: '🔄 Rewrite', callback_data: `rewrite_${jid}` },
-        { text: '✏️ Custom', callback_data: `custom_${jid}` },
+        { text: '❌ Cancel', callback_data: `cancel_${previewToken}` },
+        { text: '🔄 Rewrite', callback_data: `rewrite_${previewToken}` },
+        { text: '✏️ Custom', callback_data: `custom_${previewToken}` },
       ],
       [
-        { text: '🎤 Send as VN', callback_data: `vn_${jid}` },
+        { text: '🎤 Send as VN', callback_data: `vn_${previewToken}` },
       ],
     ],
   };
 
   await Promise.all(chatIds.map(async (cid) => {
     try {
-      await telegramRequest(token, 'sendMessage', {
+      const res = await telegramRequest(token, 'sendMessage', {
         chat_id: cid,
         text,
         parse_mode: 'Markdown',
         reply_markup: keyboard,
       });
+      const message_id = res?.result?.message_id;
+      if (message_id) {
+        const entry = state.previews.get(previewToken);
+        if (entry) entry.messages.push({ chat_id: cid, message_id });
+      }
     } catch (err) {
       console.error(`[${userId}] Failed to send Telegram preview to ${cid}:`, err?.message);
     }
@@ -288,8 +342,12 @@ export function startTelegramPolling(db, userId, handlers) {
           // Handle callback queries (button presses)
           if (update.callback_query) {
             const cbData = update.callback_query.data;
-            const [action, ...jidParts] = cbData.split('_');
-            const jid = jidParts.join('_');
+            const [action, ...rest] = cbData.split('_');
+            const tokenOrJid = rest.join('_');
+            // New format: tokenOrJid is a short token. Old format (back-compat
+            // for in-flight previews after deploy): tokenOrJid is the jid itself.
+            const resolvedJid = resolveJidFromToken(userId, tokenOrJid) || tokenOrJid;
+            const jid = resolvedJid;
 
             // Acknowledge the callback
             await telegramRequest(token, 'answerCallbackQuery', {
@@ -325,8 +383,18 @@ export function startTelegramPolling(db, userId, handlers) {
                 text: `🎤 Generating voice note...`,
               });
               try {
-                const result = await handlers.onSendVN(jid);
+                const result = await handlers.onSendVN(jid, tokenOrJid);
                 if (result && result.ok) {
+                  // Strip the inline keyboard from the original preview so it
+                  // cannot be re-tapped (prevents accidental duplicate sends).
+                  const msgChatId = update.callback_query.message?.chat?.id;
+                  const msgId = update.callback_query.message?.message_id;
+                  if (msgChatId && msgId) {
+                    telegramRequest(token, 'editMessageReplyMarkup', {
+                      chat_id: msgChatId, message_id: msgId,
+                      reply_markup: { inline_keyboard: [] },
+                    }).catch(() => {});
+                  }
                   await telegramRequest(token, 'sendMessage', {
                     chat_id: incomingChatId,
                     text: `✅ Voice note sent.`,
