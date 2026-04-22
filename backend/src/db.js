@@ -207,6 +207,9 @@ function ensureCurrentTables(db) {
     if (!cols.has('last_summary_at')) {
       db.exec("ALTER TABLE contacts ADD COLUMN last_summary_at TEXT");
     }
+    if (!cols.has('memory_enabled')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN memory_enabled INTEGER DEFAULT 1");
+    }
   } catch {}
 
   try {

@@ -79,6 +79,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [contactAiEnabled, setContactAiEnabled] = useState(true);
   const [contactAutoInitiate, setContactAutoInitiate] = useState(false);
   const [savingMemory, setSavingMemory] = useState(false);
+  const [contactMemoryEnabled, setContactMemoryEnabled] = useState(true);
+  const [lastSummaryAt, setLastSummaryAt] = useState<string | null>(null);
+  const [summarizingNow, setSummarizingNow] = useState(false);
   selectedContactRef.current = selectedContact;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -308,11 +311,15 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setContactDirective(data.active_directive || '');
       setContactDirectiveExpires(data.directive_expires || '');
       setContactAiEnabled(data.ai_enabled !== 0);
+      setContactMemoryEnabled(data.memory_enabled !== 0);
+      setLastSummaryAt(data.last_summary_at || null);
     }).catch(() => {
       setContactMemory('');
       setContactDirective('');
       setContactDirectiveExpires('');
       setContactAiEnabled(true);
+      setContactMemoryEnabled(true);
+      setLastSummaryAt(null);
     });
     api.getContactAutoInitiate(selectedContact.id).then(data => {
       setContactAutoInitiate(data.autoInitiate);
@@ -1249,34 +1256,87 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
                         <p className="text-sm font-medium text-foreground">Memory Notes</p>
-                        {contactMemory && (
-                          <button
-                            onClick={async () => {
-                              setContactMemory('');
-                              await api.updateContactMemory(selectedContact.id, '');
-                              toast.success('Memory cleared');
-                            }}
-                            className="text-xs text-destructive hover:underline"
-                          >Clear</button>
-                        )}
+                        <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                            <span>{contactMemoryEnabled ? 'On' : 'Off'}</span>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const newVal = !contactMemoryEnabled;
+                                setContactMemoryEnabled(newVal);
+                                await api.toggleContactMemory(selectedContact.id, newVal);
+                                toast.success(newVal ? 'Memory enabled for this chat' : 'Memory disabled — AI will not remember or summarize this chat');
+                              }}
+                              className={`w-9 h-5 rounded-full transition-colors relative ${contactMemoryEnabled ? 'bg-primary' : 'bg-muted'}`}
+                            >
+                              <span className={`block w-4 h-4 rounded-full bg-background shadow-sm transition-transform ${contactMemoryEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                            </button>
+                          </label>
+                          {contactMemory && (
+                            <button
+                              onClick={async () => {
+                                setContactMemory('');
+                                await api.updateContactMemory(selectedContact.id, '');
+                                toast.success('Memory cleared');
+                              }}
+                              className="text-xs text-destructive hover:underline"
+                            >Clear</button>
+                          )}
+                        </div>
                       </div>
-                      <p className="text-xs text-muted-foreground mb-1.5">Persistent context the AI remembers about this person</p>
+                      <p className="text-xs text-muted-foreground mb-1.5">
+                        Persistent context the AI remembers about this person.
+                        {lastSummaryAt && (
+                          <span className="block mt-0.5 italic">
+                            Last summarized: {new Date(lastSummaryAt + (lastSummaryAt.endsWith('Z') ? '' : 'Z')).toLocaleString()}
+                          </span>
+                        )}
+                      </p>
                       <textarea
                         value={contactMemory}
                         onChange={(e) => setContactMemory(e.target.value)}
                         placeholder="e.g. We've been planning a trip to Miami. They have a dog named Max..."
                         className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[100px] resize-y placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                        disabled={!contactMemoryEnabled}
                       />
-                      <button
-                        disabled={savingMemory}
-                        onClick={async () => {
-                          setSavingMemory(true);
-                          await api.updateContactMemory(selectedContact.id, contactMemory);
-                          setSavingMemory(false);
-                          toast.success('Memory saved');
-                        }}
-                        className="mt-1.5 px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                      >{savingMemory ? 'Saving...' : 'Save Memory'}</button>
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <button
+                          disabled={savingMemory}
+                          onClick={async () => {
+                            setSavingMemory(true);
+                            await api.updateContactMemory(selectedContact.id, contactMemory);
+                            setSavingMemory(false);
+                            toast.success('Memory saved');
+                          }}
+                          className="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                        >{savingMemory ? 'Saving...' : 'Save Memory'}</button>
+                        <button
+                          disabled={summarizingNow || !contactMemoryEnabled}
+                          onClick={async () => {
+                            setSummarizingNow(true);
+                            try {
+                              const res = await api.summarizeContactNow(selectedContact.id);
+                              if (res.success) {
+                                setContactMemory(res.memory || '');
+                                setLastSummaryAt(res.last_summary_at || null);
+                                toast.success('Memory updated from recent messages');
+                              } else {
+                                const msg = res.reason === 'too_few_messages' || res.reason === 'not_enough_new_messages'
+                                  ? 'Not enough recent messages to summarize yet'
+                                  : res.reason === 'memory_disabled'
+                                  ? 'Memory is disabled for this chat'
+                                  : 'Could not summarize right now';
+                                toast.error(msg);
+                              }
+                            } catch {
+                              toast.error('Failed to summarize');
+                            } finally {
+                              setSummarizingNow(false);
+                            }
+                          }}
+                          className="px-3 py-1.5 text-xs rounded-md border border-input bg-background hover:bg-secondary disabled:opacity-50"
+                        >{summarizingNow ? 'Summarizing…' : 'Summarize now'}</button>
+                      </div>
                     </div>
 
                     {/* Directive */}
