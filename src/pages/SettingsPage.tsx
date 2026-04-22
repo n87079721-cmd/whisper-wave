@@ -130,6 +130,12 @@ const SettingsPage = () => {
     api.getConfig('telegram_chat_id').then(data => {
       if (data.exists) setTelegramChatIdExists(true);
     }).catch(() => {});
+    api.getConfig('telegram_userbot_api_id').then(data => {
+      if (data.exists) setUserbotApiIdExists(true);
+    }).catch(() => {});
+    api.getConfig('telegram_userbot_api_hash').then(data => {
+      if (data.exists) setUserbotApiHashExists(true);
+    }).catch(() => {});
     api.getConfig('sensitive_topic_detection').then(data => {
       setSensitiveTopicEnabled(data.exists ? data.value !== 'false' : true);
     }).catch(() => {});
