@@ -64,6 +64,7 @@ function getBotState(userId) {
       activeTokenByJid: new Map(),
       vnInFlight: new Set(),
       sensitiveAlerts: new Map(),
+      awaitingVnText: new Map(),
     });
   }
   const inst = botInstances.get(userId);
@@ -73,6 +74,7 @@ function getBotState(userId) {
   if (!inst.activeTokenByJid) inst.activeTokenByJid = new Map();
   if (!inst.vnInFlight) inst.vnInFlight = new Set();
   if (!inst.sensitiveAlerts) inst.sensitiveAlerts = new Map();
+  if (!inst.awaitingVnText) inst.awaitingVnText = new Map();
   return inst;
 }
 
