@@ -3851,10 +3851,21 @@ export function getTelegramCallbackHandlers(userId, db) {
         const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
         if (!elKey) return { ok: false, reason: 'ElevenLabs API key not configured' };
 
-        // Enhance ALWAYS uses the admin's OpenAI key (and admin enhance prompt),
-        // regardless of which user owns this Telegram bridge. Per product rule.
-        const openaiKey = getAdminEnhanceOpenAIKey(db);
-        if (!openaiKey) return { ok: false, reason: 'Admin OpenAI API key not configured — cannot enhance VN text.' };
+        // Tag detection: if the pasted/drafted text already contains v3 inline
+        // tags like [whisper], [laughs], [excited] — respect the user's intent
+        // and send it raw. Only fall back to admin-enhance when NO tags exist.
+        // Regex matches single-word bracket tags up to 30 chars (avoids false
+        // positives like long-form bracketed quotes).
+        const hasV3Tags = /\[[A-Za-z][A-Za-z0-9 _-]{0,28}\]/.test(replyText);
+
+        // Enhance (when needed) ALWAYS uses the admin's OpenAI key + admin
+        // enhance prompt, regardless of which user owns this Telegram bridge.
+        // Only required when the text has no tags — pre-tagged text skips it.
+        let openaiKey = null;
+        if (!hasV3Tags) {
+          openaiKey = getAdminEnhanceOpenAIKey(db);
+          if (!openaiKey) return { ok: false, reason: 'No tags found in text and admin OpenAI key is not configured for auto-enhancement.' };
+        }
 
         // Voice selection priority for Telegram-triggered VNs:
         //   1. Per-account "Telegram VN Voice" override (Settings page) — explicit
@@ -3886,9 +3897,12 @@ export function getTelegramCallbackHandlers(userId, db) {
         }
         const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
 
-        // ALWAYS enhance — no raw-text fallback. enhanceTextForVoice throws on
-        // failure, which the surrounding try/catch turns into a Telegram error.
-        const speakable = await enhanceTextForVoice(openaiKey, replyText);
+        // Tag-aware processing:
+        //   - If user already wrote tags → pass through as-is (their tags win).
+        //   - If no tags → call admin-enhance to add expressive v3 tags first.
+        const speakable = hasV3Tags
+          ? replyText
+          : await enhanceTextForVoice(openaiKey, replyText);
 
         const audioBuffer = await generateVoiceNote(
           elKey, speakable, voiceId, modelId, bgSound,
@@ -3905,6 +3919,7 @@ export function getTelegramCallbackHandlers(userId, db) {
           enhancedTagCount: enhanceTagCount,
           hasEnhancedTags: enhanceTagCount > 0,
           enhanced: speakable !== replyText,
+          enhanceSkippedReason: hasV3Tags ? 'user_tags_present' : null,
         });
 
         const sent = await sendVoiceNote(userId, jid, audioBuffer);
