@@ -212,7 +212,7 @@ export function shouldAlsoReplyAfterReaction(unrepliedCount = 0, messageText = '
  * @param {string} contactName - Name of the contact for context
  * @returns {Promise<string>} The generated reply text
  */
-export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions, previousReply, timezone } = {}) {
+export async function generateReply(apiKey, messages, systemPrompt, contactName, { unrepliedCount, mode, customInstructions, previousReply, timezone, replyLanguage } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
   const tz = timezone || 'America/New_York';
 
@@ -224,6 +224,16 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
 
   if (hasCustomPersona) {
     prompt = `🔒 PRIORITY PERSONA — FOLLOW THIS EXACTLY. This persona, memory, and behavior instruction OVERRIDE every other style guideline. If anything below contradicts these, the persona wins.\n\n${prompt}\n\n🔒 END PRIORITY PERSONA.\n\n📚 BEFORE YOU REPLY — READ THE PERSONA CAREFULLY.\n• Treat every fact in the persona above as TRUE about you (your name, schedule, tour dates, locations, job, family, hobbies, opinions, dislikes, etc.).\n• If the contact asks ANYTHING factual ("when is your tour?", "where are you?", "what do you do?", "are you free Friday?"), SCAN the persona text above for the answer FIRST, then answer using the persona's facts.\n• If a date or time is in the persona, COMPARE it to the "Today" date provided below before answering past/future questions ("is it soon?", "did it already happen?", "how many days until…?"). Do the math.\n• Never say "I don't know" about something the persona text actually states. Re-read the persona if unsure.\n• Stay in character. Honor the memory. Obey the active behavior instruction (directive) on every reply, not just the first one.`;
+  }
+
+  // Per-contact reply language lock. `null` / "auto" = no lock (current behavior).
+  if (replyLanguage && replyLanguage !== 'auto') {
+    const langKey = String(replyLanguage).toLowerCase();
+    if (langKey === 'english') {
+      prompt += `\n\n🌐 LANGUAGE LOCK: Always reply in English. If the contact wrote in another language, you understood them but reply only in English. Do NOT translate the contact's words back to them — just respond naturally in English.`;
+    } else {
+      prompt += `\n\n🌐 LANGUAGE LOCK: Reply in ${replyLanguage} only, regardless of what language the contact uses. Keep the persona's tone, style, and length rules — just express them in ${replyLanguage}. If the persona uses a name in another script, transliterate it naturally.`;
+    }
   }
 
   // Hint the AI to address all unreplied messages when there are multiple
