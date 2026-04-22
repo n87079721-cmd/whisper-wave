@@ -74,6 +74,41 @@ Conversation Flow:
 const REACTION_EMOJIS = ['😂', '💀', '🔥', '❤️', '👀', '😭', '💯', '🙄', '😤', '👍', '🤯'];
 
 /**
+ * Build a rich, timezone-aware time context block used by every AI prompt
+ * so the model always knows the phone owner's local clock time, day-of-week
+ * and time-of-day vibe (early morning / morning / midday / afternoon /
+ * evening / late night / middle of the night). Defaults to America/New_York
+ * but always honors the per-account `ai_timezone` config when passed in.
+ */
+export function buildTimeContext(timezone) {
+  const tz = timezone || 'America/New_York';
+  const now = new Date();
+  const hour = parseInt(now.toLocaleString('en-US', { timeZone: tz, hour: 'numeric', hour12: false }));
+  const minute = parseInt(now.toLocaleString('en-US', { timeZone: tz, minute: 'numeric' }));
+
+  let timeLabel;
+  if (hour >= 5 && hour < 9) timeLabel = 'early morning';
+  else if (hour >= 9 && hour < 12) timeLabel = 'morning';
+  else if (hour >= 12 && hour < 14) timeLabel = 'midday';
+  else if (hour >= 14 && hour < 17) timeLabel = 'afternoon';
+  else if (hour >= 17 && hour < 21) timeLabel = 'evening';
+  else if (hour >= 21 && hour < 24) timeLabel = 'late night';
+  else if (hour >= 0 && hour < 2) timeLabel = 'middle of the night';
+  else timeLabel = 'middle of the night';
+
+  const todayFull = now.toLocaleDateString('en-US', {
+    timeZone: tz,
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
+  const todayISO = now.toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
+  const dateLabelShort = now.toLocaleDateString('en-US', { timeZone: tz, month: 'short', day: 'numeric', year: 'numeric' });
+  const clockTime = now.toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true });
+  const fullStamp = now.toLocaleString('en-US', { timeZone: tz });
+
+  return { tz, now, hour, minute, timeLabel, todayFull, todayISO, dateLabelShort, clockTime, fullStamp };
+}
+
+/**
  * Determine if we should send a reaction emoji instead of (or before) a text reply.
  * Now context-aware: picks an appropriate emoji based on the message content.
  * Returns the emoji to react with, or null.
@@ -399,14 +434,7 @@ Respond ONLY with a JSON object: {"isSensitive": boolean, "topic": "string or nu
  */
 export async function generateConversationStarter(apiKey, contactName, memory, lastConvoSummary, { timezone } = {}) {
   if (!apiKey) throw new Error('OpenAI API key not configured');
-  const tz = timezone || 'America/New_York';
-  const now = new Date();
-  const hour = parseInt(now.toLocaleString('en-US', { timeZone: tz, hour: 'numeric', hour12: false }));
-  let timeContext = 'afternoon';
-  if (hour >= 5 && hour < 12) timeContext = 'morning';
-  else if (hour >= 12 && hour < 17) timeContext = 'afternoon';
-  else if (hour >= 17 && hour < 21) timeContext = 'evening';
-  else timeContext = 'late night';
+  const t = buildTimeContext(timezone);
 
   let contextInfo = '';
   if (memory) contextInfo += `\nThings you know about them: ${memory}`;
@@ -423,9 +451,14 @@ export async function generateConversationStarter(apiKey, contactName, memory, l
       messages: [
         {
           role: 'system',
-          content: `You are a real person starting a casual conversation with a friend on WhatsApp. It's ${timeContext}.
+          content: `You are a real person starting a casual conversation with a friend on WhatsApp.
+
+📅 RIGHT NOW (your local time — use this to pick a natural greeting):
+• ${t.todayFull}
+• ${t.clockTime} (${t.timeLabel}, ${t.tz})
 
 Rules:
+- Match the time of day: morning → "gm" / something morning-ish; midday → casual; afternoon → chill; evening → wind-down; late night → "you up?"; middle of the night → quiet/sleepy
 - Be casual, natural, short (1 sentence max)
 - NEVER say "Hey how are you?" or generic greetings
 - Reference something from memory or last conversation if possible
@@ -460,10 +493,10 @@ export async function generateConversationSummary(apiKey, messages, contactName,
     return `${speaker}: ${m.content || '(media)'}`;
   }).join('\n');
 
-  // Build today's date label in the phone owner's configured timezone
-  const tz = timezone || 'America/New_York';
-  const today = new Date();
-  const dateLabel = today.toLocaleDateString('en-US', { timeZone: tz, month: 'short', day: 'numeric', year: 'numeric' });
+  // Build today's date + time label in the phone owner's configured timezone so
+  // the dated header reflects the user's actual local time, not server UTC.
+  const t = buildTimeContext(timezone);
+  const dateLabel = `${t.dateLabelShort} ${t.clockTime} ${t.timeLabel}`;
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
