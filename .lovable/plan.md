@@ -1,50 +1,58 @@
 
 
-## Goal
-Replace the hardcoded "default" background sounds (cafe, rain, etc.) with the user's **extracted/uploaded sounds only**, and add inline play/preview buttons next to every sound in the picker — both in **AI Voice Notes settings** and **Voice Studio**. Applies to all accounts.
+## Findings
+
+**Directive — works correctly**
+- Wrapped at top AND bottom of the system prompt on every reply (`buildContactSystemPrompt`, lines 2028–2030).
+- Expiry honored via `directive_expires` check (line 2020).
+- Survives across replies (re-read from DB every time, not cached).
+
+**Summary — works, but has gaps**
+- Auto-fires after **20+ new messages** since the last summary (per contact).
+- Uses correct timezone-stamped date `[Mon DD, YYYY]`.
+- Appended (never replaces) to `contacts.memory` — so memory grows over time.
+- **Gap 1:** Summary prompt only captures *topics/decisions/tone*. It does NOT extract "questions already asked" or "facts already shared," so the AI has no structured signal to avoid repeating itself.
+- **Gap 2:** Memory is injected as plain "things you know" — no instruction telling the model "don't re-ask things in here."
+- **Gap 3:** Only triggers on the auto-reply path. Manual-only chats never summarize.
+- **Gap 4:** Memory grows unbounded — no compaction, will eventually bloat the prompt.
 
 ## Changes
 
-### 1. Backend (`backend/src/api.js`)
-- Audit the `/voice-studio/sounds` (or equivalent) endpoint that lists background sounds.
-- Remove any hardcoded preset list (cafe, rain, street, etc.).
-- Return **only** the user's extracted sounds from the sounds storage directory / DB table.
-- Ensure each sound entry includes: `id`, `name`, `url` (streamable), `duration`.
+### 1. `backend/src/ai.js` — smarter summary
+Update `generateConversationSummary` to also extract:
+- **Questions you already asked** (so AI doesn't repeat them)
+- **Facts they shared** (name, job, family, plans, preferences)
+- **Open loops** (things they said they'd do / you said you'd follow up on)
 
-### 2. Backend (`backend/src/whatsapp.js`)
-- In `decideVoiceNote` / voice-note generation, if `bgSound` resolves to a preset name that no longer exists, treat as `none` (no background) instead of erroring.
-- Validate the chosen sound ID belongs to the user's extracted library before mixing.
+New summary format:
+```
+[Apr 22, 2026] <2-3 sentence narrative>
+Asked: <comma list of questions you already asked>
+Knows: <key facts they shared>
+Open: <unresolved threads>
+```
 
-### 3. Frontend — Settings page (`src/pages/SettingsPage.tsx`)
-- In the **AI Voice Notes → Default background sound** dropdown:
-  - Remove all preset options (cafe, rain, etc.).
-  - Show only extracted sounds fetched from backend.
-  - Add a ▶️ **Play** button next to each option in the dropdown (preview before selecting).
-  - After selecting, show a ▶️ **Play selected** button next to the dropdown trigger so the user can replay the chosen sound.
-  - If the user has zero extracted sounds, show: *"No sounds yet — extract one in Voice Studio."* with a link.
+### 2. `backend/src/whatsapp.js` — anti-repetition framing
+In `buildContactSystemPrompt`, change the memory injection from:
+> "THINGS YOU KNOW ABOUT THIS PERSON…"
 
-### 4. Frontend — Voice Studio (`src/pages/VoiceStudioPage.tsx`)
-- Same treatment: remove preset background sounds (cafe, etc.) from the picker.
-- Show only extracted sounds.
-- Inline ▶️ play button next to each sound option, plus a play button on the currently selected sound.
+to:
+> "MEMORY OF PAST CONVERSATIONS — DO NOT REPEAT QUESTIONS ALREADY ASKED OR ASK FOR INFO ALREADY KNOWN. Build on what's here, don't restart. If they already told you their job/plans/feelings, reference them naturally instead of asking again."
 
-### 5. Audio playback helper
-- Add a small reusable `useSoundPreview` hook (or inline `<audio>` ref) that:
-  - Plays one sound at a time (stops previous on new play).
-  - Toggles play/pause on the same button.
-  - Shows ⏸ icon while playing.
+### 3. `backend/src/whatsapp.js` — also summarize on inbound (not just auto-reply)
+Move the `triggerConversationSummary` call so it also fires when a message arrives in a chat where AI auto-reply is OFF, so manual chats still build memory.
 
-### 6. Scope
-- Applies globally — all users and admin accounts use the same logic. No role gating; the sounds list is naturally per-user (each user sees their own extracted library).
+### 4. `backend/src/whatsapp.js` — memory compaction
+When `contacts.memory` exceeds ~4000 chars, ask GPT-4o-mini to compact it into a single consolidated block (keeps Asked/Knows/Open lists deduped, keeps last 3 dated narratives). Triggered inside `triggerConversationSummary` after appending.
 
-## Files to edit
-- `backend/src/api.js` — strip presets from sounds endpoint
-- `backend/src/whatsapp.js` — graceful fallback when bg sound missing
-- `src/pages/SettingsPage.tsx` — extracted-only picker + preview buttons
-- `src/pages/VoiceStudioPage.tsx` — extracted-only picker + preview buttons
-- `src/lib/api.ts` — ensure sounds fetcher returns URLs for playback
+### 5. Applies to all accounts
+All logic is keyed by `user_id` already — admins and regular users get the same behavior automatically. No role-specific code paths.
+
+## Files
+- `backend/src/ai.js` — upgrade summary prompt + add `compactMemory()` helper
+- `backend/src/whatsapp.js` — stronger memory framing, summarize on inbound regardless of auto-reply, call compaction
 
 ## Out of scope
-- No changes to extraction flow itself (already works in Voice Studio).
-- No DB migrations needed (presets were hardcoded, not stored).
+- No UI changes to the Memory & AI Settings drawer (the existing textarea already shows the richer summary).
+- No DB migration (uses existing `memory`, `last_summary_at` columns).
 
