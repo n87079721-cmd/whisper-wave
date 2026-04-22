@@ -2776,6 +2776,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   }
 
   const personaName = getActivePersonaName(db, userId, contactId);
+  const replyLanguage = getContactReplyLanguage(db, userId, contactId);
   debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, persona: personaName, historyLength: messages.length, unrepliedCount, timezone: tz, forceRebatch: !!forceReply });
   // When this is a forced rebatch (a new message arrived mid-typing and we cancelled
   // the prior in-flight reply), tell the model so it knows to integrate the LATEST
@@ -2783,7 +2784,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const promptForGen = forceReply
     ? `${systemPrompt}\n\n⚠️ REBATCH: A new message just arrived while you were about to reply. Re-read the LAST few messages and reply to the latest one (and the ones above it together) — don't reply to the older context as if nothing changed. Use the current local time of day for tone.`
     : systemPrompt;
-  let replyText = await generateReply(keyRow.value, messages, promptForGen, contactName || phone, { unrepliedCount, timezone: tz });
+  let replyText = await generateReply(keyRow.value, messages, promptForGen, contactName || phone, { unrepliedCount, timezone: tz, replyLanguage });
   replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
   if (isReplyTooSimilar(replyText, recentOutgoing)) {
@@ -2793,7 +2794,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       messages,
       `${systemPrompt}\n\nIMPORTANT: Do not repeat or closely paraphrase any recent outgoing reply. Make the next reply clearly different in wording and energy.`,
       contactName || phone,
-      { timezone: tz },
+      { timezone: tz, replyLanguage },
     );
     replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
   }
@@ -3707,7 +3708,11 @@ export function getTelegramCallbackHandlers(userId, db) {
       const systemPrompt = buildContactSystemPrompt(db, userId, contact.id);
       const contactName = contact.name || contact.phone || 'Unknown';
       const { generateReply } = await import('./ai.js');
-      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, { mode: 'rewrite', timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
+      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, {
+        mode: 'rewrite',
+        timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
+        replyLanguage: getContactReplyLanguage(db, userId, contact.id),
+      });
       replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
       // Re-schedule with telegram preview
@@ -3741,6 +3746,7 @@ export function getTelegramCallbackHandlers(userId, db) {
         customInstructions: instructions,
         previousReply,
         timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
+        replyLanguage: getContactReplyLanguage(db, userId, contact.id),
       });
       replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
