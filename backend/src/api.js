@@ -1278,16 +1278,7 @@ export function createApiRouter(db) {
       if (!apiKey) return res.status(400).json({ error: 'ElevenLabs API key not configured' });
 
       const volume = bgVolume != null ? parseFloat(bgVolume) : 0.15;
-      // Voice Studio previews ALSO get the same enhancement pipeline as admin
-      // sends, so all users hear properly-tagged speech (laughs, pauses, etc.)
-      // not raw text. Falls back to admin's OpenAI key so no per-user setup.
-      let speakable = text;
-      const openaiKey = getSharedOpenAIKey(db, req.userId);
-      if (openaiKey) {
-        try { speakable = await enhanceTextForVoice(openaiKey, text); }
-        catch (e) { console.log('[voice/preview] enhance failed, using raw text:', e?.message); }
-      }
-      const audioBuffer = await generatePreviewAudio(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
+      const audioBuffer = await generatePreviewAudio(apiKey, text, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
       // Count this preview toward today's usage so the limit truly caps Voice Studio activity.
       try { db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(req.userId); } catch {}
       res.set('Content-Type', 'audio/mpeg');
@@ -1303,7 +1294,7 @@ export function createApiRouter(db) {
       const { text } = req.body;
       if (!text) return res.status(400).json({ error: 'Missing text' });
 
-      const apiKey = getSharedOpenAIKey(db, req.userId);
+      const apiKey = getConfig(db, req.userId, 'openai_api_key') || process.env.OPENAI_API_KEY;
       if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured.' });
 
       const enhanced = await enhanceTextForVoice(apiKey, text);
