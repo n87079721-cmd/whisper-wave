@@ -3736,7 +3736,11 @@ export function getTelegramCallbackHandlers(userId, db) {
       debugLog(db, userId, 'telegram_rewrite', { jid, contact: rewriteContact?.name || rewriteContact?.phone || jid });
       clearPendingAutoReply(userId, jid);
       // Find the contact and re-trigger auto reply
-      const contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+      let contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+      if (!contact) {
+        const phone = String(jid || '').split('@')[0];
+        if (phone) contact = db.prepare('SELECT id, name, phone FROM contacts WHERE phone = ? AND user_id = ? ORDER BY id DESC LIMIT 1').get(phone, userId);
+      }
       if (!contact) return;
 
       const messages = db.prepare(`
@@ -3765,7 +3769,11 @@ export function getTelegramCallbackHandlers(userId, db) {
     },
     onCustom: async (jid, instructions) => {
       clearPendingAutoReply(userId, jid);
-      const contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+      let contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+      if (!contact) {
+        const phone = String(jid || '').split('@')[0];
+        if (phone) contact = db.prepare('SELECT id, name, phone FROM contacts WHERE phone = ? AND user_id = ? ORDER BY id DESC LIMIT 1').get(phone, userId);
+      }
       if (!contact) return;
 
       const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
