@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { getWhatsAppState, onWhatsAppEvent, getOrInitWhatsApp, requestPairingWithPhone, getStatuses, getCallLogs, recoverSingleChat, getSyncDiagnostics, deleteMessage, deleteMessageForMe, deleteMessageForEveryone, deleteConversation, streamMediaForMessage, cancelAllPendingReplies, cancelPendingReplyForContact, triggerConversationSummary } from './whatsapp.js';
 import { initWhatsApp } from './whatsapp.js';
-import { archiveChat, markChatRead, syncArchiveStates } from './whatsapp.js';
+import { archiveChat, markChatRead, syncArchiveStates, enhanceTextForVoice } from './whatsapp.js';
 import { generateVoiceNote, generatePreviewAudio, BG_SOUND_PROMPTS } from './elevenlabs.js';
 import multer from 'multer';
 import { execSync } from 'child_process';
