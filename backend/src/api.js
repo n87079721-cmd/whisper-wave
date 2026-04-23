@@ -1249,7 +1249,20 @@ RULES:
       // Enhance ALWAYS uses the admin's OpenAI key for every account.
       const openaiKey = getAdminEnhanceOpenAIKey(db);
       if (!openaiKey) return res.status(400).json({ error: 'Admin OpenAI API key not configured — cannot enhance VN text.' });
-      const speakable = await enhanceTextForVoice(openaiKey, text);
+      // Lock enhancer to per-contact reply language (if set) so the spoken
+      // text stays in the target language instead of drifting to English.
+      let voiceNoteLang = null;
+      try {
+        if (contactRow?.id) {
+          const langRow = db.prepare(
+            "SELECT value FROM config WHERE user_id = ? AND key = ?"
+          ).get(req.userId, `ai_reply_language_contact_${contactRow.id}`);
+          if (langRow?.value && langRow.value.toLowerCase() !== 'auto' && langRow.value.toLowerCase() !== 'english') {
+            voiceNoteLang = langRow.value;
+          }
+        }
+      } catch { /* non-fatal */ }
+      const speakable = await enhanceTextForVoice(openaiKey, text, voiceNoteLang);
       const audioBuffer = await generateVoiceNote(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
 
       const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
