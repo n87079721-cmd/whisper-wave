@@ -4161,6 +4161,17 @@ export function getTelegramCallbackHandlers(userId, db) {
         const speakable = hasV3Tags
           ? replyText
           : await enhanceTextForVoice(openaiKey, replyText, sendVnLang || null);
+        if (!hasV3Tags && sendVnLang && !['auto', 'english'].includes(String(sendVnLang).toLowerCase())) {
+          const englishShare = estimateEnglishShare(speakable);
+          if (englishShare > 0.3) {
+            debugLog(db, userId, 'vn_language_drift', {
+              flow: 'telegram_send_vn', contactId: contact.id, jid,
+              targetLanguage: sendVnLang,
+              englishShare: Math.round(englishShare * 100) + '%',
+              enhancedPreview: String(speakable).slice(0, 160),
+            });
+          }
+        }
 
         const audioBuffer = await generateVoiceNote(
           elKey, speakable, voiceId, modelId, bgSound,
