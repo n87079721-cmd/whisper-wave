@@ -2282,6 +2282,39 @@ function decideVoiceNote(db, userId, contactId, replyText) {
 // This is the single source of truth for both the manual Enhance button and
 // Telegram/AI "send as VN" flows so they behave identically.
 /**
+ * #9 — Estimate the share of clearly-English words in a string after stripping
+ * v3 audio tags and proper-noun-ish capitalised tokens. Used to flag VN
+ * enhancements that drifted to English even though the contact has a
+ * non-English language lock. Returns a number 0..1.
+ */
+function estimateEnglishShare(text) {
+  const stripped = String(text || '')
+    .replace(/\[[^\]\n]{1,40}\]/g, ' ')   // remove audio tags
+    .replace(/[^\p{L}\s']/gu, ' ');
+  const tokens = stripped.split(/\s+/).filter(Boolean);
+  if (tokens.length < 4) return 0;
+
+  // Common English function words + casual fillers/contractions that signal drift.
+  const ENGLISH_MARKERS = new Set([
+    'the','a','an','and','or','but','if','of','for','to','in','on','at','by','with','from','about',
+    'i','im','i\'m','you','you\'re','youre','your','we','we\'re','were','they','they\'re','he','she','it','its','it\'s',
+    'is','am','are','was','were','be','been','being','have','has','had','do','does','did','will','would','can','could','should','might',
+    'this','that','these','those','what','where','when','why','who','how','which',
+    'not','no','yes','yeah','yep','nope','ok','okay','just','really','very','too','also','still','even','only',
+    'gonna','wanna','kinda','sorta','dunno','lemme','y\'know','yknow','tbh','ngl','lowkey','highkey',
+    'like','know','think','feel','want','need','say','said','tell','told','make','made','get','got','go','went','come','came',
+    'because','though','through','around','between','before','after','since','until','while',
+    'don\'t','dont','can\'t','cant','won\'t','wont','isn\'t','isnt','aren\'t','arent','wasn\'t','wasnt','that\'s','thats',
+  ]);
+  let englishHits = 0;
+  for (const tok of tokens) {
+    const lc = tok.toLowerCase();
+    if (ENGLISH_MARKERS.has(lc)) englishHits++;
+  }
+  return englishHits / tokens.length;
+}
+
+/**
  * Lightweight script-based language detection (no API call).
  * Used by VN flows that have no contact context (e.g. userbot /send) to
  * keep the enhancer in the SAME language as the pasted text. Returns a
@@ -2874,12 +2907,59 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const personaName = getActivePersonaName(db, userId, contactId);
   const replyLanguage = getContactReplyLanguage(db, userId, contactId);
   debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, persona: personaName, historyLength: messages.length, unrepliedCount, timezone: tz, forceRebatch: !!forceReply });
+
+  // ── #3 Question budget + #5 Topic exhaustion ──
+  // Look at the last 4 outgoing AI replies. Count question marks and detect
+  // overused topic nouns. Inject mechanical guardrails so the model can't
+  // ignore the persona's "max 1 question per 3-4 messages" / "don't loop" rules.
+  const lastFourReplies = recentOutgoing.slice(-4);
+  const questionsInWindow = lastFourReplies.reduce(
+    (sum, r) => sum + (String(r || '').match(/\?/g) || []).length, 0,
+  );
+  const overQuestionBudget = questionsInWindow >= 2;
+
+  // Detect topic noun loops: any 4+ char alpha word appearing in 3+ of the
+ // last 4 replies. Strip stopwords. Cheap, no API call.
+  const STOPWORDS = new Set(['this','that','what','your','have','just','like','really','about','from','with','they','them','then','than','when','where','will','would','could','should','been','being','were','also','only','still','even','some','much','most','very','sure','okay','yeah','yeahh','yeahhh','lmao','lmaoo','haha','hahaha','tbh','ngl','idk','fr','i\'m','it\'s','that\'s','don\'t','can\'t','won\'t','you\'re','they\'re','we\'re']);
+  const wordCounts = {};
+  for (const r of lastFourReplies) {
+    const seen = new Set();
+    for (const w of String(r || '').toLowerCase().match(/[a-z']{4,}/g) || []) {
+      if (STOPWORDS.has(w) || seen.has(w)) continue;
+      seen.add(w);
+      wordCounts[w] = (wordCounts[w] || 0) + 1;
+    }
+  }
+  const overusedTopics = Object.entries(wordCounts)
+    .filter(([, c]) => c >= 3)
+    .map(([w]) => w)
+    .slice(0, 5);
+
+  let guardrails = '';
+  if (overQuestionBudget) {
+    guardrails += `\n\n🚫 QUESTION BUDGET HIT: You've asked ${questionsInWindow} questions in your last ${lastFourReplies.length} replies. THIS REPLY MUST CONTAIN ZERO QUESTION MARKS. End on a statement, a reaction, or a small share about yourself. No "?". No rhetorical questions either.`;
+  }
+  if (overusedTopics.length > 0) {
+    guardrails += `\n\n♻️ TOPIC LOOP DETECTED: You keep coming back to: ${overusedTopics.join(', ')}. Do NOT mention these words in this reply. Pivot to something fresh — a different memory, a small observation about your day/surroundings, a new thread.`;
+  }
+
   // When this is a forced rebatch (a new message arrived mid-typing and we cancelled
   // the prior in-flight reply), tell the model so it knows to integrate the LATEST
   // message into its single combined reply, using the latest local time of day.
-  const promptForGen = forceReply
+  const basePrompt = forceReply
     ? `${systemPrompt}\n\n⚠️ REBATCH: A new message just arrived while you were about to reply. Re-read the LAST few messages and reply to the latest one (and the ones above it together) — don't reply to the older context as if nothing changed. Use the current local time of day for tone.`
     : systemPrompt;
+  const promptForGen = `${basePrompt}${guardrails}`;
+
+  if (guardrails) {
+    debugLog(db, userId, 'reply_guardrails_injected', {
+      contact: contactName || phone,
+      questionsInWindow,
+      overQuestionBudget,
+      overusedTopics,
+    });
+  }
+
   let replyText = await generateReply(keyRow.value, messages, promptForGen, contactName || phone, { unrepliedCount, timezone: tz, replyLanguage });
   replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
@@ -2973,6 +3053,17 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             // Lock the enhancer to the contact's reply language so v3 fillers/contractions
             // stay in the target language (not English).
             const enhanced = await enhanceTextForVoice(adminEnhanceKey, replyText, replyLanguage || null);
+            if (replyLanguage && !['auto', 'english'].includes(String(replyLanguage).toLowerCase())) {
+              const englishShare = estimateEnglishShare(enhanced);
+              if (englishShare > 0.3) {
+                debugLog(db, userId, 'vn_language_drift', {
+                  flow: 'auto_reply_vn', contact: contactName || phone,
+                  targetLanguage: replyLanguage,
+                  englishShare: Math.round(englishShare * 100) + '%',
+                  enhancedPreview: enhanced.slice(0, 160),
+                });
+              }
+            }
             const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
             const audioBuffer = await generateVoiceNote(
               elKey,
@@ -4070,6 +4161,17 @@ export function getTelegramCallbackHandlers(userId, db) {
         const speakable = hasV3Tags
           ? replyText
           : await enhanceTextForVoice(openaiKey, replyText, sendVnLang || null);
+        if (!hasV3Tags && sendVnLang && !['auto', 'english'].includes(String(sendVnLang).toLowerCase())) {
+          const englishShare = estimateEnglishShare(speakable);
+          if (englishShare > 0.3) {
+            debugLog(db, userId, 'vn_language_drift', {
+              flow: 'telegram_send_vn', contactId: contact.id, jid,
+              targetLanguage: sendVnLang,
+              englishShare: Math.round(englishShare * 100) + '%',
+              enhancedPreview: String(speakable).slice(0, 160),
+            });
+          }
+        }
 
         const audioBuffer = await generateVoiceNote(
           elKey, speakable, voiceId, modelId, bgSound,
@@ -4165,6 +4267,17 @@ export function getTelegramCallbackHandlers(userId, db) {
           if (!openaiKey) return { ok: false, reason: 'No tags + admin OpenAI key not configured' };
         }
         const speakable = hasV3Tags ? workingText : await enhanceTextForVoice(openaiKey, workingText, contactLang || null);
+        if (!hasV3Tags && contactLang && !['auto', 'english'].includes(String(contactLang).toLowerCase())) {
+          const englishShare = estimateEnglishShare(speakable);
+          if (englishShare > 0.3) {
+            debugLog(db, userId, 'vn_language_drift', {
+              flow: 'telegram_custom_vn', contactId: contact.id, jid,
+              targetLanguage: contactLang,
+              englishShare: Math.round(englishShare * 100) + '%',
+              enhancedPreview: String(speakable).slice(0, 160),
+            });
+          }
+        }
 
         // Same voice resolution as onSendVN: Telegram override → persona → default.
         const telegramVoiceOverride = getConfigValue(db, userId, 'ai_telegram_vn_voice_id', '');
