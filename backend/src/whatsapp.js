@@ -2909,11 +2909,14 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, persona: personaName, historyLength: messages.length, unrepliedCount, timezone: tz, forceRebatch: !!forceReply });
 
   // ── #3 Question budget + #5 Topic exhaustion ──
-  // Rule: after 3 consecutive replies that contain a question, the next 2
-  // replies MUST be question-free. Then the cycle resets. Walk the recent
-  // outgoing replies from newest → oldest to count the current "cooldown"
-  // state.
-  const lastFiveReplies = recentOutgoing.slice(-5);
+  // Rule (configurable per user via Dashboard):
+  //   After N consecutive replies that contain a question, the next M
+  //   replies MUST be question-free. Then the cycle resets.
+  // Defaults: N=3, M=2.
+  const questionStreakThreshold = Math.max(1, Math.min(10, parseInt(getConfigValue(db, userId, 'ai_question_streak_threshold', '3'), 10)));
+  const questionCooldownLength = Math.max(1, Math.min(10, parseInt(getConfigValue(db, userId, 'ai_question_cooldown_length', '2'), 10)));
+  const lookback = questionStreakThreshold + questionCooldownLength;
+  const lastFiveReplies = recentOutgoing.slice(-lookback);
   const replyHasQuestion = (r) => /\?/.test(String(r || ''));
 
   // Count how many of the most-recent replies were question-free (cooldown progress).
@@ -2929,9 +2932,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     else break;
   }
 
-  // Trigger cooldown when we've hit 3 question-replies and haven't yet served 2 question-free ones.
-  const overQuestionBudget = questionStreak >= 3 && coolingReplies < 2;
-  const cooldownRemaining = overQuestionBudget ? (2 - coolingReplies) : 0;
+  // Trigger cooldown when we've hit the threshold and haven't yet served the cooldown length.
+  const overQuestionBudget = questionStreak >= questionStreakThreshold && coolingReplies < questionCooldownLength;
+  const cooldownRemaining = overQuestionBudget ? (questionCooldownLength - coolingReplies) : 0;
 
   // Detect topic noun loops: any 4+ char alpha word appearing in 3+ of the
  // last 4 replies. Strip stopwords. Cheap, no API call.
