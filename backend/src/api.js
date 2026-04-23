@@ -1377,14 +1377,20 @@ RULES:
   // ── Enhance text ────────────────────────────────────────
   router.post('/enhance', async (req, res) => {
     try {
-      const { text } = req.body;
+      const { text, language } = req.body;
       if (!text) return res.status(400).json({ error: 'Missing text' });
 
       // Enhance ALWAYS uses the admin's OpenAI key for every account.
       const apiKey = getAdminEnhanceOpenAIKey(db);
       if (!apiKey) return res.status(400).json({ error: 'Admin OpenAI API key not configured.' });
 
-      const enhanced = await enhanceTextForVoice(apiKey, text);
+      // Optional language lock: callers (e.g. Voice Studio per-contact preview)
+      // can pass a target language so the enhancer keeps fillers/contractions
+      // in that language instead of defaulting to English.
+      const lockLang = (language && typeof language === 'string'
+        && !['auto', 'english', ''].includes(language.toLowerCase().trim()))
+        ? language.trim() : null;
+      const enhanced = await enhanceTextForVoice(apiKey, text, lockLang);
 
       res.json({ enhanced });
     } catch (err) {
