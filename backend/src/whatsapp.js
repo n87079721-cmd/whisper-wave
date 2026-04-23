@@ -4011,9 +4011,12 @@ export function getTelegramCallbackHandlers(userId, db) {
         // Tag-aware processing:
         //   - If user already wrote tags → pass through as-is (their tags win).
         //   - If no tags → call admin-enhance to add expressive v3 tags first.
+        // Pass per-contact language so the enhancer keeps fillers/contractions
+        // in the target language instead of drifting to English.
+        const sendVnLang = getContactReplyLanguage(db, userId, contact.id);
         const speakable = hasV3Tags
           ? replyText
-          : await enhanceTextForVoice(openaiKey, replyText);
+          : await enhanceTextForVoice(openaiKey, replyText, sendVnLang || null);
 
         const audioBuffer = await generateVoiceNote(
           elKey, speakable, voiceId, modelId, bgSound,
