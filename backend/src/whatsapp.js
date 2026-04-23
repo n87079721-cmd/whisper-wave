@@ -2281,7 +2281,7 @@ function decideVoiceNote(db, userId, contactId, replyText) {
 // Rewrite reply text via OpenAI to add ElevenLabs v3 expression tags.
 // This is the single source of truth for both the manual Enhance button and
 // Telegram/AI "send as VN" flows so they behave identically.
-export async function enhanceTextForVoice(openaiKey, text) {
+export async function enhanceTextForVoice(openaiKey, text, targetLanguage = null) {
   const cleanedInput = String(text)
     .replace(/\[[^\]\n]{1,40}\]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -2294,7 +2294,11 @@ export async function enhanceTextForVoice(openaiKey, text) {
   const tagRange = wordCount <= 15 ? '2-3' : wordCount <= 40 ? '4-6' : wordCount <= 80 ? '6-10' : '8-15';
   const minTags = parseInt(tagRange.split('-')[0], 10) || 2;
 
-  const baseSystem = `You rewrite text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note. You ARE this person — you feel things, you react, you breathe.
+  const langLock = (targetLanguage && !['auto', 'english'].includes(String(targetLanguage).toLowerCase()))
+    ? `\n\n🌐 LANGUAGE LOCK — CRITICAL: The spoken text MUST be in ${targetLanguage} ONLY. The input is already in ${targetLanguage}. Do NOT translate it to English. Do NOT mix English words in. Do NOT use English fillers like "gonna", "wanna", "y'know", "lowkey", "ngl", "tbh", "I mean", "you know" — instead use the equivalent NATURAL spoken fillers in ${targetLanguage}. Contractions, slang, fillers, self-corrections — all of them must be in ${targetLanguage}. The bracketed audio tags ([soft], [pause], etc.) STAY in English (they're directives, not spoken). Everything OUTSIDE the brackets must be ${targetLanguage}. If you find yourself writing an English word that isn't a proper noun, replace it with the ${targetLanguage} equivalent.`
+    : '';
+
+  const baseSystem = `You rewrite text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note. You ARE this person — you feel things, you react, you breathe.${langLock}
 
 ELEVENLABS v3 AUDIO TAGS — use bracketed cues to direct delivery. v3 accepts BOTH the canonical tag list AND free-form descriptors (e.g. [soft], [warm], [protective tone], [matter-of-fact], [low], [gentle warning], [tone shifts slightly]). Use whichever fits the moment.
 
@@ -2318,8 +2322,8 @@ Tag categories you can draw from (combine freely):
 • Sound effects (sparingly, only if it fits): [applause], [clapping], [gunshot], [explosion], [door slams], [phone rings] — usually skip for casual VNs
 
 TEXT FILTERS — Make it sound SPOKEN, not typed:
-- Use fillers naturally: "like", "you know", "I mean", "honestly", "basically", "right?", "so yeah", "anyway", "look", "thing is"
-- Use casual contractions and slang: "gonna", "wanna", "kinda", "sorta", "dunno", "lemme", "y'know", "ngl", "tbh", "lowkey"
+- Use natural spoken fillers in the SAME LANGUAGE as the input (English examples below are illustrative; if input is in another language, use that language's equivalents): "like", "you know", "I mean", "honestly", "basically", "right?", "so yeah", "anyway", "look", "thing is"
+- Use casual contractions and slang in the input's language. English examples: "gonna", "wanna", "kinda", "sorta", "dunno", "lemme", "y'know", "ngl", "tbh", "lowkey". For other languages, use that language's natural casual register — never substitute English words.
 - Self-corrections mid-sentence: "I was gonna— actually no, I think..."
 - Trailing thoughts: "but yeah..." or "so... yeah"
 - Verbal reactions: "oh!", "wait", "okay so", "ugh", "hmm", "right right right"
@@ -2338,7 +2342,7 @@ RULES:
 - AT LEAST half of the tag groups should be STACKS of 2-3 tags, not single tags. Single tags are fine sometimes; stacks are better.
 - At least 2 pacing/breath cues (pauses, breaths, hesitations) per rewrite — these can be inside a stack or on their own line
 - Break long sentences into shorter spoken fragments
-- Use contractions everywhere (I'm, don't, can't, won't, it's, that's, there's)
+- Use contractions everywhere when the language supports them (English: I'm, don't, can't, won't, it's, that's, there's; French: j'ai, c'est, t'es; etc.). For languages without contractions, just keep it natural and conversational.
 - Match tag stacks to context: happy → [excited][warm][laughing], heavy → [pause][soft][sighing], funny → [chuckles][amused], serious → [inhaling sharply][serious tone][matter-of-fact], reassuring → [gentle][protective tone][soft], awkward → [hesitates][nervously][small pause]
 - Accent / character / singing tags are OPT-IN: do NOT add them unless the source text clearly implies it (e.g. an impression, lyrics in quotes, an established character persona). For a normal VN, leave them out.
 - If input already had tags, completely rewrite with fresh emotion and new tags
@@ -4102,7 +4106,7 @@ export function getTelegramCallbackHandlers(userId, db) {
           openaiKey = getAdminEnhanceOpenAIKey(db);
           if (!openaiKey) return { ok: false, reason: 'No tags + admin OpenAI key not configured' };
         }
-        const speakable = hasV3Tags ? workingText : await enhanceTextForVoice(openaiKey, workingText);
+        const speakable = hasV3Tags ? workingText : await enhanceTextForVoice(openaiKey, workingText, contactLang || null);
 
         // Same voice resolution as onSendVN: Telegram override → persona → default.
         const telegramVoiceOverride = getConfigValue(db, userId, 'ai_telegram_vn_voice_id', '');
