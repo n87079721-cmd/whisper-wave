@@ -4106,7 +4106,7 @@ export function getTelegramCallbackHandlers(userId, db) {
           openaiKey = getAdminEnhanceOpenAIKey(db);
           if (!openaiKey) return { ok: false, reason: 'No tags + admin OpenAI key not configured' };
         }
-        const speakable = hasV3Tags ? workingText : await enhanceTextForVoice(openaiKey, workingText);
+        const speakable = hasV3Tags ? workingText : await enhanceTextForVoice(openaiKey, workingText, contactLang || null);
 
         // Same voice resolution as onSendVN: Telegram override → persona → default.
         const telegramVoiceOverride = getConfigValue(db, userId, 'ai_telegram_vn_voice_id', '');
