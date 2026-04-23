@@ -4267,6 +4267,17 @@ export function getTelegramCallbackHandlers(userId, db) {
           if (!openaiKey) return { ok: false, reason: 'No tags + admin OpenAI key not configured' };
         }
         const speakable = hasV3Tags ? workingText : await enhanceTextForVoice(openaiKey, workingText, contactLang || null);
+        if (!hasV3Tags && contactLang && !['auto', 'english'].includes(String(contactLang).toLowerCase())) {
+          const englishShare = estimateEnglishShare(speakable);
+          if (englishShare > 0.3) {
+            debugLog(db, userId, 'vn_language_drift', {
+              flow: 'telegram_custom_vn', contactId: contact.id, jid,
+              targetLanguage: contactLang,
+              englishShare: Math.round(englishShare * 100) + '%',
+              enhancedPreview: String(speakable).slice(0, 160),
+            });
+          }
+        }
 
         // Same voice resolution as onSendVN: Telegram override → persona → default.
         const telegramVoiceOverride = getConfigValue(db, userId, 'ai_telegram_vn_voice_id', '');
