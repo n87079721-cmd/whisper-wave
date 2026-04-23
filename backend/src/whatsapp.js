@@ -3053,6 +3053,17 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             // Lock the enhancer to the contact's reply language so v3 fillers/contractions
             // stay in the target language (not English).
             const enhanced = await enhanceTextForVoice(adminEnhanceKey, replyText, replyLanguage || null);
+            if (replyLanguage && !['auto', 'english'].includes(String(replyLanguage).toLowerCase())) {
+              const englishShare = estimateEnglishShare(enhanced);
+              if (englishShare > 0.3) {
+                debugLog(db, userId, 'vn_language_drift', {
+                  flow: 'auto_reply_vn', contact: contactName || phone,
+                  targetLanguage: replyLanguage,
+                  englishShare: Math.round(englishShare * 100) + '%',
+                  enhancedPreview: enhanced.slice(0, 160),
+                });
+              }
+            }
             const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
             const audioBuffer = await generateVoiceNote(
               elKey,
