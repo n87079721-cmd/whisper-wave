@@ -2282,6 +2282,39 @@ function decideVoiceNote(db, userId, contactId, replyText) {
 // This is the single source of truth for both the manual Enhance button and
 // Telegram/AI "send as VN" flows so they behave identically.
 /**
+ * #9 — Estimate the share of clearly-English words in a string after stripping
+ * v3 audio tags and proper-noun-ish capitalised tokens. Used to flag VN
+ * enhancements that drifted to English even though the contact has a
+ * non-English language lock. Returns a number 0..1.
+ */
+function estimateEnglishShare(text) {
+  const stripped = String(text || '')
+    .replace(/\[[^\]\n]{1,40}\]/g, ' ')   // remove audio tags
+    .replace(/[^\p{L}\s']/gu, ' ');
+  const tokens = stripped.split(/\s+/).filter(Boolean);
+  if (tokens.length < 4) return 0;
+
+  // Common English function words + casual fillers/contractions that signal drift.
+  const ENGLISH_MARKERS = new Set([
+    'the','a','an','and','or','but','if','of','for','to','in','on','at','by','with','from','about',
+    'i','im','i\'m','you','you\'re','youre','your','we','we\'re','were','they','they\'re','he','she','it','its','it\'s',
+    'is','am','are','was','were','be','been','being','have','has','had','do','does','did','will','would','can','could','should','might',
+    'this','that','these','those','what','where','when','why','who','how','which',
+    'not','no','yes','yeah','yep','nope','ok','okay','just','really','very','too','also','still','even','only',
+    'gonna','wanna','kinda','sorta','dunno','lemme','y\'know','yknow','tbh','ngl','lowkey','highkey',
+    'like','know','think','feel','want','need','say','said','tell','told','make','made','get','got','go','went','come','came',
+    'because','though','through','around','between','before','after','since','until','while',
+    'don\'t','dont','can\'t','cant','won\'t','wont','isn\'t','isnt','aren\'t','arent','wasn\'t','wasnt','that\'s','thats',
+  ]);
+  let englishHits = 0;
+  for (const tok of tokens) {
+    const lc = tok.toLowerCase();
+    if (ENGLISH_MARKERS.has(lc)) englishHits++;
+  }
+  return englishHits / tokens.length;
+}
+
+/**
  * Lightweight script-based language detection (no API call).
  * Used by VN flows that have no contact context (e.g. userbot /send) to
  * keep the enhancer in the SAME language as the pasted text. Returns a
