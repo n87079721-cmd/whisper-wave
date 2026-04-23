@@ -1255,10 +1255,11 @@ RULES:
       try {
         if (contactRow?.id) {
           const langRow = db.prepare(
-            "SELECT value FROM config WHERE user_id = ? AND key = ?"
-          ).get(req.userId, `ai_reply_language_contact_${contactRow.id}`);
-          if (langRow?.value && langRow.value.toLowerCase() !== 'auto' && langRow.value.toLowerCase() !== 'english') {
-            voiceNoteLang = langRow.value;
+            "SELECT reply_language FROM contacts WHERE id = ? AND user_id = ?"
+          ).get(contactRow.id, req.userId);
+          const lang = langRow?.reply_language;
+          if (lang && lang.toLowerCase() !== 'auto' && lang.toLowerCase() !== 'english') {
+            voiceNoteLang = lang;
           }
         }
       } catch { /* non-fatal */ }
