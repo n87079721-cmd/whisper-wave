@@ -2312,7 +2312,10 @@ Tag categories you can draw from (combine freely):
 • Delivery / tone: [whispering], [shouting], [mumbling], [dramatically], [deadpan], [breathlessly], [cheerfully], [sadly], [lovingly], [coldly], [mockingly], [matter-of-fact], [wistful], [cautiously], [timidly], [quizzically], [serious tone], [gentle], [soft], [low], [steady tone], [firm but calm], [protective tone], [honest], [empathetic], [respectful], [genuine]
 • Physical / breath: [clearing throat], [coughing], [inhaling sharply], [exhaling deeply], [breathes in], [breathes out], [breathes], [swallows], [gulps], [clicks tongue], [tuts], [panting]
 • Pacing: [pause], [slight pause], [small pause], [long pause], [hesitates], [slows], [slows down], [drawn out], [continues after a beat], [stammers], [deliberate], [rushed], [emphasized], [understated], [counts lightly], [tone softens again], [slight pause][explaining]
-• Sound effects (sparingly, only if it fits): [applause], [clapping], [gunshot] — usually skip
+• Accents & character (use ONLY if the speaker's voice clearly calls for it — e.g. impression, role-play, or the persona is established as that character): [British accent], [American accent], [Southern US accent], [Irish accent], [Scottish accent], [French accent], [Italian accent], [Russian accent], [Australian accent], [New York accent], [pirate voice], [robotic], [old man voice], [child voice]
+• Singing & musical: [sings], [singing], [singing softly], [humming], [hums a tune] — only if the text actually contains lyrics or a sung phrase
+• Dialogue dynamics (only if there's a back-and-forth or interruption in the text): [interrupting], [overlapping], [cutting in], [trailing off], [muttering under breath]
+• Sound effects (sparingly, only if it fits): [applause], [clapping], [gunshot], [explosion], [door slams], [phone rings] — usually skip for casual VNs
 
 TEXT FILTERS — Make it sound SPOKEN, not typed:
 - Use fillers naturally: "like", "you know", "I mean", "honestly", "basically", "right?", "so yeah", "anyway", "look", "thing is"
@@ -2337,6 +2340,7 @@ RULES:
 - Break long sentences into shorter spoken fragments
 - Use contractions everywhere (I'm, don't, can't, won't, it's, that's, there's)
 - Match tag stacks to context: happy → [excited][warm][laughing], heavy → [pause][soft][sighing], funny → [chuckles][amused], serious → [inhaling sharply][serious tone][matter-of-fact], reassuring → [gentle][protective tone][soft], awkward → [hesitates][nervously][small pause]
+- Accent / character / singing tags are OPT-IN: do NOT add them unless the source text clearly implies it (e.g. an impression, lyrics in quotes, an established character persona). For a normal VN, leave them out.
 - If input already had tags, completely rewrite with fresh emotion and new tags
 - Add at least one emotional shift or tonal change in longer texts
 - NEVER add greetings like "hey", "hi", "hello", "yo", "hey [name]", "hi [name]" at the start — this is mid-conversation, not a new chat. Do NOT invent or insert names. Start directly with the content/reaction.
