@@ -3015,7 +3015,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   if (guardrails) {
     debugLog(db, userId, 'reply_guardrails_injected', {
       contact: contactName || phone,
-      questionsInWindow,
+      questionStreak,
+      coolingReplies,
+      cooldownRemaining,
       overQuestionBudget,
       overusedTopics,
       memoryRecallHits,
