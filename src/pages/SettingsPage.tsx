@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Key, Shield, Power, Loader2, Brain, LogOut, Save, Dice5, Gauge, RefreshCw, AlertTriangle, Database, Plus, Trash2, Pencil, X, BookOpen, Send, Bot, Sparkles, MessageCircle, Play, Pause } from 'lucide-react';
+import { Key, Shield, Power, Loader2, Brain, LogOut, Save, RefreshCw, AlertTriangle, Database, Plus, Trash2, Pencil, X, BookOpen, Send, Bot, Sparkles, MessageCircle, Play, Pause } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api, type SyncDiagnostics, type Prompt } from '@/lib/api';
 import { toast } from 'sonner';
@@ -339,75 +339,25 @@ const SettingsPage = () => {
         </div>
       </motion.div>
 
-      {/* Automation Toggle + Settings */}
+      {/* Automation status — Reply Chance, Response Speed & Question Cooldown moved to Dashboard */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass rounded-xl p-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-warning/15 flex items-center justify-center"><Power className="w-5 h-5 text-warning" /></div>
             <div>
               <h3 className="font-semibold text-foreground text-sm">Automation</h3>
-              <p className="text-xs text-muted-foreground">Enable automated message handling</p>
+              <p className="text-xs text-muted-foreground">
+                {autoEnabled
+                  ? <>Automation is <span className="font-semibold text-foreground">ON</span> — {activeSpeed.label}, {replyChance}% reply chance</>
+                  : <>Automation is <span className="font-semibold text-foreground">OFF</span></>}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-1">Manage reply chance, speed & question cooldown on the <Link to="/" className="text-primary hover:underline">Dashboard</Link>.</p>
             </div>
           </div>
-          <button onClick={handleToggleAuto} className={`relative w-12 h-6 rounded-full transition-colors ${autoEnabled ? 'bg-primary' : 'bg-muted'}`}>
-            <motion.div animate={{ x: autoEnabled ? 24 : 2 }} transition={{ type: 'spring', stiffness: 500, damping: 30 }} className="absolute top-1 w-4 h-4 rounded-full bg-foreground" />
-          </button>
         </div>
         {autoEnabled && (
           <AnimatePresence>
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mt-4 space-y-5">
-              <div className="p-3 rounded-lg bg-warning/10 border border-warning/20">
-                <div className="flex items-start gap-2">
-                  <Shield className="w-4 h-4 text-warning mt-0.5 flex-shrink-0" />
-                  <p className="text-xs text-warning">
-                    Automation is ON. Active timing is <span className="font-semibold">{activeSpeed.label}</span> ({activeSpeed.desc}) with <span className="font-semibold">{replyChance}%</span> reply chance.
-                  </p>
-                </div>
-              </div>
-
-
-              {/* Reply Chance */}
-              <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Dice5 className="w-4 h-4 text-primary" />
-                    <label className="text-sm font-medium text-foreground">Reply Chance</label>
-                  </div>
-                  <span className="text-sm font-bold text-primary">{replyChance}%</span>
-                </div>
-                <p className="text-xs text-muted-foreground">How often should you reply? Celebrities don't answer everything 😎</p>
-                <Slider value={[replyChance]} onValueChange={(val) => setReplyChance(val[0])}
-                  onValueCommit={(val) => saveAvailabilitySetting('ai_reply_chance', String(val[0]))}
-                  min={10} max={100} step={5} className="w-full" />
-                <div className="flex justify-between text-[10px] text-muted-foreground">
-                  <span>Ghost mode 👻</span>
-                  <span>Always available 📱</span>
-                </div>
-              </div>
-
-              {/* Response Speed */}
-              <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
-                <div className="flex items-center gap-2">
-                  <Gauge className="w-4 h-4 text-primary" />
-                  <label className="text-sm font-medium text-foreground">Response Speed</label>
-                </div>
-                <p className="text-xs text-muted-foreground">Saved mode: {activeSpeed.label} — replies wait {activeSpeed.desc} before sending, then typing time scales with the reply length.</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {SPEED_OPTIONS.map((option) => (
-                    <button key={option.id}
-                      onClick={() => { setResponseSpeed(option.id); saveAvailabilitySetting('ai_response_speed', option.id); }}
-                      className={`p-3 rounded-lg border text-center transition-all ${
-                        responseSpeed === option.id
-                          ? 'bg-primary/15 border-primary text-primary'
-                          : 'bg-secondary border-border text-muted-foreground hover:border-primary/30'
-                      }`}>
-                      <div className="text-lg mb-1">{option.emoji}</div>
-                      <div className="text-xs font-medium">{option.label}</div>
-                      <div className="text-[10px] opacity-70">{option.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
 
               {/* AI Voice Notes */}
               <div className="space-y-3 p-4 rounded-lg bg-secondary/50 border border-border">
