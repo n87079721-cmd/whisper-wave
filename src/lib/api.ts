@@ -643,6 +643,14 @@ export const api = {
     });
   },
 
+  rewriteContactDirective(contactId: string, raw: string) {
+    return requestJson<{ directive: string }>(`/api/contacts/${contactId}/directive/rewrite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw }),
+    });
+  },
+
   toggleContactAI(contactId: string, enabled: boolean) {
     return requestJson<{ success: boolean }>(`/api/contacts/${contactId}/ai-toggle`, {
       method: 'PUT',
