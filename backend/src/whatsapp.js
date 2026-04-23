@@ -2909,18 +2909,34 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, persona: personaName, historyLength: messages.length, unrepliedCount, timezone: tz, forceRebatch: !!forceReply });
 
   // ── #3 Question budget + #5 Topic exhaustion ──
-  // Look at the last 4 outgoing AI replies. Count question marks and detect
-  // overused topic nouns. Inject mechanical guardrails so the model can't
-  // ignore the persona's "max 1 question per 3-4 messages" / "don't loop" rules.
-  const lastFourReplies = recentOutgoing.slice(-4);
-  const questionsInWindow = lastFourReplies.reduce(
-    (sum, r) => sum + (String(r || '').match(/\?/g) || []).length, 0,
-  );
-  const overQuestionBudget = questionsInWindow >= 2;
+  // Rule: after 3 consecutive replies that contain a question, the next 2
+  // replies MUST be question-free. Then the cycle resets. Walk the recent
+  // outgoing replies from newest → oldest to count the current "cooldown"
+  // state.
+  const lastFiveReplies = recentOutgoing.slice(-5);
+  const replyHasQuestion = (r) => /\?/.test(String(r || ''));
+
+  // Count how many of the most-recent replies were question-free (cooldown progress).
+  let coolingReplies = 0;
+  for (let i = lastFiveReplies.length - 1; i >= 0; i--) {
+    if (replyHasQuestion(lastFiveReplies[i])) break;
+    coolingReplies++;
+  }
+  // Count the streak of question-bearing replies that came BEFORE the cooldown.
+  let questionStreak = 0;
+  for (let i = lastFiveReplies.length - 1 - coolingReplies; i >= 0; i--) {
+    if (replyHasQuestion(lastFiveReplies[i])) questionStreak++;
+    else break;
+  }
+
+  // Trigger cooldown when we've hit 3 question-replies and haven't yet served 2 question-free ones.
+  const overQuestionBudget = questionStreak >= 3 && coolingReplies < 2;
+  const cooldownRemaining = overQuestionBudget ? (2 - coolingReplies) : 0;
 
   // Detect topic noun loops: any 4+ char alpha word appearing in 3+ of the
  // last 4 replies. Strip stopwords. Cheap, no API call.
   const STOPWORDS = new Set(['this','that','what','your','have','just','like','really','about','from','with','they','them','then','than','when','where','will','would','could','should','been','being','were','also','only','still','even','some','much','most','very','sure','okay','yeah','yeahh','yeahhh','lmao','lmaoo','haha','hahaha','tbh','ngl','idk','fr','i\'m','it\'s','that\'s','don\'t','can\'t','won\'t','you\'re','they\'re','we\'re']);
+  const lastFourReplies = recentOutgoing.slice(-4);
   const wordCounts = {};
   for (const r of lastFourReplies) {
     const seen = new Set();
@@ -2937,7 +2953,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   let guardrails = '';
   if (overQuestionBudget) {
-    guardrails += `\n\n🚫 QUESTION BUDGET HIT: You've asked ${questionsInWindow} questions in your last ${lastFourReplies.length} replies. THIS REPLY MUST CONTAIN ZERO QUESTION MARKS. End on a statement, a reaction, or a small share about yourself. No "?". No rhetorical questions either.`;
+    guardrails += `\n\n🚫 QUESTION COOLDOWN ACTIVE: Your last ${questionStreak} replies all contained questions. THIS REPLY (and the next ${cooldownRemaining - 1 >= 0 ? cooldownRemaining - 1 : 0} after) MUST CONTAIN ZERO QUESTION MARKS. End on a statement, a reaction, or a small share about yourself. No "?". No rhetorical questions either. Let them lead the conversation for a beat.`;
   }
   if (overusedTopics.length > 0) {
     guardrails += `\n\n♻️ TOPIC LOOP DETECTED: You keep coming back to: ${overusedTopics.join(', ')}. Do NOT mention these words in this reply. Pivot to something fresh — a different memory, a small observation about your day/surroundings, a new thread.`;
