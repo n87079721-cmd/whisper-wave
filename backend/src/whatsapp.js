@@ -3002,6 +3002,8 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       questionsInWindow,
       overQuestionBudget,
       overusedTopics,
+      memoryRecallHits,
+      memoryAvailable,
     });
   }
 
