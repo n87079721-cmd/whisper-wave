@@ -2874,12 +2874,59 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const personaName = getActivePersonaName(db, userId, contactId);
   const replyLanguage = getContactReplyLanguage(db, userId, contactId);
   debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, persona: personaName, historyLength: messages.length, unrepliedCount, timezone: tz, forceRebatch: !!forceReply });
+
+  // ── #3 Question budget + #5 Topic exhaustion ──
+  // Look at the last 4 outgoing AI replies. Count question marks and detect
+  // overused topic nouns. Inject mechanical guardrails so the model can't
+  // ignore the persona's "max 1 question per 3-4 messages" / "don't loop" rules.
+  const lastFourReplies = recentOutgoing.slice(-4);
+  const questionsInWindow = lastFourReplies.reduce(
+    (sum, r) => sum + (String(r || '').match(/\?/g) || []).length, 0,
+  );
+  const overQuestionBudget = questionsInWindow >= 2;
+
+  // Detect topic noun loops: any 4+ char alpha word appearing in 3+ of the
+ // last 4 replies. Strip stopwords. Cheap, no API call.
+  const STOPWORDS = new Set(['this','that','what','your','have','just','like','really','about','from','with','they','them','then','than','when','where','will','would','could','should','been','being','were','also','only','still','even','some','much','most','very','sure','okay','yeah','yeahh','yeahhh','lmao','lmaoo','haha','hahaha','tbh','ngl','idk','fr','i\'m','it\'s','that\'s','don\'t','can\'t','won\'t','you\'re','they\'re','we\'re']);
+  const wordCounts = {};
+  for (const r of lastFourReplies) {
+    const seen = new Set();
+    for (const w of String(r || '').toLowerCase().match(/[a-z']{4,}/g) || []) {
+      if (STOPWORDS.has(w) || seen.has(w)) continue;
+      seen.add(w);
+      wordCounts[w] = (wordCounts[w] || 0) + 1;
+    }
+  }
+  const overusedTopics = Object.entries(wordCounts)
+    .filter(([, c]) => c >= 3)
+    .map(([w]) => w)
+    .slice(0, 5);
+
+  let guardrails = '';
+  if (overQuestionBudget) {
+    guardrails += `\n\n🚫 QUESTION BUDGET HIT: You've asked ${questionsInWindow} questions in your last ${lastFourReplies.length} replies. THIS REPLY MUST CONTAIN ZERO QUESTION MARKS. End on a statement, a reaction, or a small share about yourself. No "?". No rhetorical questions either.`;
+  }
+  if (overusedTopics.length > 0) {
+    guardrails += `\n\n♻️ TOPIC LOOP DETECTED: You keep coming back to: ${overusedTopics.join(', ')}. Do NOT mention these words in this reply. Pivot to something fresh — a different memory, a small observation about your day/surroundings, a new thread.`;
+  }
+
   // When this is a forced rebatch (a new message arrived mid-typing and we cancelled
   // the prior in-flight reply), tell the model so it knows to integrate the LATEST
   // message into its single combined reply, using the latest local time of day.
-  const promptForGen = forceReply
+  const basePrompt = forceReply
     ? `${systemPrompt}\n\n⚠️ REBATCH: A new message just arrived while you were about to reply. Re-read the LAST few messages and reply to the latest one (and the ones above it together) — don't reply to the older context as if nothing changed. Use the current local time of day for tone.`
     : systemPrompt;
+  const promptForGen = `${basePrompt}${guardrails}`;
+
+  if (guardrails) {
+    debugLog(db, userId, 'reply_guardrails_injected', {
+      contact: contactName || phone,
+      questionsInWindow,
+      overQuestionBudget,
+      overusedTopics,
+    });
+  }
+
   let replyText = await generateReply(keyRow.value, messages, promptForGen, contactName || phone, { unrepliedCount, timezone: tz, replyLanguage });
   replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
