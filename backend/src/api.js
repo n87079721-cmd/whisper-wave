@@ -1249,7 +1249,21 @@ RULES:
       // Enhance ALWAYS uses the admin's OpenAI key for every account.
       const openaiKey = getAdminEnhanceOpenAIKey(db);
       if (!openaiKey) return res.status(400).json({ error: 'Admin OpenAI API key not configured — cannot enhance VN text.' });
-      const speakable = await enhanceTextForVoice(openaiKey, text);
+      // Lock enhancer to per-contact reply language (if set) so the spoken
+      // text stays in the target language instead of drifting to English.
+      let voiceNoteLang = null;
+      try {
+        if (contactRow?.id) {
+          const langRow = db.prepare(
+            "SELECT reply_language FROM contacts WHERE id = ? AND user_id = ?"
+          ).get(contactRow.id, req.userId);
+          const lang = langRow?.reply_language;
+          if (lang && lang.toLowerCase() !== 'auto' && lang.toLowerCase() !== 'english') {
+            voiceNoteLang = lang;
+          }
+        }
+      } catch { /* non-fatal */ }
+      const speakable = await enhanceTextForVoice(openaiKey, text, voiceNoteLang);
       const audioBuffer = await generateVoiceNote(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
 
       const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
@@ -1363,14 +1377,20 @@ RULES:
   // ── Enhance text ────────────────────────────────────────
   router.post('/enhance', async (req, res) => {
     try {
-      const { text } = req.body;
+      const { text, language } = req.body;
       if (!text) return res.status(400).json({ error: 'Missing text' });
 
       // Enhance ALWAYS uses the admin's OpenAI key for every account.
       const apiKey = getAdminEnhanceOpenAIKey(db);
       if (!apiKey) return res.status(400).json({ error: 'Admin OpenAI API key not configured.' });
 
-      const enhanced = await enhanceTextForVoice(apiKey, text);
+      // Optional language lock: callers (e.g. Voice Studio per-contact preview)
+      // can pass a target language so the enhancer keeps fillers/contractions
+      // in that language instead of defaulting to English.
+      const lockLang = (language && typeof language === 'string'
+        && !['auto', 'english', ''].includes(language.toLowerCase().trim()))
+        ? language.trim() : null;
+      const enhanced = await enhanceTextForVoice(apiKey, text, lockLang);
 
       res.json({ enhanced });
     } catch (err) {

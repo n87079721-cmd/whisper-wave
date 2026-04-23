@@ -2921,7 +2921,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             // user's auto-reply this is. Per product rule: "enhance" = admin key.
             const adminEnhanceKey = getAdminEnhanceOpenAIKey(db);
             if (!adminEnhanceKey) throw new Error('Admin OpenAI API key not configured — cannot enhance VN text.');
-            const enhanced = await enhanceTextForVoice(adminEnhanceKey, replyText);
+            // Lock the enhancer to the contact's reply language so v3 fillers/contractions
+            // stay in the target language (not English).
+            const enhanced = await enhanceTextForVoice(adminEnhanceKey, replyText, replyLanguage || null);
             const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
             const audioBuffer = await generateVoiceNote(
               elKey,
@@ -4009,9 +4011,12 @@ export function getTelegramCallbackHandlers(userId, db) {
         // Tag-aware processing:
         //   - If user already wrote tags → pass through as-is (their tags win).
         //   - If no tags → call admin-enhance to add expressive v3 tags first.
+        // Pass per-contact language so the enhancer keeps fillers/contractions
+        // in the target language instead of drifting to English.
+        const sendVnLang = getContactReplyLanguage(db, userId, contact.id);
         const speakable = hasV3Tags
           ? replyText
-          : await enhanceTextForVoice(openaiKey, replyText);
+          : await enhanceTextForVoice(openaiKey, replyText, sendVnLang || null);
 
         const audioBuffer = await generateVoiceNote(
           elKey, speakable, voiceId, modelId, bgSound,
