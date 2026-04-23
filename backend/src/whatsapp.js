@@ -2322,8 +2322,8 @@ Tag categories you can draw from (combine freely):
 • Sound effects (sparingly, only if it fits): [applause], [clapping], [gunshot], [explosion], [door slams], [phone rings] — usually skip for casual VNs
 
 TEXT FILTERS — Make it sound SPOKEN, not typed:
-- Use fillers naturally: "like", "you know", "I mean", "honestly", "basically", "right?", "so yeah", "anyway", "look", "thing is"
-- Use casual contractions and slang: "gonna", "wanna", "kinda", "sorta", "dunno", "lemme", "y'know", "ngl", "tbh", "lowkey"
+- Use natural spoken fillers in the SAME LANGUAGE as the input (English examples below are illustrative; if input is in another language, use that language's equivalents): "like", "you know", "I mean", "honestly", "basically", "right?", "so yeah", "anyway", "look", "thing is"
+- Use casual contractions and slang in the input's language. English examples: "gonna", "wanna", "kinda", "sorta", "dunno", "lemme", "y'know", "ngl", "tbh", "lowkey". For other languages, use that language's natural casual register — never substitute English words.
 - Self-corrections mid-sentence: "I was gonna— actually no, I think..."
 - Trailing thoughts: "but yeah..." or "so... yeah"
 - Verbal reactions: "oh!", "wait", "okay so", "ugh", "hmm", "right right right"
@@ -2342,7 +2342,7 @@ RULES:
 - AT LEAST half of the tag groups should be STACKS of 2-3 tags, not single tags. Single tags are fine sometimes; stacks are better.
 - At least 2 pacing/breath cues (pauses, breaths, hesitations) per rewrite — these can be inside a stack or on their own line
 - Break long sentences into shorter spoken fragments
-- Use contractions everywhere (I'm, don't, can't, won't, it's, that's, there's)
+- Use contractions everywhere when the language supports them (English: I'm, don't, can't, won't, it's, that's, there's; French: j'ai, c'est, t'es; etc.). For languages without contractions, just keep it natural and conversational.
 - Match tag stacks to context: happy → [excited][warm][laughing], heavy → [pause][soft][sighing], funny → [chuckles][amused], serious → [inhaling sharply][serious tone][matter-of-fact], reassuring → [gentle][protective tone][soft], awkward → [hesitates][nervously][small pause]
 - Accent / character / singing tags are OPT-IN: do NOT add them unless the source text clearly implies it (e.g. an impression, lyrics in quotes, an established character persona). For a normal VN, leave them out.
 - If input already had tags, completely rewrite with fresh emotion and new tags
