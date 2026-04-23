@@ -2281,7 +2281,7 @@ function decideVoiceNote(db, userId, contactId, replyText) {
 // Rewrite reply text via OpenAI to add ElevenLabs v3 expression tags.
 // This is the single source of truth for both the manual Enhance button and
 // Telegram/AI "send as VN" flows so they behave identically.
-export async function enhanceTextForVoice(openaiKey, text) {
+export async function enhanceTextForVoice(openaiKey, text, targetLanguage = null) {
   const cleanedInput = String(text)
     .replace(/\[[^\]\n]{1,40}\]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -2294,7 +2294,11 @@ export async function enhanceTextForVoice(openaiKey, text) {
   const tagRange = wordCount <= 15 ? '2-3' : wordCount <= 40 ? '4-6' : wordCount <= 80 ? '6-10' : '8-15';
   const minTags = parseInt(tagRange.split('-')[0], 10) || 2;
 
-  const baseSystem = `You rewrite text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note. You ARE this person — you feel things, you react, you breathe.
+  const langLock = (targetLanguage && !['auto', 'english'].includes(String(targetLanguage).toLowerCase()))
+    ? `\n\n🌐 LANGUAGE LOCK — CRITICAL: The spoken text MUST be in ${targetLanguage} ONLY. The input is already in ${targetLanguage}. Do NOT translate it to English. Do NOT mix English words in. Do NOT use English fillers like "gonna", "wanna", "y'know", "lowkey", "ngl", "tbh", "I mean", "you know" — instead use the equivalent NATURAL spoken fillers in ${targetLanguage}. Contractions, slang, fillers, self-corrections — all of them must be in ${targetLanguage}. The bracketed audio tags ([soft], [pause], etc.) STAY in English (they're directives, not spoken). Everything OUTSIDE the brackets must be ${targetLanguage}. If you find yourself writing an English word that isn't a proper noun, replace it with the ${targetLanguage} equivalent.`
+    : '';
+
+  const baseSystem = `You rewrite text for ElevenLabs v3 Human Mode so it sounds like a real person speaking in a WhatsApp voice note. You ARE this person — you feel things, you react, you breathe.${langLock}
 
 ELEVENLABS v3 AUDIO TAGS — use bracketed cues to direct delivery. v3 accepts BOTH the canonical tag list AND free-form descriptors (e.g. [soft], [warm], [protective tone], [matter-of-fact], [low], [gentle warning], [tone shifts slightly]). Use whichever fits the moment.
 
