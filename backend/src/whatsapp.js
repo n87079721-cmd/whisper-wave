@@ -2943,6 +2943,51 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     guardrails += `\n\n♻️ TOPIC LOOP DETECTED: You keep coming back to: ${overusedTopics.join(', ')}. Do NOT mention these words in this reply. Pivot to something fresh — a different memory, a small observation about your day/surroundings, a new thread.`;
   }
 
+  // ── MEMORY RECALL ENFORCEMENT ──
+  // Pull the contact's stored memory and keyword-match against the latest
+  // incoming message. When the user mentions something we already know about
+  // (a name, place, job, plan, feeling), force the model to reference it
+  // instead of asking a generic question. This is the mechanical version of
+  // "use your memory before replying."
+  let memoryRecallHits = [];
+  let memoryAvailable = false;
+  try {
+    const memRow = db.prepare('SELECT memory, memory_enabled FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+    const memEnabled = memRow?.memory_enabled === undefined || memRow?.memory_enabled === null ? 1 : memRow.memory_enabled;
+    const memoryText = (memEnabled !== 0 && memRow?.memory) ? String(memRow.memory) : '';
+    memoryAvailable = memoryText.length > 0;
+    if (memoryAvailable && latestMsgText) {
+      // Extract candidate "facts" from memory: 4+ char alpha tokens, lowercase,
+      // skip stopwords/persona-fluff. Names (capitalized in memory) are kept too.
+      const MEM_STOP = new Set([...STOPWORDS, 'asked','knows','open','none','contact','user','memory','said','told','mentioned','today','yesterday','tomorrow','morning','evening','night','message','conversation','reply','replied','answer','question','feels','feeling','wants','needs','likes','loves','hates','going','doing','thinking','talking','shared']);
+      const memTokens = new Set();
+      for (const w of memoryText.toLowerCase().match(/[a-zà-ÿ']{4,}/gi) || []) {
+        const lw = w.toLowerCase();
+        if (MEM_STOP.has(lw)) continue;
+        memTokens.add(lw);
+      }
+      // Now scan the latest incoming message for any of those tokens.
+      const incomingTokens = (latestMsgText.toLowerCase().match(/[a-zà-ÿ']{4,}/gi) || []).map(s => s.toLowerCase());
+      const hits = new Set();
+      for (const t of incomingTokens) {
+        if (memTokens.has(t)) hits.add(t);
+      }
+      memoryRecallHits = Array.from(hits).slice(0, 6);
+    }
+  } catch {}
+
+  if (memoryRecallHits.length > 0) {
+    guardrails += `\n\n🧠 MEMORY RECALL — REQUIRED: Their message references things you already know about: "${memoryRecallHits.join('", "')}". BEFORE replying, scan the MEMORY OF PAST CONVERSATIONS section in your system prompt for what you know about these. Reference that context naturally in your reply (e.g. "still on that thing with X?" / "how'd that work out"). Do NOT ask them to re-explain what they already told you. Do NOT treat it as new info.`;
+    debugLog(db, userId, 'memory_recall_triggered', {
+      contact: contactName || phone,
+      hits: memoryRecallHits,
+      incomingPreview: String(latestMsgText).slice(0, 80),
+    });
+  } else if (memoryAvailable) {
+    // No direct keyword hit, but memory exists. Soft nudge to consult it.
+    guardrails += `\n\n🧠 MEMORY CHECK: You have stored memory about this contact. Before replying, glance at the MEMORY section above. If anything there is relevant to what they just said — even loosely — reference it instead of starting from zero. If nothing fits, ignore this and reply normally.`;
+  }
+
   // When this is a forced rebatch (a new message arrived mid-typing and we cancelled
   // the prior in-flight reply), tell the model so it knows to integrate the LATEST
   // message into its single combined reply, using the latest local time of day.
@@ -2957,6 +3002,8 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       questionsInWindow,
       overQuestionBudget,
       overusedTopics,
+      memoryRecallHits,
+      memoryAvailable,
     });
   }
 
