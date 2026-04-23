@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Activity, MessageSquare, Mic, Users, Wifi, WifiOff, Loader2, AlertTriangle, Settings, QrCode, Phone, ArrowRight } from 'lucide-react';
 import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
 import StatusBadge from '@/components/StatusBadge';
+import AiReplyTuning from '@/components/AiReplyTuning';
 import { api, isBackendConfigured } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
@@ -237,6 +238,9 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
           </div>
         ))}
       </div>
+
+      {/* AI Reply Tuning — promoted from Settings */}
+      <AiReplyTuning />
 
       {/* Quick actions */}
       <div className="flex flex-wrap gap-2">
