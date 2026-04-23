@@ -3807,7 +3807,11 @@ export function getTelegramCallbackHandlers(userId, db) {
         if (!hasV3Tags) {
           const openaiKey = getAdminEnhanceOpenAIKey(db);
           if (!openaiKey) throw new Error('No tags found and admin OpenAI key is not configured for auto-enhancement.');
-          speakable = await enhanceTextForVoice(openaiKey, pastedText);
+          // Auto-detect language from the pasted text so the enhancer doesn't
+          // drift to English. No contact context here (userbot /send is
+          // recipient-only), so we sniff the text itself.
+          const detectedLang = detectLanguageFromText(pastedText);
+          speakable = await enhanceTextForVoice(openaiKey, pastedText, detectedLang);
         }
 
         // Voice: per-user Telegram VN voice → global default → fallback.
