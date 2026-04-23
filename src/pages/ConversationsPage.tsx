@@ -77,6 +77,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [contactMemory, setContactMemory] = useState('');
   const [contactDirective, setContactDirective] = useState('');
   const [contactDirectiveExpires, setContactDirectiveExpires] = useState('');
+  const [directiveRaw, setDirectiveRaw] = useState('');
+  const [rewritingDirective, setRewritingDirective] = useState(false);
   const [contactAiEnabled, setContactAiEnabled] = useState(true);
   const [contactAutoInitiate, setContactAutoInitiate] = useState(false);
   const [savingMemory, setSavingMemory] = useState(false);
@@ -1412,6 +1414,38 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                         placeholder="e.g. Act distant and busy, respond slowly..."
                         className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[60px] resize-y placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       />
+                      {/* Free-form rewrite: type however you want, AI cleans it up */}
+                      <div className="mt-2 rounded-md border border-dashed border-input bg-secondary/40 p-2">
+                        <p className="text-[11px] text-muted-foreground mb-1.5">
+                          ✨ Or just say what you want in your own words and let AI write the directive:
+                        </p>
+                        <textarea
+                          value={directiveRaw}
+                          onChange={(e) => setDirectiveRaw(e.target.value)}
+                          placeholder="e.g. idk just be more chill, stop asking so many questions, talk about yourself sometimes too..."
+                          className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs min-h-[50px] resize-y placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                        <button
+                          disabled={rewritingDirective || !directiveRaw.trim()}
+                          onClick={async () => {
+                            if (!selectedContact) return;
+                            setRewritingDirective(true);
+                            try {
+                              const { directive } = await api.rewriteContactDirective(selectedContact.id, directiveRaw);
+                              setContactDirective(directive);
+                              toast.success('Rewritten — review then Save');
+                            } catch (err) {
+                              toast.error(err instanceof Error ? err.message : 'Rewrite failed');
+                            } finally {
+                              setRewritingDirective(false);
+                            }
+                          }}
+                          className="mt-1.5 px-2.5 py-1 text-[11px] rounded-md bg-secondary text-foreground hover:bg-secondary/70 disabled:opacity-50"
+                        >
+                          {rewritingDirective ? 'Rewriting…' : '✨ Rewrite with AI'}
+                        </button>
+                        <span className="ml-2 text-[11px] text-muted-foreground">Not happy? Edit your note and tap again.</span>
+                      </div>
                       <div className="flex items-center gap-2 mt-1.5">
                         <input
                           type="date"

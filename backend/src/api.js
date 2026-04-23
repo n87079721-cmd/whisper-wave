@@ -729,6 +729,61 @@ export function createApiRouter(db) {
     }
   });
 
+  // Rewrite a free-form natural-language note into a clean, AI-ready directive.
+  // The user types however they want ("idk just be more chill and stop asking
+  // so many questions, also flirt a lil") and we turn it into a tight
+  // instruction the reply model can follow.
+  router.post('/contacts/:id/directive/rewrite', async (req, res) => {
+    try {
+      const { raw } = req.body || {};
+      if (!raw || !String(raw).trim()) {
+        return res.status(400).json({ error: 'Empty input' });
+      }
+      const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(req.userId);
+      const apiKey = keyRow?.value || process.env.OPENAI_API_KEY;
+      if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured in Settings.' });
+
+      const contact = db.prepare('SELECT name FROM contacts WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
+      const contactName = contact?.name || 'this contact';
+
+      const system = `You convert messy, conversational user notes into a SHORT, clear behavior directive for an AI that texts on the user's behalf with ${contactName} on WhatsApp.
+
+RULES:
+- Output ONLY the rewritten directive. No preamble, no quotes, no explanation.
+- Keep the user's intent EXACTLY. Do not add behaviors they didn't ask for.
+- Be concise: 1-3 sentences, max ~60 words.
+- Use second person imperative ("Be...", "Don't...", "Reply..."), like an instruction.
+- Preserve any specific rules they mention (tone, frequency, topics to avoid, things to bring up).
+- If they wrote in another language, keep the directive in English unless they specifically asked otherwise.
+- Strip filler ("idk", "like", "i guess", "maybe just"). Keep the actual instruction.
+- Do not invent a persona or backstory. This is a behavior tweak, not a character.`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: String(raw).slice(0, 2000) },
+          ],
+          max_tokens: 200,
+          temperature: 0.6,
+        }),
+      });
+      if (!response.ok) {
+        const t = await response.text().catch(() => '');
+        return res.status(502).json({ error: `AI rewrite failed: ${response.status} ${t.slice(0, 200)}` });
+      }
+      const data = await response.json();
+      const directive = (data.choices?.[0]?.message?.content || '').trim().replace(/^["']|["']$/g, '');
+      if (!directive) return res.status(502).json({ error: 'AI returned empty result' });
+      res.json({ directive });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.put('/contacts/:id/ai-toggle', (req, res) => {
     try {
       const { enabled } = req.body;
