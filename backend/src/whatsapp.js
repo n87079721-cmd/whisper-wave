@@ -6,7 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
-import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory, detectAndTranslate } from './ai.js';
+import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory, detectAndTranslate, translateToLanguage } from './ai.js';
 import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, claimPreviewByToken, consumeSensitiveAlert, sendVoiceNoteTranscript, sendForeignLanguageAlert } from './telegram.js';
 import { transcribeAudio, generateVoiceNote } from './elevenlabs.js';
 
@@ -4070,13 +4070,35 @@ export function getTelegramCallbackHandlers(userId, db) {
         const elKey = getConfigValue(db, userId, 'elevenlabs_api_key', '') || process.env.ELEVENLABS_API_KEY;
         if (!elKey) return { ok: false, reason: 'ElevenLabs API key not configured' };
 
-        const hasV3Tags = /\[[A-Za-z][A-Za-z0-9 _-]{0,28}\]/.test(text);
+        // If the contact has a per-contact reply language lock (e.g. Yoruba,
+        // French), translate the typed text into that language BEFORE we
+        // detect tags / enhance / TTS. The phone owner can type in English
+        // and the VN will be spoken in the contact's language. Audio tags
+        // like [soft][pause] are preserved by the translator.
+        let workingText = text;
+        const contactLang = getContactReplyLanguage(db, userId, contact.id);
+        if (contactLang && contactLang.toLowerCase() !== 'auto' && contactLang.toLowerCase() !== 'english') {
+          const enhanceKey = getAdminEnhanceOpenAIKey(db);
+          if (enhanceKey) {
+            const translated = await translateToLanguage(enhanceKey, text, contactLang);
+            if (translated && translated.trim()) {
+              workingText = translated.trim();
+              debugLog(db, userId, 'telegram_vn_translated', {
+                jid, targetLanguage: contactLang,
+                originalPreview: text.slice(0, 80),
+                translatedPreview: workingText.slice(0, 80),
+              });
+            }
+          }
+        }
+
+        const hasV3Tags = /\[[A-Za-z][A-Za-z0-9 _-]{0,28}\]/.test(workingText);
         let openaiKey = null;
         if (!hasV3Tags) {
           openaiKey = getAdminEnhanceOpenAIKey(db);
           if (!openaiKey) return { ok: false, reason: 'No tags + admin OpenAI key not configured' };
         }
-        const speakable = hasV3Tags ? text : await enhanceTextForVoice(openaiKey, text);
+        const speakable = hasV3Tags ? workingText : await enhanceTextForVoice(openaiKey, workingText);
 
         // Same voice resolution as onSendVN: Telegram override → persona → default.
         const telegramVoiceOverride = getConfigValue(db, userId, 'ai_telegram_vn_voice_id', '');
@@ -4107,7 +4129,7 @@ export function getTelegramCallbackHandlers(userId, db) {
         db.prepare(`
           INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
           VALUES (?, ?, ?, ?, ?, 'voice', 'sent', datetime('now'), 'sent', ?, ?, ?)
-        `).run(replyId, userId, contact.id, jid, text, voiceMedia.mediaPath, voiceMedia.mediaName, voiceMedia.mediaMime);
+        `).run(replyId, userId, contact.id, jid, workingText, voiceMedia.mediaPath, voiceMedia.mediaName, voiceMedia.mediaMime);
         db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contact.id);
         db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(userId);
         db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'telegram_vn_sent', ?)`).run(userId, JSON.stringify({ contactId: contact.id, source: 'sensitive_alert' }));
