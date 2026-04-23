@@ -2281,6 +2281,55 @@ function decideVoiceNote(db, userId, contactId, replyText) {
 // Rewrite reply text via OpenAI to add ElevenLabs v3 expression tags.
 // This is the single source of truth for both the manual Enhance button and
 // Telegram/AI "send as VN" flows so they behave identically.
+/**
+ * Lightweight script-based language detection (no API call).
+ * Used by VN flows that have no contact context (e.g. userbot /send) to
+ * keep the enhancer in the SAME language as the pasted text. Returns a
+ * language name like "Yoruba", "French", "Arabic", or null when the text
+ * looks like English / can't be confidently identified (in which case the
+ * enhancer just runs normally).
+ */
+function detectLanguageFromText(rawText) {
+  const text = String(rawText || '').trim();
+  if (!text || text.length < 4) return null;
+
+  // 1) Non-Latin scripts → unambiguous
+  if (/[\u0600-\u06FF]/.test(text)) return 'Arabic';
+  if (/[\u0400-\u04FF]/.test(text)) return 'Russian';
+  if (/[\u0590-\u05FF]/.test(text)) return 'Hebrew';
+  if (/[\u4E00-\u9FFF]/.test(text)) return 'Chinese';
+  if (/[\u3040-\u309F\u30A0-\u30FF]/.test(text)) return 'Japanese';
+  if (/[\uAC00-\uD7AF]/.test(text)) return 'Korean';
+  if (/[\u0900-\u097F]/.test(text)) return 'Hindi';
+  if (/[\u0E00-\u0E7F]/.test(text)) return 'Thai';
+  if (/[\u0370-\u03FF]/.test(text)) return 'Greek';
+  if (/[\u0980-\u09FF]/.test(text)) return 'Bengali';
+
+  // 2) Latin-script: lightweight word-marker detection.
+  const lower = ' ' + text.toLowerCase().replace(/[^a-záéíóúüñçàâäêëîïôöùûœæßãõ\s]/g, ' ').replace(/\s+/g, ' ') + ' ';
+  const has = (words) => words.some(w => lower.includes(' ' + w + ' '));
+
+  // Yoruba — diacritics + common particles
+  if (/[ẹọṣ]/i.test(text) || has(['ṣe', 'ńkọ', 'jọwọ', 'oga', 'jare', 'abeg', 'ṣebi', 'ṣé', 'kíni'])) return 'Yoruba';
+  // French
+  if (has(['je', 'tu', 'le', 'la', 'les', 'un', 'une', 'des', 'mais', 'avec', 'pour', 'que', 'qui', 'pas', 'tout', "c'est", 'mon', 'ton', 'son', 'nous', 'vous'])) return 'French';
+  // Spanish
+  if (has(['hola', 'pero', 'que', 'como', 'estoy', 'tengo', 'tienes', 'gracias', 'por', 'para', 'muy', 'esta', 'este', 'eres', 'soy', 'aqui', 'también'])) return 'Spanish';
+  // Portuguese
+  if (has(['você', 'voce', 'estou', 'obrigado', 'obrigada', 'então', 'tudo', 'bem', 'muito', 'também', 'fazer', 'gente', 'cara'])) return 'Portuguese';
+  // German
+  if (has(['ich', 'bin', 'das', 'ist', 'nicht', 'mit', 'auch', 'aber', 'noch', 'wenn', 'weil', 'sehr', 'kann', 'mein', 'dein'])) return 'German';
+  // Italian
+  if (has(['sono', 'sei', 'che', 'come', 'molto', 'però', 'anche', 'questo', 'quello', 'tutto', 'grazie', 'ciao', 'allora'])) return 'Italian';
+  // Pidgin / Naija English (treat as Pidgin so the enhancer keeps the register)
+  if (has(['abeg', 'wahala', 'sabi', 'oga', 'wetin', 'naa', 'shey', 'biko', 'no wahala', 'omo', 'sef', 'jare', 'dey', 'gan'])) return 'Nigerian Pidgin';
+  // Swahili
+  if (has(['habari', 'asante', 'sana', 'rafiki', 'mzuri', 'pole', 'karibu', 'jambo', 'mimi', 'wewe', 'nataka'])) return 'Swahili';
+
+  // Default: looks English → no lock.
+  return null;
+}
+
 export async function enhanceTextForVoice(openaiKey, text, targetLanguage = null) {
   const cleanedInput = String(text)
     .replace(/\[[^\]\n]{1,40}\]/g, ' ')
