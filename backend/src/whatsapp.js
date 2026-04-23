@@ -2921,7 +2921,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             // user's auto-reply this is. Per product rule: "enhance" = admin key.
             const adminEnhanceKey = getAdminEnhanceOpenAIKey(db);
             if (!adminEnhanceKey) throw new Error('Admin OpenAI API key not configured — cannot enhance VN text.');
-            const enhanced = await enhanceTextForVoice(adminEnhanceKey, replyText);
+            // Lock the enhancer to the contact's reply language so v3 fillers/contractions
+            // stay in the target language (not English).
+            const enhanced = await enhanceTextForVoice(adminEnhanceKey, replyText, replyLanguage || null);
             const bgVolume = parseFloat(getConfigValue(db, userId, 'ai_voice_bg_volume', '0.15'));
             const audioBuffer = await generateVoiceNote(
               elKey,
