@@ -648,3 +648,52 @@ Respond ONLY with a JSON object: {"language": "...", "languageCode": "...", "isE
     return null;
   }
 }
+
+/**
+ * Translate arbitrary text into a target natural language while preserving
+ * tone, slang, and any inline ElevenLabs v3 audio tags like [soft][pause].
+ *
+ * Used by the Telegram "🎤 Send VN" flow so that when the contact has a
+ * locked reply language (e.g. Yoruba), a VN typed in English by the phone
+ * owner is spoken in the contact's language. Returns null on failure so
+ * callers can fall back to the original text.
+ */
+export async function translateToLanguage(apiKey, text, targetLanguage) {
+  if (!apiKey || !text || !targetLanguage) return null;
+  const lang = String(targetLanguage).trim();
+  if (!lang || lang.toLowerCase() === 'auto' || lang.toLowerCase() === 'english') return null;
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You translate short casual text messages into ${lang} for a voice note.
+
+RULES:
+- Output ONLY the translation in ${lang}. No quotes, no preamble, no explanation.
+- Match the casual, spoken tone. If the input uses slang/contractions, use the natural ${lang} equivalent.
+- PRESERVE any bracketed audio tags exactly as-is and in the same positions: [soft], [pause], [serious tone], [breathes in], [warm], etc. These are voice direction tags — do NOT translate or remove them.
+- Preserve emojis and ellipses exactly.
+- If the input is already in ${lang}, return it unchanged.
+- Keep proper names (people, places, brands) in their original form unless ${lang} has a standard equivalent.
+- Do not add new sentences. Do not summarize. Do not censor.`,
+          },
+          { role: 'user', content: String(text).slice(0, 4000) },
+        ],
+        max_tokens: 800,
+        temperature: 0.3,
+      }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const translated = (data.choices?.[0]?.message?.content || '').trim();
+    return translated || null;
+  } catch {
+    return null;
+  }
+}
