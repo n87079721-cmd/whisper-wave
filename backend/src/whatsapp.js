@@ -4340,6 +4340,7 @@ export function getTelegramCallbackHandlers(userId, db) {
         db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(userId);
         db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'telegram_vn_sent', ?)`).run(userId, JSON.stringify({ contactId: contact.id }));
 
+        recordAiSend(userId, jid, replyText);
         emit(userId, 'message', { contactId: contact.id, msgId: replyId });
         lock?.release?.(true);
         return { ok: true };
@@ -4445,6 +4446,7 @@ export function getTelegramCallbackHandlers(userId, db) {
           INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
           VALUES (?, ?, ?, ?, ?, 'voice', 'sent', datetime('now'), 'sent', ?, ?, ?)
         `).run(replyId, userId, contact.id, jid, workingText, voiceMedia.mediaPath, voiceMedia.mediaName, voiceMedia.mediaMime);
+        recordAiSend(userId, jid, workingText);
         db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contact.id);
         db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(userId);
         db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'telegram_vn_sent', ?)`).run(userId, JSON.stringify({ contactId: contact.id, source: 'sensitive_alert' }));
