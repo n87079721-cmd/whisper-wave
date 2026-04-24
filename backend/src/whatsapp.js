@@ -4514,6 +4514,7 @@ function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactNa
         try {
           const sent = await sendTextMessage(userId, jid, replyText);
           const replyId = sent?.id?._serialized || uuid();
+          recordAiSend(userId, jid, replyText);
           await clearTypingState(userId, jid);
 
           db.prepare(`
