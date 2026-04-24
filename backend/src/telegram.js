@@ -647,11 +647,22 @@ export function startTelegramPolling(db, userId, handlers) {
             if (awaitingEntries.length > 0 && handlers.onCustom) {
               const [jid] = awaitingEntries[awaitingEntries.length - 1]; // Most recent
               state.awaitingCustom.delete(jid);
-              await handlers.onCustom(jid, update.message.text);
+              const captured = update.message.text;
+              // Echo what we captured so the user can verify their instruction
+              // was actually received (and which contact it's being applied to).
+              const phone = String(jid || '').split('@')[0];
               await telegramRequest(token, 'sendMessage', {
                 chat_id: incomingChatId,
-                text: `✅ Custom reply being generated...`,
+                text: `✅ Got it — generating custom reply for ${phone}…\n\n📝 Your instruction:\n"${captured.slice(0, 300)}"`,
               });
+              try {
+                await handlers.onCustom(jid, captured);
+              } catch (err) {
+                await telegramRequest(token, 'sendMessage', {
+                  chat_id: incomingChatId,
+                  text: `⚠️ Custom reply failed: ${err?.message || 'unknown error'}`,
+                });
+              }
             }
           }
         }
