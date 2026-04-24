@@ -4195,15 +4195,29 @@ export function getTelegramCallbackHandlers(userId, db) {
     },
     onCustom: async (jid, instructions) => {
       clearPendingAutoReply(userId, jid);
+      // Manual reply mute would block the AI from speaking. The user explicitly
+      // asked for a custom reply via Telegram, so clear the mute for this jid.
+      try { getInstance(userId).manualReplyMutes.delete(jid); } catch {}
+      debugLog(db, userId, 'telegram_custom_received', {
+        jid,
+        instructionsLength: instructions?.length || 0,
+        instructionsPreview: (instructions || '').slice(0, 200),
+      });
       let contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
       if (!contact) {
         const phone = String(jid || '').split('@')[0];
         if (phone) contact = db.prepare('SELECT id, name, phone FROM contacts WHERE phone = ? AND user_id = ? ORDER BY id DESC LIMIT 1').get(phone, userId);
       }
-      if (!contact) return;
+      if (!contact) {
+        debugLog(db, userId, 'telegram_custom_no_contact', { jid });
+        return;
+      }
 
       const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
-      if (!keyRow?.value) return;
+      if (!keyRow?.value) {
+        debugLog(db, userId, 'telegram_custom_no_openai_key', { jid, contact: contact.name || contact.phone });
+        return;
+      }
 
       const messages = db.prepare(`
         SELECT content, direction, type, media_path FROM messages
@@ -4219,17 +4233,28 @@ export function getTelegramCallbackHandlers(userId, db) {
       const contactName = contact.name || contact.phone || 'Unknown';
       // Look up the previous AI draft so the AI can EDIT/EXTEND it instead of starting fresh
       const previousReply = getLastPreviewedReply(userId, jid);
-      const { generateReply } = await import('./ai.js');
-      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, {
-        mode: 'custom',
-        customInstructions: instructions,
-        previousReply,
-        timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
-        replyLanguage: getContactReplyLanguage(db, userId, contact.id),
-      });
-      replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
-
-      executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
+      try {
+        const { generateReply } = await import('./ai.js');
+        let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, {
+          mode: 'custom',
+          customInstructions: instructions,
+          previousReply,
+          timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
+          replyLanguage: getContactReplyLanguage(db, userId, contact.id),
+        });
+        replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
+        debugLog(db, userId, 'telegram_custom_generated', {
+          contact: contactName,
+          replyPreview: replyText.slice(0, 160),
+        });
+        executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
+      } catch (err) {
+        debugLog(db, userId, 'telegram_custom_failed', {
+          contact: contactName,
+          error: err?.message || String(err),
+        });
+        console.error(`[${userId}] Telegram /custom failed:`, err?.message || err);
+      }
     },
     /**
      * Telegram "🎤 Send as VN" — synthesize the previewed reply as a voice
