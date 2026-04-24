@@ -3211,6 +3211,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             sent = await sendVoiceNote(userId, jid, audioBuffer);
             replyId = sent?.id?._serialized || uuid();
             voiceMedia = persistVoiceNoteBuffer(replyId, audioBuffer);
+            recordAiSend(userId, jid, replyText);
             db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contactId);
             sentAsVoice = true;
           } else if (!voiceDecision.send) {
@@ -3226,6 +3227,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             shouldQuote = Math.random() < 0.2;
             sent = await sendTextMessage(userId, jid, replyText, { quotedMessageId: shouldQuote ? latestMessageId : null });
             replyId = sent?.id?._serialized || uuid();
+            recordAiSend(userId, jid, replyText);
           }
 
           // Clear typing
