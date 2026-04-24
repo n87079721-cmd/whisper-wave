@@ -3164,7 +3164,15 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const basePrompt = forceReply
     ? `${systemPrompt}\n\n⚠️ REBATCH: A new message just arrived while you were about to reply. Re-read the LAST few messages and reply to the latest one (and the ones above it together) — don't reply to the older context as if nothing changed. Use the current local time of day for tone.`
     : systemPrompt;
-  const promptForGen = `${basePrompt}${guardrails}`;
+  // Re-inject the directive at the END so it overrides the depth engine and
+  // generic casual-texting rules baked into generateReply(). Without this last
+  // anchor, custom directives ("be more flirty", "stop asking questions",
+  // "talk about yourself more") tend to lose to the model's default chat
+  // habits.
+  const directiveTail = activeDirective
+    ? `\n\n════════════\n🎯 FINAL OVERRIDE — ACTIVE DIRECTIVE WINS:\n"${activeDirective}"\n\nThis directive OVERRIDES every guideline above (depth engine, question rhythm, casual texting rules). If anything above contradicts this directive, IGNORE the contradicting guideline and follow the directive instead. Apply it on THIS reply, every reply, until removed.\n════════════`
+    : '';
+  const promptForGen = `${basePrompt}${guardrails}${directiveTail}`;
 
   if (guardrails) {
     debugLog(db, userId, 'reply_guardrails_injected', {
@@ -3176,6 +3184,8 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       overusedTopics,
       memoryRecallHits,
       memoryAvailable,
+      directiveActive: !!activeDirective,
+      directiveLength: activeDirective.length,
     });
   }
 
