@@ -1364,6 +1364,25 @@ async function startConnection(userId, db, options = {}) {
               }
             } catch {}
           }
+        } else {
+          // ── Manual reply detection ──
+          // Outgoing message in a 1:1 chat. If the text DOESN'T match a recently
+          // recorded AI send, the user typed it manually on their phone. In that
+          // case: cancel any pending AI reply and mute auto-reply for this jid
+          // for the configured window so the AI doesn't speak over them.
+          if (!isGroup) {
+            const isAiOwnSend = consumeMatchingAiSend(userId, resolvedJid, resolvedContent || '');
+            if (!isAiOwnSend) {
+              try {
+                clearPendingAutoReply(userId, resolvedJid);
+                const buf = inst.messageBatchBuffers.get(resolvedJid);
+                if (buf) { clearTimeout(buf.timer); inst.messageBatchBuffers.delete(resolvedJid); }
+                setManualReplyMute(userId, resolvedJid, db);
+              } catch (err) {
+                console.error('Manual reply detection error:', err?.message || err);
+              }
+            }
+          }
         }
       } catch (err) {
         console.error('message_create handler error:', err?.message || err);
