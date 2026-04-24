@@ -2711,11 +2711,18 @@ function consumeMatchingAiSend(userId, jid, text) {
   return true;
 }
 
-function setManualReplyMute(userId, jid, db) {
+function setManualReplyMute(userId, jid, db, overrideMs = null) {
   const inst = getInstance(userId);
-  const minutes = Math.max(0, Math.min(120, parseInt(getConfigValue(db, userId, 'ai_manual_mute_minutes', '5'), 10) || 0));
-  if (minutes <= 0) return; // feature disabled
-  const expiresAt = Date.now() + minutes * 60_000;
+  let expiresAt;
+  let minutes;
+  if (overrideMs && overrideMs > 0) {
+    expiresAt = Date.now() + overrideMs;
+    minutes = Math.round(overrideMs / 60_000);
+  } else {
+    minutes = Math.max(0, Math.min(120, parseInt(getConfigValue(db, userId, 'ai_manual_mute_minutes', '5'), 10) || 0));
+    if (minutes <= 0) return; // feature disabled
+    expiresAt = Date.now() + minutes * 60_000;
+  }
   inst.manualReplyMutes.set(jid, expiresAt);
   try { debugLog(db, userId, 'manual_reply_detected_mute_set', { jid, minutes }); } catch {}
 }
