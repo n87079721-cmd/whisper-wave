@@ -2711,11 +2711,18 @@ function consumeMatchingAiSend(userId, jid, text) {
   return true;
 }
 
-function setManualReplyMute(userId, jid, db) {
+function setManualReplyMute(userId, jid, db, overrideMs = null) {
   const inst = getInstance(userId);
-  const minutes = Math.max(0, Math.min(120, parseInt(getConfigValue(db, userId, 'ai_manual_mute_minutes', '5'), 10) || 0));
-  if (minutes <= 0) return; // feature disabled
-  const expiresAt = Date.now() + minutes * 60_000;
+  let expiresAt;
+  let minutes;
+  if (overrideMs && overrideMs > 0) {
+    expiresAt = Date.now() + overrideMs;
+    minutes = Math.round(overrideMs / 60_000);
+  } else {
+    minutes = Math.max(0, Math.min(120, parseInt(getConfigValue(db, userId, 'ai_manual_mute_minutes', '5'), 10) || 0));
+    if (minutes <= 0) return; // feature disabled
+    expiresAt = Date.now() + minutes * 60_000;
+  }
   inst.manualReplyMutes.set(jid, expiresAt);
   try { debugLog(db, userId, 'manual_reply_detected_mute_set', { jid, minutes }); } catch {}
 }
@@ -3003,6 +3010,62 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const replyLanguage = getContactReplyLanguage(db, userId, contactId);
   debugLog(db, userId, 'generating_ai_reply', { contact: contactName || phone, persona: personaName, historyLength: messages.length, unrepliedCount, timezone: tz, forceRebatch: !!forceReply });
 
+  // ── Conversation closure detection ──
+  // If the last few messages contain a clear goodnight / goodbye exchange from
+  // BOTH sides (or a goodbye from them after we already said goodnight), the
+  // conversation is over. Don't keep replying — just react if anything new comes
+  // in for the next ~30 minutes. This prevents the "she said gn but the AI keeps
+  // chatting" problem.
+  try {
+    const CLOSURE_RE = /\b(gn|goodnight|good\s*night|night\s*night|nighty|sleep\s*(well|tight)|sweet\s*dreams|bye+|byee+|bye\s*bye|see\s*ya|see\s*you|talk\s*(later|tmr|tomorrow)|catch\s*you\s*later|cya|peace\s*out|i'?m\s*out|i'?m\s*off|heading\s*(out|to\s*bed)|going\s*to\s*(bed|sleep)|knocking\s*out|passing\s*out|ttyl)\b/i;
+    const last6 = messages.slice(-6);
+    let theyClosed = false;
+    let weClosed = false;
+    for (const m of last6) {
+      if (m.type !== 'text' || !m.content) continue;
+      if (!CLOSURE_RE.test(m.content)) continue;
+      if (m.direction === 'received') theyClosed = true;
+      else if (m.direction === 'sent') weClosed = true;
+    }
+    // The current incoming message itself counts as "they closed".
+    if (CLOSURE_RE.test(latestMsgText || '')) theyClosed = true;
+    if (theyClosed && weClosed) {
+      // Both sides have signed off → mute auto-reply for 30 min, react only.
+      const closureMuteMs = 30 * 60 * 1000;
+      setManualReplyMute(userId, jid, db, closureMuteMs);
+      debugLog(db, userId, 'skip_conversation_closed', {
+        contact: contactName || phone,
+        reason: 'goodnight/goodbye exchange detected on both sides',
+        muteMinutes: 30,
+      });
+      // Still send a reaction if appropriate, then return.
+      if (latestOriginalMsg) {
+        const closureReact = await shouldReact(keyRow.value, latestMsgText, { timezone: tz });
+        if (closureReact) {
+          const reactDelay = Math.floor(Math.random() * 4000) + 2000;
+          setTimeout(() => sendReaction(userId, jid, latestOriginalMsg, closureReact), reactDelay);
+          debugLog(db, userId, 'closure_reaction_sent', { contact: contactName || phone, emoji: closureReact });
+        }
+      }
+      return;
+    }
+  } catch (err) {
+    console.error('[closure-detect] failed:', err?.message);
+  }
+
+  // Pull the contact's active directive separately so we can re-inject it at
+  // the very END of the system prompt (after depth engine + casual rules).
+  // Without this, the depth engine's "ask soft questions" guidance often
+  // overrides the directive, which is why custom directives "weren't working."
+  let activeDirective = '';
+  try {
+    const dRow = db.prepare('SELECT active_directive, directive_expires FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+    if (dRow?.active_directive) {
+      const notExpired = !dRow.directive_expires || new Date() < new Date(dRow.directive_expires);
+      if (notExpired) activeDirective = String(dRow.active_directive).trim();
+    }
+  } catch {}
+
   // ── #3 Question budget + #5 Topic exhaustion ──
   // Rule (configurable per user via Dashboard):
   //   After N consecutive replies that contain a question, the next M
@@ -3108,7 +3171,15 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const basePrompt = forceReply
     ? `${systemPrompt}\n\n⚠️ REBATCH: A new message just arrived while you were about to reply. Re-read the LAST few messages and reply to the latest one (and the ones above it together) — don't reply to the older context as if nothing changed. Use the current local time of day for tone.`
     : systemPrompt;
-  const promptForGen = `${basePrompt}${guardrails}`;
+  // Re-inject the directive at the END so it overrides the depth engine and
+  // generic casual-texting rules baked into generateReply(). Without this last
+  // anchor, custom directives ("be more flirty", "stop asking questions",
+  // "talk about yourself more") tend to lose to the model's default chat
+  // habits.
+  const directiveTail = activeDirective
+    ? `\n\n════════════\n🎯 FINAL OVERRIDE — ACTIVE DIRECTIVE WINS:\n"${activeDirective}"\n\nThis directive OVERRIDES every guideline above (depth engine, question rhythm, casual texting rules). If anything above contradicts this directive, IGNORE the contradicting guideline and follow the directive instead. Apply it on THIS reply, every reply, until removed.\n════════════`
+    : '';
+  const promptForGen = `${basePrompt}${guardrails}${directiveTail}`;
 
   if (guardrails) {
     debugLog(db, userId, 'reply_guardrails_injected', {
@@ -3120,6 +3191,8 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       overusedTopics,
       memoryRecallHits,
       memoryAvailable,
+      directiveActive: !!activeDirective,
+      directiveLength: activeDirective.length,
     });
   }
 
