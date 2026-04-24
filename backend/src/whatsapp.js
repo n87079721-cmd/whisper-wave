@@ -95,6 +95,13 @@ function getInstance(userId) {
       autoReplyCooldowns: new Map(),
       messageBatchBuffers: new Map(),
       pendingAutoReplies: new Map(),
+      // Tracks AI-originated outgoing sends so the message_create event can
+      // distinguish them from manual replies typed on the user's phone.
+      // Map<jid, Array<{ textNorm: string, ts: number }>> — entries auto-prune.
+      recentAiSends: new Map(),
+      // When the user replies manually from their phone, mute AI auto-replies
+      // for this jid until the timestamp expires. Map<jid, expiresAtMs>.
+      manualReplyMutes: new Map(),
       contactCache: new Map(),
       archiveSyncTimer: null,
       recoverySyncTimer: null,
@@ -1356,6 +1363,25 @@ async function startConnection(userId, db, options = {}) {
                 maybeAlertForeignLanguage(db, userId, contactId, contactName || phone, resolvedContent).catch(() => {});
               }
             } catch {}
+          }
+        } else {
+          // ── Manual reply detection ──
+          // Outgoing message in a 1:1 chat. If the text DOESN'T match a recently
+          // recorded AI send, the user typed it manually on their phone. In that
+          // case: cancel any pending AI reply and mute auto-reply for this jid
+          // for the configured window so the AI doesn't speak over them.
+          if (!isGroup) {
+            const isAiOwnSend = consumeMatchingAiSend(userId, resolvedJid, resolvedContent || '');
+            if (!isAiOwnSend) {
+              try {
+                clearPendingAutoReply(userId, resolvedJid);
+                const buf = inst.messageBatchBuffers.get(resolvedJid);
+                if (buf) { clearTimeout(buf.timer); inst.messageBatchBuffers.delete(resolvedJid); }
+                setManualReplyMute(userId, resolvedJid, db);
+              } catch (err) {
+                console.error('Manual reply detection error:', err?.message || err);
+              }
+            }
           }
         }
       } catch (err) {
@@ -2646,6 +2672,65 @@ function clearPendingAutoReply(userId, jid, { rescue = false } = {}) {
   }
 }
 
+// ── Manual reply detection helpers ──
+// We fingerprint outgoing AI sends so the WhatsApp message_create event can
+// tell our own AI sends apart from messages the user types on their phone.
+function _normalizeForFingerprint(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[^\p{L}\p{N} ]+/gu, '')
+    .trim()
+    .slice(0, 160);
+}
+
+function recordAiSend(userId, jid, text) {
+  if (!text) return;
+  const inst = getInstance(userId);
+  const norm = _normalizeForFingerprint(text);
+  if (!norm) return;
+  const list = inst.recentAiSends.get(jid) || [];
+  list.push({ textNorm: norm, ts: Date.now() });
+  // Keep only the last 6 entries per jid
+  while (list.length > 6) list.shift();
+  inst.recentAiSends.set(jid, list);
+}
+
+// Returns true if `text` matches a recently-recorded AI send (within 60s).
+// Consumes the matching entry so it can't accidentally double-match.
+function consumeMatchingAiSend(userId, jid, text) {
+  const inst = getInstance(userId);
+  const list = inst.recentAiSends.get(jid);
+  if (!list || list.length === 0) return false;
+  const norm = _normalizeForFingerprint(text);
+  if (!norm) return false;
+  const now = Date.now();
+  const idx = list.findIndex(entry => (now - entry.ts) <= 60_000 && entry.textNorm === norm);
+  if (idx === -1) return false;
+  list.splice(idx, 1);
+  return true;
+}
+
+function setManualReplyMute(userId, jid, db) {
+  const inst = getInstance(userId);
+  const minutes = Math.max(0, Math.min(120, parseInt(getConfigValue(db, userId, 'ai_manual_mute_minutes', '5'), 10) || 0));
+  if (minutes <= 0) return; // feature disabled
+  const expiresAt = Date.now() + minutes * 60_000;
+  inst.manualReplyMutes.set(jid, expiresAt);
+  try { debugLog(db, userId, 'manual_reply_detected_mute_set', { jid, minutes }); } catch {}
+}
+
+function isManuallyMuted(userId, jid) {
+  const inst = getInstance(userId);
+  const exp = inst.manualReplyMutes.get(jid);
+  if (!exp) return false;
+  if (Date.now() > exp) {
+    inst.manualReplyMutes.delete(jid);
+    return false;
+  }
+  return true;
+}
+
 async function sendReaction(userId, jid, msg, emoji) {
   const inst = getInstance(userId);
   if (!inst.client || inst.connectionStatus !== 'connected') return;
@@ -2685,6 +2770,16 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
   }
   if (contactRow?.ai_enabled === 0) {
     debugLog(db, userId, 'skip_ai_disabled_for_contact', { contact: contactName || phone });
+    return;
+  }
+
+  // Skip if user recently replied manually from their phone — they're handling
+  // this conversation themselves. Mute auto-clears after `ai_manual_mute_minutes`.
+  if (isManuallyMuted(userId, jid)) {
+    const inst2 = getInstance(userId);
+    const exp = inst2.manualReplyMutes.get(jid);
+    const remainingSec = Math.max(0, Math.round((exp - Date.now()) / 1000));
+    debugLog(db, userId, 'skip_manual_reply_mute', { contact: contactName || phone, remainingSec });
     return;
   }
 
@@ -3145,6 +3240,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             sent = await sendVoiceNote(userId, jid, audioBuffer);
             replyId = sent?.id?._serialized || uuid();
             voiceMedia = persistVoiceNoteBuffer(replyId, audioBuffer);
+            recordAiSend(userId, jid, replyText);
             db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contactId);
             sentAsVoice = true;
           } else if (!voiceDecision.send) {
@@ -3160,6 +3256,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
             shouldQuote = Math.random() < 0.2;
             sent = await sendTextMessage(userId, jid, replyText, { quotedMessageId: shouldQuote ? latestMessageId : null });
             replyId = sent?.id?._serialized || uuid();
+            recordAiSend(userId, jid, replyText);
           }
 
           // Clear typing
@@ -4098,15 +4195,29 @@ export function getTelegramCallbackHandlers(userId, db) {
     },
     onCustom: async (jid, instructions) => {
       clearPendingAutoReply(userId, jid);
+      // Manual reply mute would block the AI from speaking. The user explicitly
+      // asked for a custom reply via Telegram, so clear the mute for this jid.
+      try { getInstance(userId).manualReplyMutes.delete(jid); } catch {}
+      debugLog(db, userId, 'telegram_custom_received', {
+        jid,
+        instructionsLength: instructions?.length || 0,
+        instructionsPreview: (instructions || '').slice(0, 200),
+      });
       let contact = db.prepare('SELECT id, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
       if (!contact) {
         const phone = String(jid || '').split('@')[0];
         if (phone) contact = db.prepare('SELECT id, name, phone FROM contacts WHERE phone = ? AND user_id = ? ORDER BY id DESC LIMIT 1').get(phone, userId);
       }
-      if (!contact) return;
+      if (!contact) {
+        debugLog(db, userId, 'telegram_custom_no_contact', { jid });
+        return;
+      }
 
       const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
-      if (!keyRow?.value) return;
+      if (!keyRow?.value) {
+        debugLog(db, userId, 'telegram_custom_no_openai_key', { jid, contact: contact.name || contact.phone });
+        return;
+      }
 
       const messages = db.prepare(`
         SELECT content, direction, type, media_path FROM messages
@@ -4122,17 +4233,28 @@ export function getTelegramCallbackHandlers(userId, db) {
       const contactName = contact.name || contact.phone || 'Unknown';
       // Look up the previous AI draft so the AI can EDIT/EXTEND it instead of starting fresh
       const previousReply = getLastPreviewedReply(userId, jid);
-      const { generateReply } = await import('./ai.js');
-      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, {
-        mode: 'custom',
-        customInstructions: instructions,
-        previousReply,
-        timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
-        replyLanguage: getContactReplyLanguage(db, userId, contact.id),
-      });
-      replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
-
-      executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
+      try {
+        const { generateReply } = await import('./ai.js');
+        let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, {
+          mode: 'custom',
+          customInstructions: instructions,
+          previousReply,
+          timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
+          replyLanguage: getContactReplyLanguage(db, userId, contact.id),
+        });
+        replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
+        debugLog(db, userId, 'telegram_custom_generated', {
+          contact: contactName,
+          replyPreview: replyText.slice(0, 160),
+        });
+        executeAutoReplyWithText(userId, db, { contactId: contact.id, jid, phone: contact.phone, contactName, replyText });
+      } catch (err) {
+        debugLog(db, userId, 'telegram_custom_failed', {
+          contact: contactName,
+          error: err?.message || String(err),
+        });
+        console.error(`[${userId}] Telegram /custom failed:`, err?.message || err);
+      }
     },
     /**
      * Telegram "🎤 Send as VN" — synthesize the previewed reply as a voice
@@ -4272,6 +4394,7 @@ export function getTelegramCallbackHandlers(userId, db) {
         db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(userId);
         db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'telegram_vn_sent', ?)`).run(userId, JSON.stringify({ contactId: contact.id }));
 
+        recordAiSend(userId, jid, replyText);
         emit(userId, 'message', { contactId: contact.id, msgId: replyId });
         lock?.release?.(true);
         return { ok: true };
@@ -4377,6 +4500,7 @@ export function getTelegramCallbackHandlers(userId, db) {
           INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
           VALUES (?, ?, ?, ?, ?, 'voice', 'sent', datetime('now'), 'sent', ?, ?, ?)
         `).run(replyId, userId, contact.id, jid, workingText, voiceMedia.mediaPath, voiceMedia.mediaName, voiceMedia.mediaMime);
+        recordAiSend(userId, jid, workingText);
         db.prepare(`INSERT INTO voice_note_log (user_id, contact_id) VALUES (?, ?)`).run(userId, contact.id);
         db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(userId);
         db.prepare(`INSERT INTO stats (user_id, event, data) VALUES (?, 'telegram_vn_sent', ?)`).run(userId, JSON.stringify({ contactId: contact.id, source: 'sensitive_alert' }));
@@ -4446,6 +4570,7 @@ function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactNa
         try {
           const sent = await sendTextMessage(userId, jid, replyText);
           const replyId = sent?.id?._serialized || uuid();
+          recordAiSend(userId, jid, replyText);
           await clearTypingState(userId, jid);
 
           db.prepare(`

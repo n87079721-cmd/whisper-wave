@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bot, Dice5, Gauge, Brain, Loader2 } from 'lucide-react';
+import { Bot, Dice5, Gauge, Brain, Loader2, Hand } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
@@ -27,6 +27,7 @@ const AiReplyTuning = () => {
   const [responseSpeed, setResponseSpeed] = useState('normal');
   const [questionStreakThreshold, setQuestionStreakThreshold] = useState(3);
   const [questionCooldownLength, setQuestionCooldownLength] = useState(2);
+  const [manualMuteMinutes, setManualMuteMinutes] = useState(5);
 
   useEffect(() => {
     Promise.allSettled([
@@ -35,6 +36,7 @@ const AiReplyTuning = () => {
       api.getConfig('ai_response_speed').then(d => { if (d.exists) setResponseSpeed(d.value || 'normal'); }),
       api.getConfig('ai_question_streak_threshold').then(d => { if (d.exists) setQuestionStreakThreshold(parseInt(d.value || '3', 10)); }),
       api.getConfig('ai_question_cooldown_length').then(d => { if (d.exists) setQuestionCooldownLength(parseInt(d.value || '2', 10)); }),
+      api.getConfig('ai_manual_mute_minutes').then(d => { if (d.exists) setManualMuteMinutes(parseInt(d.value || '5', 10)); }),
     ]).finally(() => setLoaded(true));
   }, []);
 
@@ -175,6 +177,31 @@ const AiReplyTuning = () => {
                 onValueCommit={(v) => save('ai_question_cooldown_length', String(v[0]))}
                 min={1} max={5} step={1}
               />
+            </div>
+          </div>
+
+          {/* Manual Reply Mute */}
+          <div className="space-y-2 p-3 rounded-lg bg-secondary/60 border border-border">
+            <div className="flex items-center gap-2">
+              <Hand className="w-4 h-4 text-primary" />
+              <label className="text-xs font-medium text-foreground">Manual Reply Mute</label>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              When you reply manually from your phone, pause the AI for this chat for{' '}
+              <span className="font-semibold text-foreground">
+                {manualMuteMinutes === 0 ? 'never (off)' : `${manualMuteMinutes} min`}
+              </span>
+              . Stops the AI from talking over you when you forget it's on.
+            </p>
+            <Slider
+              value={[manualMuteMinutes]}
+              onValueChange={(v) => setManualMuteMinutes(v[0])}
+              onValueCommit={(v) => save('ai_manual_mute_minutes', String(v[0]))}
+              min={0} max={60} step={1}
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              <span>Off</span>
+              <span>60 min</span>
             </div>
           </div>
         </div>
