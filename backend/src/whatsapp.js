@@ -2773,6 +2773,16 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
     return;
   }
 
+  // Skip if user recently replied manually from their phone — they're handling
+  // this conversation themselves. Mute auto-clears after `ai_manual_mute_minutes`.
+  if (isManuallyMuted(userId, jid)) {
+    const inst2 = getInstance(userId);
+    const exp = inst2.manualReplyMutes.get(jid);
+    const remainingSec = Math.max(0, Math.round((exp - Date.now()) / 1000));
+    debugLog(db, userId, 'skip_manual_reply_mute', { contact: contactName || phone, remainingSec });
+    return;
+  }
+
   const effectiveContent = resolvedContent || originalMsg?.body || originalMsg?.caption || '';
   debugLog(db, userId, 'message_received_for_ai', { contact: contactName || phone, body: effectiveContent.slice(0, 80) });
 
