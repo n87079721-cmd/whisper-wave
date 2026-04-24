@@ -3112,12 +3112,85 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     .map(([w]) => w)
     .slice(0, 5);
 
+  // ── Topic-mode rotation (emotional vs light vs deep vs logistics) ──
+  // The word-level loop check above only catches literal repetition. This
+  // catches the bigger problem: staying in the SAME emotional register all day.
+  // We classify each of the last ~6 messages (both sides) into a mode, and if
+  // 4+ of them share the same mode, we tell the model to PIVOT to a different
+  // register. The suggested next-mode is biased by local time of day so the
+  // pivot feels human (morning → light/plans; afternoon → casual/share;
+  // evening → reflective; late night → quiet/intimate).
+  const TOPIC_MODES = {
+    emotional: /\b(feel|feeling|felt|hurt|pain|sad|cry|cried|crying|miss|lonely|alone|broken|heart|love|loved|trauma|grief|anxiety|depress|stress|overwhelm|sorry|forgive)\b/i,
+    deep: /\b(meaning|purpose|life|death|god|faith|believe|future|destiny|fear|dream|childhood|family|memory|memories|growing up|who am i|identity)\b/i,
+    romantic: /\b(miss you|love you|babe|baby|cute|kiss|hug|cuddle|sweet|beautiful|gorgeous|wifey|hubby|bae|date|together)\b/i,
+    advice: /\b(should i|what would you|do you think i|help me|advice|recommend|suggest|figure out|decide|stuck on|don'?t know what)\b/i,
+    plans: /\b(today|tonight|tomorrow|this week|weekend|going|gonna|plans?|meet|hangout|dinner|lunch|brunch|movie|trip|flight|come over)\b/i,
+    light: /\b(food|eat|coffee|music|song|movie|show|watch|funny|lol|lmao|weather|outside|gym|work|job|class|sleep|tired|busy)\b/i,
+  };
+  function classifyMode(text) {
+    const t = String(text || '');
+    if (!t.trim()) return null;
+    for (const [mode, re] of Object.entries(TOPIC_MODES)) {
+      if (re.test(t)) return mode;
+    }
+    return 'smalltalk';
+  }
+  const last8 = messages.slice(-8);
+  const modeCounts = {};
+  for (const m of last8) {
+    if (m.type !== 'text') continue;
+    const mode = classifyMode(m.content);
+    if (!mode) continue;
+    modeCounts[mode] = (modeCounts[mode] || 0) + 1;
+  }
+  const dominantMode = Object.entries(modeCounts)
+    .sort((a, b) => b[1] - a[1])[0];
+  const stuckInMode = dominantMode && dominantMode[1] >= 4 ? dominantMode[0] : null;
+
+  // Pick a fresh mode suggestion based on local hour.
+  let suggestedNextModes = [];
+  try {
+    const localHour = parseInt(
+      new Date().toLocaleString('en-US', { timeZone: tz, hour: '2-digit', hour12: false }),
+      10,
+    );
+    if (localHour >= 5 && localHour < 11) suggestedNextModes = ['plans', 'light', 'smalltalk'];
+    else if (localHour >= 11 && localHour < 17) suggestedNextModes = ['light', 'smalltalk', 'plans'];
+    else if (localHour >= 17 && localHour < 22) suggestedNextModes = ['plans', 'smalltalk', 'deep'];
+    else suggestedNextModes = ['smalltalk', 'light', 'romantic'];
+    // Remove the stuck mode from suggestions.
+    if (stuckInMode) suggestedNextModes = suggestedNextModes.filter(m => m !== stuckInMode);
+  } catch {}
+
   let guardrails = '';
   if (overQuestionBudget) {
     guardrails += `\n\n🚫 QUESTION COOLDOWN ACTIVE: Your last ${questionStreak} replies all contained questions. THIS REPLY (and the next ${cooldownRemaining - 1 >= 0 ? cooldownRemaining - 1 : 0} after) MUST CONTAIN ZERO QUESTION MARKS. End on a statement, a reaction, or a small share about yourself. No "?". No rhetorical questions either. Let them lead the conversation for a beat.`;
   }
   if (overusedTopics.length > 0) {
     guardrails += `\n\n♻️ TOPIC LOOP DETECTED: You keep coming back to: ${overusedTopics.join(', ')}. Do NOT mention these words in this reply. Pivot to something fresh — a different memory, a small observation about your day/surroundings, a new thread.`;
+  }
+  if (stuckInMode) {
+    const MODE_DESCRIPTIONS = {
+      emotional: 'heavy/emotional ("how do you feel", validating their pain, comforting)',
+      deep: 'deep/philosophical (life, meaning, fears, identity)',
+      romantic: 'romantic/affectionate (sweet talk, "miss you", flirty)',
+      advice: 'advice-giving / problem-solving',
+      plans: 'logistics / plans / scheduling',
+      light: 'light chitchat (food, music, work, weather)',
+      smalltalk: 'pure small talk / reactions',
+    };
+    const PIVOT_HINTS = {
+      plans: 'mention something on YOUR plate today, ask about their plans, or suggest doing something',
+      light: 'switch to something casual — food, music you\'re into, a show, the weather, what you\'re doing right now',
+      smalltalk: 'just react and share a tiny moment from your day. Keep it breezy',
+      deep: 'go a level deeper — share a real thought or memory of yours',
+      romantic: 'be a little warmer, drop a soft compliment or sweet line',
+      emotional: 'check in on how they\'re actually doing, but lightly',
+    };
+    const nextMode = suggestedNextModes[0] || 'light';
+    const altModes = suggestedNextModes.slice(1, 3).join(', ') || 'something different';
+    guardrails += `\n\n🧭 MODE SHIFT — REQUIRED: The last several messages have all been ${MODE_DESCRIPTIONS[stuckInMode] || stuckInMode}. Real people don't stay in one register all day. PIVOT this reply to → **${nextMode}** (${PIVOT_HINTS[nextMode] || 'change the vibe'}). Other good moves right now: ${altModes}. Don't force it — let it flow naturally — but DO change the temperature. If they want to stay in the old mode, you can briefly acknowledge then redirect.`;
   }
 
   // ── MEMORY RECALL ENFORCEMENT ──
@@ -3193,6 +3266,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       memoryAvailable,
       directiveActive: !!activeDirective,
       directiveLength: activeDirective.length,
+      stuckInMode,
+      suggestedNextModes,
+      modeCounts,
     });
   }
 
