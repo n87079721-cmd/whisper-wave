@@ -95,6 +95,13 @@ function getInstance(userId) {
       autoReplyCooldowns: new Map(),
       messageBatchBuffers: new Map(),
       pendingAutoReplies: new Map(),
+      // Tracks AI-originated outgoing sends so the message_create event can
+      // distinguish them from manual replies typed on the user's phone.
+      // Map<jid, Array<{ textNorm: string, ts: number }>> — entries auto-prune.
+      recentAiSends: new Map(),
+      // When the user replies manually from their phone, mute AI auto-replies
+      // for this jid until the timestamp expires. Map<jid, expiresAtMs>.
+      manualReplyMutes: new Map(),
       contactCache: new Map(),
       archiveSyncTimer: null,
       recoverySyncTimer: null,
