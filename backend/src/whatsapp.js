@@ -3266,6 +3266,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
       memoryAvailable,
       directiveActive: !!activeDirective,
       directiveLength: activeDirective.length,
+      stuckInMode,
+      suggestedNextModes,
+      modeCounts,
     });
   }
 
