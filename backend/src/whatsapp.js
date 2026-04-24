@@ -2653,6 +2653,65 @@ function clearPendingAutoReply(userId, jid, { rescue = false } = {}) {
   }
 }
 
+// ── Manual reply detection helpers ──
+// We fingerprint outgoing AI sends so the WhatsApp message_create event can
+// tell our own AI sends apart from messages the user types on their phone.
+function _normalizeForFingerprint(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[^\p{L}\p{N} ]+/gu, '')
+    .trim()
+    .slice(0, 160);
+}
+
+function recordAiSend(userId, jid, text) {
+  if (!text) return;
+  const inst = getInstance(userId);
+  const norm = _normalizeForFingerprint(text);
+  if (!norm) return;
+  const list = inst.recentAiSends.get(jid) || [];
+  list.push({ textNorm: norm, ts: Date.now() });
+  // Keep only the last 6 entries per jid
+  while (list.length > 6) list.shift();
+  inst.recentAiSends.set(jid, list);
+}
+
+// Returns true if `text` matches a recently-recorded AI send (within 60s).
+// Consumes the matching entry so it can't accidentally double-match.
+function consumeMatchingAiSend(userId, jid, text) {
+  const inst = getInstance(userId);
+  const list = inst.recentAiSends.get(jid);
+  if (!list || list.length === 0) return false;
+  const norm = _normalizeForFingerprint(text);
+  if (!norm) return false;
+  const now = Date.now();
+  const idx = list.findIndex(entry => (now - entry.ts) <= 60_000 && entry.textNorm === norm);
+  if (idx === -1) return false;
+  list.splice(idx, 1);
+  return true;
+}
+
+function setManualReplyMute(userId, jid, db) {
+  const inst = getInstance(userId);
+  const minutes = Math.max(0, Math.min(120, parseInt(getConfigValue(db, userId, 'ai_manual_mute_minutes', '5'), 10) || 0));
+  if (minutes <= 0) return; // feature disabled
+  const expiresAt = Date.now() + minutes * 60_000;
+  inst.manualReplyMutes.set(jid, expiresAt);
+  try { debugLog(db, userId, 'manual_reply_detected_mute_set', { jid, minutes }); } catch {}
+}
+
+function isManuallyMuted(userId, jid) {
+  const inst = getInstance(userId);
+  const exp = inst.manualReplyMutes.get(jid);
+  if (!exp) return false;
+  if (Date.now() > exp) {
+    inst.manualReplyMutes.delete(jid);
+    return false;
+  }
+  return true;
+}
+
 async function sendReaction(userId, jid, msg, emoji) {
   const inst = getInstance(userId);
   if (!inst.client || inst.connectionStatus !== 'connected') return;
