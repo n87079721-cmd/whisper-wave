@@ -3170,6 +3170,28 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   if (overusedTopics.length > 0) {
     guardrails += `\n\n♻️ TOPIC LOOP DETECTED: You keep coming back to: ${overusedTopics.join(', ')}. Do NOT mention these words in this reply. Pivot to something fresh — a different memory, a small observation about your day/surroundings, a new thread.`;
   }
+  if (stuckInMode) {
+    const MODE_DESCRIPTIONS = {
+      emotional: 'heavy/emotional ("how do you feel", validating their pain, comforting)',
+      deep: 'deep/philosophical (life, meaning, fears, identity)',
+      romantic: 'romantic/affectionate (sweet talk, "miss you", flirty)',
+      advice: 'advice-giving / problem-solving',
+      plans: 'logistics / plans / scheduling',
+      light: 'light chitchat (food, music, work, weather)',
+      smalltalk: 'pure small talk / reactions',
+    };
+    const PIVOT_HINTS = {
+      plans: 'mention something on YOUR plate today, ask about their plans, or suggest doing something',
+      light: 'switch to something casual — food, music you\'re into, a show, the weather, what you\'re doing right now',
+      smalltalk: 'just react and share a tiny moment from your day. Keep it breezy',
+      deep: 'go a level deeper — share a real thought or memory of yours',
+      romantic: 'be a little warmer, drop a soft compliment or sweet line',
+      emotional: 'check in on how they\'re actually doing, but lightly',
+    };
+    const nextMode = suggestedNextModes[0] || 'light';
+    const altModes = suggestedNextModes.slice(1, 3).join(', ') || 'something different';
+    guardrails += `\n\n🧭 MODE SHIFT — REQUIRED: The last several messages have all been ${MODE_DESCRIPTIONS[stuckInMode] || stuckInMode}. Real people don't stay in one register all day. PIVOT this reply to → **${nextMode}** (${PIVOT_HINTS[nextMode] || 'change the vibe'}). Other good moves right now: ${altModes}. Don't force it — let it flow naturally — but DO change the temperature. If they want to stay in the old mode, you can briefly acknowledge then redirect.`;
+  }
 
   // ── MEMORY RECALL ENFORCEMENT ──
   // Pull the contact's stored memory and keyword-match against the latest
