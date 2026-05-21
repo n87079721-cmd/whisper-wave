@@ -752,17 +752,113 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const handleSwipeStart = useCallback((e: React.TouchEvent, msg: Message) => {
     if (msg.type === 'call') return;
     swipeRef.current = { startX: e.touches[0].clientX, msgId: msg.id };
+    longPressFiredRef.current = false;
+    if (longPressRef.current) window.clearTimeout(longPressRef.current);
+    longPressRef.current = window.setTimeout(() => {
+      longPressFiredRef.current = true;
+      if (navigator.vibrate) try { navigator.vibrate(30); } catch {}
+      setSelectedMsgIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(msg.id)) next.delete(msg.id); else next.add(msg.id);
+        return next;
+      });
+    }, 450);
   }, []);
 
   const handleSwipeEnd = useCallback((e: React.TouchEvent, msg: Message) => {
+    if (longPressRef.current) { window.clearTimeout(longPressRef.current); longPressRef.current = null; }
     if (!swipeRef.current || swipeRef.current.msgId !== msg.id) return;
     const deltaX = e.changedTouches[0].clientX - swipeRef.current.startX;
     const threshold = 60;
+    // Suppress reply-swipe when we're selecting messages or just fired a long-press.
+    if (longPressFiredRef.current || selectedMsgIds.size > 0) {
+      swipeRef.current = null;
+      return;
+    }
     if ((msg.direction === 'received' && deltaX > threshold) || (msg.direction === 'sent' && deltaX < -threshold)) {
       setQuotedMessage(msg);
     }
     swipeRef.current = null;
+  }, [selectedMsgIds]);
+
+  const handleLongPressMouseDown = useCallback((msg: Message) => {
+    if (msg.type === 'call') return;
+    longPressFiredRef.current = false;
+    if (longPressRef.current) window.clearTimeout(longPressRef.current);
+    longPressRef.current = window.setTimeout(() => {
+      longPressFiredRef.current = true;
+      setSelectedMsgIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(msg.id)) next.delete(msg.id); else next.add(msg.id);
+        return next;
+      });
+    }, 500);
   }, []);
+
+  const cancelLongPress = useCallback(() => {
+    if (longPressRef.current) { window.clearTimeout(longPressRef.current); longPressRef.current = null; }
+  }, []);
+
+  const toggleMsgSelected = useCallback((msgId: string) => {
+    setSelectedMsgIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(msgId)) next.delete(msgId); else next.add(msgId);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedMsgIds(new Set()), []);
+
+  const handleBulkDelete = useCallback(async (mode: 'me' | 'everyone') => {
+    const ids = Array.from(selectedMsgIds);
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} message${ids.length === 1 ? '' : 's'} ${mode === 'everyone' ? 'for everyone' : 'for you'}?`)) return;
+    try {
+      await Promise.all(ids.map((id) => api.deleteMessage(id, mode)));
+      if (mode === 'everyone') {
+        setMessages((prev) => prev.map((m) => ids.includes(m.id) ? { ...m, is_deleted: 1, content: '🚫 You deleted this message', media_path: null, type: 'text' as const } : m));
+      } else {
+        setMessages((prev) => prev.filter((m) => !ids.includes(m.id)));
+      }
+      toast.success(`Deleted ${ids.length} message${ids.length === 1 ? '' : 's'}`);
+      clearSelection();
+      refreshConversations();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete');
+    }
+  }, [selectedMsgIds, clearSelection, refreshConversations]);
+
+  const handleBulkStar = useCallback(async () => {
+    const ids = Array.from(selectedMsgIds);
+    if (!ids.length) return;
+    try {
+      await Promise.all(ids.map((id) => api.starMessage(id, true)));
+      setMessages((prev) => prev.map((m) => ids.includes(m.id) ? { ...m, is_starred: 1 } : m));
+      toast.success(`Starred ${ids.length}`);
+      clearSelection();
+    } catch (err: any) { toast.error(err?.message || 'Failed'); }
+  }, [selectedMsgIds, clearSelection]);
+
+  const handleBulkForward = useCallback(() => {
+    const ids = Array.from(selectedMsgIds);
+    if (!ids.length) return;
+    const first = messages.find((m) => m.id === ids[0]);
+    if (first) {
+      setForwardingMsg(first);
+      if (allContacts.length === 0) refreshAllContacts();
+    }
+  }, [selectedMsgIds, messages, allContacts.length]);
+
+  const handleBulkCopy = useCallback(async () => {
+    const ids = Array.from(selectedMsgIds);
+    const lines = messages.filter((m) => ids.includes(m.id)).map((m) => m.content || '').filter(Boolean);
+    if (!lines.length) return;
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      toast.success(`Copied ${lines.length} message${lines.length === 1 ? '' : 's'}`);
+      clearSelection();
+    } catch { toast.error('Copy failed'); }
+  }, [selectedMsgIds, messages, clearSelection]);
 
   const renderMessageContent = (msg: Message) => {
     // Deleted message placeholder
