@@ -96,6 +96,17 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [savingLanguage, setSavingLanguage] = useState(false);
   selectedContactRef.current = selectedContact;
 
+  // AI typing indicator: set of contactIds currently being typed to
+  const [aiTypingContactIds, setAiTypingContactIds] = useState<Set<string>>(new Set());
+  // Unread divider: id of the first unread message when chat was opened
+  const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
+  const initialUnreadCountRef = useRef(0);
+  // Pinned messages per chat (localStorage-backed)
+  const [pinnedMsgIds, setPinnedMsgIds] = useState<Set<string>>(new Set());
+  // Swipe-to-archive on chat list
+  const [swipeOffsetByContact, setSwipeOffsetByContact] = useState<Record<string, number>>({});
+  const chatSwipeRef = useRef<{ contactId: string; startX: number; startY: number; axis: 'h' | 'v' | null } | null>(null);
+
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const viewport = messagesViewportRef.current;
     if (!viewport) return;
