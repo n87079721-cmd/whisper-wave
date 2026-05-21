@@ -6,7 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
-import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory, detectAndTranslate, translateToLanguage, buildTimeContext } from './ai.js';
+import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory, detectAndTranslate, translateToLanguage, buildTimeContext, detectContactMood, updateRelationshipGraph } from './ai.js';
 import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, claimPreviewByToken, consumeSensitiveAlert, sendVoiceNoteTranscript, sendForeignLanguageAlert } from './telegram.js';
 import { transcribeAudio, generateVoiceNote } from './elevenlabs.js';
 
@@ -1352,6 +1352,8 @@ async function startConnection(userId, db, options = {}) {
               const sumKeyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
               if (sumKeyRow?.value) {
                 triggerConversationSummary(userId, db, contactId, resolvedJid, contactName || phone, sumKeyRow.value).catch(() => {});
+                // Update real-time mood snapshot for this contact (cheap, ~1 call).
+                triggerMoodDetection(userId, db, contactId, contactName || phone, sumKeyRow.value).catch(() => {});
               }
             } catch {}
 
@@ -2112,8 +2114,10 @@ function buildContactSystemPrompt(db, userId, contactId) {
   let systemPrompt = '';
   let memory = '';
   let directive = '';
+  let moodState = null;
+  let graph = null;
   try {
-    const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires, memory_enabled FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires, memory_enabled, mood_state, relationship_graph FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
     if (contactRow?.prompt_id) {
       const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
       systemPrompt = promptRow?.content || '';
@@ -2126,6 +2130,12 @@ function buildContactSystemPrompt(db, userId, contactId) {
     if (contactRow?.active_directive) {
       const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
       if (notExpired) directive = contactRow.active_directive;
+    }
+    if (contactRow?.mood_state && memoryEnabled !== 0) {
+      try { moodState = JSON.parse(contactRow.mood_state); } catch {}
+    }
+    if (contactRow?.relationship_graph && memoryEnabled !== 0) {
+      try { graph = JSON.parse(contactRow.relationship_graph); } catch {}
     }
   } catch {}
   if (!systemPrompt) {
@@ -2144,6 +2154,50 @@ function buildContactSystemPrompt(db, userId, contactId) {
   if (directive) {
     systemPrompt = `🎯 ACTIVE BEHAVIOR DIRECTIVE (must be followed on EVERY reply, no exceptions):\n${directive}\n\n────────\n\n${systemPrompt}\n\n────────\n\n🎯 REMINDER — ACTIVE DIRECTIVE STILL APPLIES: ${directive}`;
   }
+
+  // ── MOOD-AWARE TONE GUARD ──
+  if (moodState && moodState.mood) {
+    const detectedAgoMs = moodState.detectedAt ? (Date.now() - new Date(moodState.detectedAt).getTime()) : Infinity;
+    // Mood snapshots stay fresh for 30 minutes — after that, fall back to neutral
+    if (detectedAgoMs < 30 * 60 * 1000) {
+      const mood = moodState.mood;
+      const intensity = moodState.intensity || 0.3;
+      const tone = moodState.suggestedTone || '';
+      const heavyMoods = new Set(['upset','sad','angry','hurt','grieving','anxious','stressed','vulnerable','tired']);
+      const stricter = heavyMoods.has(mood) && intensity >= 0.4;
+      systemPrompt += `\n\n🎭 CONTACT MOOD RIGHT NOW: ${mood} (intensity ${intensity.toFixed(2)})${moodState.evidence ? ` — evidence: "${moodState.evidence}"` : ''}.\nTONE FOR THIS REPLY: ${tone || (stricter ? 'softer, shorter, no jokes. Let them feel heard.' : 'match their energy naturally.')}`;
+      if (stricter) {
+        systemPrompt += `\n• Do NOT joke, tease, or be sarcastic. Do NOT pivot to small talk or random questions.\n• Keep this reply SHORT (1-2 sentences). Lead with acknowledgement of how they feel.\n• If they're venting, don't immediately try to fix it. Sit with them first.`;
+      }
+    }
+  }
+
+  // ── RELATIONSHIP GRAPH (people, places, events, promises) ──
+  if (graph) {
+    const today = new Date();
+    const fmtDate = (d) => {
+      try { return new Date(d).toISOString().slice(0, 10); } catch { return null; }
+    };
+    const todayISO = fmtDate(today);
+    const openPromises = (graph.promises || []).filter(p => p && p.status !== 'done' && p.status !== 'missed');
+    const overdue = openPromises.filter(p => p.due && fmtDate(p.due) && fmtDate(p.due) < todayISO);
+    const dueSoon = openPromises.filter(p => p.due && fmtDate(p.due) && fmtDate(p.due) >= todayISO && fmtDate(p.due) <= fmtDate(new Date(today.getTime() + 7 * 86400000)));
+    const upcomingEvents = (graph.events || []).filter(e => e.date && fmtDate(e.date) && fmtDate(e.date) >= todayISO).slice(0, 5);
+    const keyPeople = (graph.people || []).slice(0, 10).map(p => `${p.name}${p.relation ? ` (${p.relation})` : ''}${p.notes ? ` — ${p.notes}` : ''}`);
+    const keyPlaces = (graph.places || []).slice(0, 8).map(p => `${p.name}${p.notes ? ` — ${p.notes}` : ''}`);
+
+    const blocks = [];
+    if (keyPeople.length) blocks.push(`PEOPLE IN THEIR LIFE:\n  - ${keyPeople.join('\n  - ')}`);
+    if (keyPlaces.length) blocks.push(`PLACES THAT MATTER:\n  - ${keyPlaces.join('\n  - ')}`);
+    if (upcomingEvents.length) blocks.push(`UPCOMING EVENTS:\n  - ${upcomingEvents.map(e => `${e.name}${e.date ? ` (${fmtDate(e.date)})` : ''}${e.notes ? ` — ${e.notes}` : ''}`).join('\n  - ')}`);
+    if (overdue.length) blocks.push(`⚠️ OVERDUE PROMISES (gently close the loop if it fits):\n  - ${overdue.map(p => `${p.who === 'you' ? 'YOU promised' : 'THEY promised'}: ${p.what}${p.due ? ` (was due ${fmtDate(p.due) || p.due})` : ''}`).join('\n  - ')}`);
+    if (dueSoon.length) blocks.push(`📌 PROMISES COMING UP (don't force, but if the topic fits, acknowledge):\n  - ${dueSoon.map(p => `${p.who === 'you' ? 'YOU' : 'THEY'} → ${p.what}${p.due ? ` (due ${fmtDate(p.due) || p.due})` : ''}`).join('\n  - ')}`);
+
+    if (blocks.length) {
+      systemPrompt += `\n\n🕸️ RELATIONSHIP GRAPH — use this to sound like you actually remember their life. Reference people by name when relevant. Surface a promise only when the conversation gives you a natural opening (don't force it).\n\n${blocks.join('\n\n')}`;
+    }
+  }
+
   if (memory) {
     systemPrompt += `\n\n🧠 MEMORY OF PAST CONVERSATIONS — READ THIS BEFORE YOU WRITE A SINGLE WORD.
 
@@ -4130,10 +4184,72 @@ export async function triggerConversationSummary(userId, db, contactId, jid, con
       .run(newMemory, contactId, userId);
 
     debugLog(db, userId, 'conversation_summarized', { contact: contactName, summaryPreview: summary.slice(0, 100) });
+
+    // ── Update relationship graph in parallel (fire-and-forget; doesn't block summary completion) ──
+    try {
+      const existingGraphRaw = db.prepare('SELECT relationship_graph FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId)?.relationship_graph;
+      let existingGraph = null;
+      if (existingGraphRaw) { try { existingGraph = JSON.parse(existingGraphRaw); } catch {} }
+      updateRelationshipGraph(apiKey, messages, existingGraph, contactName, { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') })
+        .then(updated => {
+          if (!updated) return;
+          db.prepare("UPDATE contacts SET relationship_graph = ? WHERE id = ? AND user_id = ?")
+            .run(JSON.stringify(updated), contactId, userId);
+          debugLog(db, userId, 'relationship_graph_updated', {
+            contact: contactName,
+            people: (updated.people || []).length,
+            promises: (updated.promises || []).length,
+            events: (updated.events || []).length,
+          });
+        })
+        .catch(() => {});
+    } catch {}
+
     return { ran: true, summary, memory: newMemory };
   } catch (err) {
     console.error(`[${userId}] Conversation summary failed:`, err?.message);
     return { ran: false, reason: 'error', error: err?.message };
+  }
+}
+
+// ── Mood Detection (per-contact, refreshed on incoming messages, debounced) ──
+
+const moodDetectionCooldowns = new Map(); // key: `${userId}:${contactId}` → lastRunMs
+const MOOD_COOLDOWN_MS = 90 * 1000; // re-detect at most every 90s per contact
+
+export async function triggerMoodDetection(userId, db, contactId, contactName, apiKey) {
+  if (!apiKey) return;
+  const key = `${userId}:${contactId}`;
+  const last = moodDetectionCooldowns.get(key) || 0;
+  if (Date.now() - last < MOOD_COOLDOWN_MS) return;
+  moodDetectionCooldowns.set(key, Date.now());
+
+  try {
+    // Respect per-contact memory toggle (mood is part of memory-driven behavior).
+    const row = db.prepare('SELECT memory_enabled FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+    const memoryEnabled = row?.memory_enabled === undefined || row?.memory_enabled === null ? 1 : row.memory_enabled;
+    if (memoryEnabled === 0) return;
+
+    const recent = db.prepare(`
+      SELECT content FROM messages
+      WHERE contact_id = ? AND user_id = ? AND direction = 'received'
+        AND content IS NOT NULL AND content != ''
+      ORDER BY timestamp DESC LIMIT 6
+    `).all(contactId, userId).reverse().map(r => r.content);
+
+    if (recent.length < 1) return;
+    const mood = await detectContactMood(apiKey, recent, contactName);
+    if (!mood) return;
+    db.prepare("UPDATE contacts SET mood_state = ? WHERE id = ? AND user_id = ?")
+      .run(JSON.stringify(mood), contactId, userId);
+    debugLog(db, userId, 'mood_detected', {
+      contact: contactName,
+      mood: mood.mood,
+      intensity: mood.intensity,
+      evidence: mood.evidence,
+    });
+  } catch (err) {
+    console.error(`[${userId}] Mood detection failed:`, err?.message);
   }
 }
 
