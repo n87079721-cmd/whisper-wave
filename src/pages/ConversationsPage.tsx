@@ -1683,14 +1683,31 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                         {group.messages.map((msg) => {
                           const isMatch = chatSearchMatchSet.has(msg._idx);
                           const isActive = msg._idx === activeChatSearchIdx;
+                          const isSelected = selectedMsgIds.has(msg.id);
+                          const inSelectionMode = selectedMsgIds.size > 0;
                           return (
                           <div
                             key={msg.id}
                             data-msg-idx={msg._idx}
                             data-msg-id={msg.id}
-                            className={`flex ${msg.type === 'call' ? 'justify-center' : msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
+                            className={`flex ${msg.type === 'call' ? 'justify-center' : msg.direction === 'sent' ? 'justify-end' : 'justify-start'} ${isSelected ? 'bg-primary/10 -mx-2 px-2 py-0.5 rounded-md' : ''}`}
                             onTouchStart={(e) => handleSwipeStart(e, msg)}
                             onTouchEnd={(e) => handleSwipeEnd(e, msg)}
+                            onMouseDown={() => handleLongPressMouseDown(msg)}
+                            onMouseUp={cancelLongPress}
+                            onMouseLeave={cancelLongPress}
+                            onContextMenu={(e) => {
+                              if (msg.type === 'call') return;
+                              e.preventDefault();
+                              toggleMsgSelected(msg.id);
+                            }}
+                            onClickCapture={(e) => {
+                              if (inSelectionMode && msg.type !== 'call') {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                toggleMsgSelected(msg.id);
+                              }
+                            }}
                           >
                             <div
                               className={`group max-w-[88%] sm:max-w-[80%] md:max-w-[65%] ${
@@ -1703,7 +1720,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                         ? 'bg-bubble-out text-bubble-out-foreground rounded-br-md'
                                         : 'bg-bubble-in text-bubble-in-foreground rounded-bl-md'
                                     }`
-                              } ${isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''}`}
+                              } ${isSelected ? 'ring-2 ring-primary shadow-lg' : isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''} transition-all`}
                             >
                               {/* Quoted message preview - tap to scroll to original */}
                               {msg.reply_to_content && (
