@@ -1348,6 +1348,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   {selectedContact.is_archived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                 </button>
               </div>
+              )}
 
               {/* Memory/Directive/AI Sheet */}
               <Sheet open={showMemoryPanel} onOpenChange={setShowMemoryPanel}>
