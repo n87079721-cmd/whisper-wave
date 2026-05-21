@@ -1934,14 +1934,23 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     ) : (
                       <div className="grid grid-cols-3 gap-1 max-h-[200px] overflow-y-auto rounded-lg">
                         {profileMedia.filter(m => m.type === 'image' || m.type === 'video').map((m) => (
-                          <div key={m.id} className="aspect-square rounded-md overflow-hidden bg-muted">
+                          <button
+                            type="button"
+                            key={m.id}
+                            onClick={() => {
+                              if (m.type === 'image' && m.media_path) {
+                                setLightbox({ url: api.getMessageMediaUrl(m.media_path), alt: m.content || m.media_name || 'Shared image' });
+                              }
+                            }}
+                            className="aspect-square rounded-md overflow-hidden bg-muted cursor-zoom-in"
+                          >
                             {m.type === 'image' && m.media_path && (
                               <img src={api.getMessageMediaUrl(m.media_path)} alt="" className="w-full h-full object-cover" />
                             )}
                             {m.type === 'video' && m.media_path && (
                               <video src={api.getMessageMediaUrl(m.media_path)} className="w-full h-full object-cover" muted playsInline />
                             )}
-                          </div>
+                          </button>
                         ))}
                         {profileMedia.filter(m => m.type === 'image' || m.type === 'video').length === 0 && (
                           <p className="col-span-3 text-xs text-muted-foreground text-center py-4">No media shared yet</p>
