@@ -213,6 +213,12 @@ function ensureCurrentTables(db) {
     if (!cols.has('reply_language')) {
       db.exec("ALTER TABLE contacts ADD COLUMN reply_language TEXT DEFAULT NULL");
     }
+    if (!cols.has('relationship_graph')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN relationship_graph TEXT");
+    }
+    if (!cols.has('mood_state')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN mood_state TEXT");
+    }
   } catch {}
 
   try {
