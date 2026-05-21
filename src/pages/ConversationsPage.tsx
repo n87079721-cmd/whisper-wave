@@ -292,6 +292,17 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
           }
         } catch {}
       });
+      es.addEventListener('ai_typing', (event: Event) => {
+        try {
+          const data = event instanceof MessageEvent ? JSON.parse(event.data) : null;
+          if (!data?.contactId) return;
+          setAiTypingContactIds(prev => {
+            const next = new Set(prev);
+            if (data.typing) next.add(data.contactId); else next.delete(data.contactId);
+            return next;
+          });
+        } catch {}
+      });
       es.onerror = () => {};
     } catch {}
 
