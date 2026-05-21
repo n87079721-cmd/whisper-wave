@@ -1277,13 +1277,49 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             ) : (
               filtered.map(contact => {
                 const isActive = selectedContact?.id === contact.id;
+                const swipeOffset = swipeOffsetByContact[contact.id] || 0;
                 return (
+                  <div
+                    key={contact.id}
+                    className="relative overflow-hidden"
+                    onTouchStart={(e) => {
+                      chatSwipeRef.current = { contactId: contact.id, startX: e.touches[0].clientX, startY: e.touches[0].clientY, axis: null };
+                    }}
+                    onTouchMove={(e) => {
+                      const s = chatSwipeRef.current;
+                      if (!s || s.contactId !== contact.id) return;
+                      const dx = e.touches[0].clientX - s.startX;
+                      const dy = e.touches[0].clientY - s.startY;
+                      if (s.axis === null) {
+                        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+                        s.axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+                      }
+                      if (s.axis !== 'h') return;
+                      // Only allow swipe-left (negative dx) for active chats; swipe-right for archived
+                      const clamped = contact.is_archived ? Math.max(0, Math.min(120, dx)) : Math.max(-120, Math.min(0, dx));
+                      setSwipeOffsetByContact(prev => ({ ...prev, [contact.id]: clamped }));
+                    }}
+                    onTouchEnd={() => {
+                      const s = chatSwipeRef.current;
+                      chatSwipeRef.current = null;
+                      const off = swipeOffsetByContact[contact.id] || 0;
+                      setSwipeOffsetByContact(prev => ({ ...prev, [contact.id]: 0 }));
+                      if (s?.axis === 'h' && Math.abs(off) > 70) {
+                        handleArchiveChat(contact.id, !contact.is_archived);
+                      }
+                    }}
+                  >
+                    {/* Swipe action background */}
+                    <div className={`absolute inset-y-0 ${contact.is_archived ? 'left-0' : 'right-0'} w-[120px] flex items-center justify-center bg-primary text-primary-foreground`}>
+                      {contact.is_archived ? <ArchiveRestore className="w-5 h-5" /> : <Archive className="w-5 h-5" />}
+                    </div>
                   <button
                     key={contact.id}
                     onClick={() => { setSelectedContact(contact); if (showArchived) setShowArchived(false); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 text-left transition-colors ${
+                    style={{ transform: `translateX(${swipeOffset}px)`, transition: chatSwipeRef.current?.contactId === contact.id ? 'none' : 'transform 0.2s ease' }}
+                    className={`relative w-full flex items-center gap-3 px-3 py-3 text-left transition-colors ${
                       isActive ? 'bg-accent' : 'hover:bg-secondary/60'
-                    }`}
+                    } bg-background`}
                   >
                     <Avatar contact={contact} size="md" />
                     <div className="min-w-0 flex-1">
@@ -1309,6 +1345,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       </div>
                     </div>
                   </button>
+                  </div>
                 );
               })
             )}
