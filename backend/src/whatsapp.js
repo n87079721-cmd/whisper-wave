@@ -1352,6 +1352,8 @@ async function startConnection(userId, db, options = {}) {
               const sumKeyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
               if (sumKeyRow?.value) {
                 triggerConversationSummary(userId, db, contactId, resolvedJid, contactName || phone, sumKeyRow.value).catch(() => {});
+                // Update real-time mood snapshot for this contact (cheap, ~1 call).
+                triggerMoodDetection(userId, db, contactId, contactName || phone, sumKeyRow.value).catch(() => {});
               }
             } catch {}
 
