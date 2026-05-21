@@ -1232,7 +1232,35 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         <div className={`${!showChatOnMobile && !showNewChat ? 'hidden md:flex' : showNewChat && !showChatOnMobile ? 'hidden md:flex' : 'flex'} flex-1 flex-col min-w-0`}>
           {selectedContact ? (
             <>
-              {/* Chat header */}
+              {/* Selection action bar (replaces chat header when messages are selected) */}
+              {selectedMsgIds.size > 0 ? (
+                <div className="px-3 md:px-4 py-2.5 border-b border-border flex items-center gap-2 bg-primary/10 backdrop-blur-sm">
+                  <button onClick={clearSelection} className="p-1.5 -ml-1 text-foreground hover:bg-background/50 rounded-full" title="Clear selection">
+                    <X className="w-5 h-5" />
+                  </button>
+                  <p className="text-[15px] font-semibold text-foreground flex-1">{selectedMsgIds.size} selected</p>
+                  <button onClick={handleBulkStar} className="p-2 text-foreground hover:bg-background/50 rounded-full" title="Star">
+                    <Star className="w-5 h-5" />
+                  </button>
+                  <button onClick={handleBulkCopy} className="p-2 text-foreground hover:bg-background/50 rounded-full" title="Copy">
+                    <Copy className="w-5 h-5" />
+                  </button>
+                  <button onClick={handleBulkForward} className="p-2 text-foreground hover:bg-background/50 rounded-full" title="Forward">
+                    <Forward className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      const choice = window.prompt('Delete: type "me" to delete for you, or "all" to delete for everyone. Cancel to abort.', 'me');
+                      if (choice === 'me') handleBulkDelete('me');
+                      else if (choice === 'all') handleBulkDelete('everyone');
+                    }}
+                    className="p-2 text-destructive hover:bg-background/50 rounded-full"
+                    title="Delete"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
+              ) : (
               <div className="px-3 md:px-4 py-2.5 border-b border-border flex items-center gap-3 bg-background">
                 <button
                   onClick={() => setSelectedContact(null)}
