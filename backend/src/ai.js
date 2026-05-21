@@ -522,7 +522,7 @@ Rules:
         },
         { role: 'user', content: convoText.slice(-4000) },
       ],
-      max_tokens: 320,
+      max_tokens: 700,
       temperature: 0.3,
     }),
   });
@@ -568,9 +568,9 @@ Open (current): <unresolved items only, or "none">
 
 Respond with ONLY the compacted memory, nothing else.`,
         },
-        { role: 'user', content: memory.slice(-12000) },
+        { role: 'user', content: memory.slice(-16000) },
       ],
-      max_tokens: 800,
+      max_tokens: 1400,
       temperature: 0.2,
     }),
   });
