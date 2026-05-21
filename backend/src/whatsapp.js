@@ -4184,10 +4184,72 @@ export async function triggerConversationSummary(userId, db, contactId, jid, con
       .run(newMemory, contactId, userId);
 
     debugLog(db, userId, 'conversation_summarized', { contact: contactName, summaryPreview: summary.slice(0, 100) });
+
+    // ── Update relationship graph in parallel (fire-and-forget; doesn't block summary completion) ──
+    try {
+      const existingGraphRaw = db.prepare('SELECT relationship_graph FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId)?.relationship_graph;
+      let existingGraph = null;
+      if (existingGraphRaw) { try { existingGraph = JSON.parse(existingGraphRaw); } catch {} }
+      updateRelationshipGraph(apiKey, messages, existingGraph, contactName, { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') })
+        .then(updated => {
+          if (!updated) return;
+          db.prepare("UPDATE contacts SET relationship_graph = ? WHERE id = ? AND user_id = ?")
+            .run(JSON.stringify(updated), contactId, userId);
+          debugLog(db, userId, 'relationship_graph_updated', {
+            contact: contactName,
+            people: (updated.people || []).length,
+            promises: (updated.promises || []).length,
+            events: (updated.events || []).length,
+          });
+        })
+        .catch(() => {});
+    } catch {}
+
     return { ran: true, summary, memory: newMemory };
   } catch (err) {
     console.error(`[${userId}] Conversation summary failed:`, err?.message);
     return { ran: false, reason: 'error', error: err?.message };
+  }
+}
+
+// ── Mood Detection (per-contact, refreshed on incoming messages, debounced) ──
+
+const moodDetectionCooldowns = new Map(); // key: `${userId}:${contactId}` → lastRunMs
+const MOOD_COOLDOWN_MS = 90 * 1000; // re-detect at most every 90s per contact
+
+export async function triggerMoodDetection(userId, db, contactId, contactName, apiKey) {
+  if (!apiKey) return;
+  const key = `${userId}:${contactId}`;
+  const last = moodDetectionCooldowns.get(key) || 0;
+  if (Date.now() - last < MOOD_COOLDOWN_MS) return;
+  moodDetectionCooldowns.set(key, Date.now());
+
+  try {
+    // Respect per-contact memory toggle (mood is part of memory-driven behavior).
+    const row = db.prepare('SELECT memory_enabled FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
+    const memoryEnabled = row?.memory_enabled === undefined || row?.memory_enabled === null ? 1 : row.memory_enabled;
+    if (memoryEnabled === 0) return;
+
+    const recent = db.prepare(`
+      SELECT content FROM messages
+      WHERE contact_id = ? AND user_id = ? AND direction = 'received'
+        AND content IS NOT NULL AND content != ''
+      ORDER BY timestamp DESC LIMIT 6
+    `).all(contactId, userId).reverse().map(r => r.content);
+
+    if (recent.length < 1) return;
+    const mood = await detectContactMood(apiKey, recent, contactName);
+    if (!mood) return;
+    db.prepare("UPDATE contacts SET mood_state = ? WHERE id = ? AND user_id = ?")
+      .run(JSON.stringify(mood), contactId, userId);
+    debugLog(db, userId, 'mood_detected', {
+      contact: contactName,
+      mood: mood.mood,
+      intensity: mood.intensity,
+      evidence: mood.evidence,
+    });
+  } catch (err) {
+    console.error(`[${userId}] Mood detection failed:`, err?.message);
   }
 }
 
