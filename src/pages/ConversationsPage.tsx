@@ -1839,9 +1839,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
                   {groupedMessages.map((group) => (
                     <div key={group.date}>
-                      {/* Date separator */}
-                      <div className="flex justify-center my-3">
-                        <span className="px-3 py-1 rounded-lg bg-card/90 text-[11px] text-muted-foreground shadow-sm">
+                      {/* Date separator (sticky while scrolling within this group) */}
+                      <div className="sticky top-1 z-10 flex justify-center my-3 pointer-events-none">
+                        <span className="px-3 py-1 rounded-lg bg-card/95 text-[11px] text-muted-foreground shadow-sm backdrop-blur-sm">
                           {group.date}
                         </span>
                       </div>
@@ -1852,7 +1852,18 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                           const isActive = msg._idx === activeChatSearchIdx;
                           const isSelected = selectedMsgIds.has(msg.id);
                           const inSelectionMode = selectedMsgIds.size > 0;
+                          const showUnreadDivider = firstUnreadId === msg.id;
                           return (
+                          <>
+                          {showUnreadDivider && (
+                            <div key={`unread-${msg.id}`} className="flex items-center gap-2 my-2 px-2">
+                              <div className="flex-1 h-px bg-primary/40" />
+                              <span className="text-[10px] font-medium text-primary uppercase tracking-wider whitespace-nowrap">
+                                {initialUnreadCountRef.current} new message{initialUnreadCountRef.current === 1 ? '' : 's'}
+                              </span>
+                              <div className="flex-1 h-px bg-primary/40" />
+                            </div>
+                          )}
                           <div
                             key={msg.id}
                             data-msg-idx={msg._idx}
