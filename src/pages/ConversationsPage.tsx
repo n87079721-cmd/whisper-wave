@@ -1763,6 +1763,31 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
               {/* Messages area */}
               <div className="relative flex-1 min-h-0">
+                {/* Pinned messages bar */}
+                {pinnedMsgIds.size > 0 && (() => {
+                  const firstPinned = messages.find(m => pinnedMsgIds.has(m.id));
+                  if (!firstPinned) return null;
+                  const preview = firstPinned.content || (firstPinned.type === 'image' ? '📷 Photo' : firstPinned.type === 'video' ? '🎥 Video' : firstPinned.type === 'voice' ? '🎤 Voice' : firstPinned.type);
+                  return (
+                    <div className="absolute top-0 left-0 right-0 z-20 px-3 py-1.5 bg-card/95 backdrop-blur-sm border-b border-border flex items-center gap-2">
+                      <Pin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                      <button
+                        onClick={() => jumpToMessage(firstPinned.id)}
+                        className="flex-1 min-w-0 text-left"
+                      >
+                        <p className="text-[11px] font-medium text-primary">Pinned {pinnedMsgIds.size > 1 ? `(${pinnedMsgIds.size})` : ''}</p>
+                        <p className="text-[12px] text-foreground truncate">{preview}</p>
+                      </button>
+                      <button
+                        onClick={() => togglePinMessage(firstPinned.id)}
+                        className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                        title="Unpin"
+                      >
+                        <PinOff className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })()}
                 <div
                   ref={messagesViewportRef}
                   onScroll={syncAutoScrollState}
