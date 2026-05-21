@@ -2114,8 +2114,10 @@ function buildContactSystemPrompt(db, userId, contactId) {
   let systemPrompt = '';
   let memory = '';
   let directive = '';
+  let moodState = null;
+  let graph = null;
   try {
-    const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires, memory_enabled FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires, memory_enabled, mood_state, relationship_graph FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
     if (contactRow?.prompt_id) {
       const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
       systemPrompt = promptRow?.content || '';
@@ -2128,6 +2130,12 @@ function buildContactSystemPrompt(db, userId, contactId) {
     if (contactRow?.active_directive) {
       const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
       if (notExpired) directive = contactRow.active_directive;
+    }
+    if (contactRow?.mood_state && memoryEnabled !== 0) {
+      try { moodState = JSON.parse(contactRow.mood_state); } catch {}
+    }
+    if (contactRow?.relationship_graph && memoryEnabled !== 0) {
+      try { graph = JSON.parse(contactRow.relationship_graph); } catch {}
     }
   } catch {}
   if (!systemPrompt) {
@@ -2146,6 +2154,50 @@ function buildContactSystemPrompt(db, userId, contactId) {
   if (directive) {
     systemPrompt = `🎯 ACTIVE BEHAVIOR DIRECTIVE (must be followed on EVERY reply, no exceptions):\n${directive}\n\n────────\n\n${systemPrompt}\n\n────────\n\n🎯 REMINDER — ACTIVE DIRECTIVE STILL APPLIES: ${directive}`;
   }
+
+  // ── MOOD-AWARE TONE GUARD ──
+  if (moodState && moodState.mood) {
+    const detectedAgoMs = moodState.detectedAt ? (Date.now() - new Date(moodState.detectedAt).getTime()) : Infinity;
+    // Mood snapshots stay fresh for 30 minutes — after that, fall back to neutral
+    if (detectedAgoMs < 30 * 60 * 1000) {
+      const mood = moodState.mood;
+      const intensity = moodState.intensity || 0.3;
+      const tone = moodState.suggestedTone || '';
+      const heavyMoods = new Set(['upset','sad','angry','hurt','grieving','anxious','stressed','vulnerable','tired']);
+      const stricter = heavyMoods.has(mood) && intensity >= 0.4;
+      systemPrompt += `\n\n🎭 CONTACT MOOD RIGHT NOW: ${mood} (intensity ${intensity.toFixed(2)})${moodState.evidence ? ` — evidence: "${moodState.evidence}"` : ''}.\nTONE FOR THIS REPLY: ${tone || (stricter ? 'softer, shorter, no jokes. Let them feel heard.' : 'match their energy naturally.')}`;
+      if (stricter) {
+        systemPrompt += `\n• Do NOT joke, tease, or be sarcastic. Do NOT pivot to small talk or random questions.\n• Keep this reply SHORT (1-2 sentences). Lead with acknowledgement of how they feel.\n• If they're venting, don't immediately try to fix it. Sit with them first.`;
+      }
+    }
+  }
+
+  // ── RELATIONSHIP GRAPH (people, places, events, promises) ──
+  if (graph) {
+    const today = new Date();
+    const fmtDate = (d) => {
+      try { return new Date(d).toISOString().slice(0, 10); } catch { return null; }
+    };
+    const todayISO = fmtDate(today);
+    const openPromises = (graph.promises || []).filter(p => p && p.status !== 'done' && p.status !== 'missed');
+    const overdue = openPromises.filter(p => p.due && fmtDate(p.due) && fmtDate(p.due) < todayISO);
+    const dueSoon = openPromises.filter(p => p.due && fmtDate(p.due) && fmtDate(p.due) >= todayISO && fmtDate(p.due) <= fmtDate(new Date(today.getTime() + 7 * 86400000)));
+    const upcomingEvents = (graph.events || []).filter(e => e.date && fmtDate(e.date) && fmtDate(e.date) >= todayISO).slice(0, 5);
+    const keyPeople = (graph.people || []).slice(0, 10).map(p => `${p.name}${p.relation ? ` (${p.relation})` : ''}${p.notes ? ` — ${p.notes}` : ''}`);
+    const keyPlaces = (graph.places || []).slice(0, 8).map(p => `${p.name}${p.notes ? ` — ${p.notes}` : ''}`);
+
+    const blocks = [];
+    if (keyPeople.length) blocks.push(`PEOPLE IN THEIR LIFE:\n  - ${keyPeople.join('\n  - ')}`);
+    if (keyPlaces.length) blocks.push(`PLACES THAT MATTER:\n  - ${keyPlaces.join('\n  - ')}`);
+    if (upcomingEvents.length) blocks.push(`UPCOMING EVENTS:\n  - ${upcomingEvents.map(e => `${e.name}${e.date ? ` (${fmtDate(e.date)})` : ''}${e.notes ? ` — ${e.notes}` : ''}`).join('\n  - ')}`);
+    if (overdue.length) blocks.push(`⚠️ OVERDUE PROMISES (gently close the loop if it fits):\n  - ${overdue.map(p => `${p.who === 'you' ? 'YOU promised' : 'THEY promised'}: ${p.what}${p.due ? ` (was due ${fmtDate(p.due) || p.due})` : ''}`).join('\n  - ')}`);
+    if (dueSoon.length) blocks.push(`📌 PROMISES COMING UP (don't force, but if the topic fits, acknowledge):\n  - ${dueSoon.map(p => `${p.who === 'you' ? 'YOU' : 'THEY'} → ${p.what}${p.due ? ` (due ${fmtDate(p.due) || p.due})` : ''}`).join('\n  - ')}`);
+
+    if (blocks.length) {
+      systemPrompt += `\n\n🕸️ RELATIONSHIP GRAPH — use this to sound like you actually remember their life. Reference people by name when relevant. Surface a promise only when the conversation gives you a natural opening (don't force it).\n\n${blocks.join('\n\n')}`;
+    }
+  }
+
   if (memory) {
     systemPrompt += `\n\n🧠 MEMORY OF PAST CONVERSATIONS — READ THIS BEFORE YOU WRITE A SINGLE WORD.
 
