@@ -706,3 +706,136 @@ RULES:
     return null;
   }
 }
+
+/**
+ * Detect the contact's current mood from their last few incoming messages.
+ * Returns a small JSON: { mood, intensity (0-1), evidence, suggestedTone }.
+ * Returns null on failure or when there's not enough signal.
+ */
+export async function detectContactMood(apiKey, recentReceivedTexts, contactName) {
+  if (!apiKey) return null;
+  const joined = (recentReceivedTexts || [])
+    .filter(Boolean)
+    .slice(-6)
+    .map((t, i) => `${i + 1}. ${String(t).slice(0, 400)}`)
+    .join('\n');
+  if (!joined || joined.replace(/[^a-zA-Z\u00C0-\uFFFF]/g, '').length < 6) return null;
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You detect the EMOTIONAL STATE of a person (named ${contactName || 'the contact'}) from their last few text messages. Read carefully — punctuation, length, slang, dryness, exclamation, swearing, emoji choice, topic.
+
+Output ONLY a JSON object: {
+  "mood": one of ["happy","excited","flirty","calm","neutral","tired","bored","anxious","sad","upset","angry","hurt","vulnerable","playful","romantic","stressed","grieving"],
+  "intensity": number 0.0–1.0 (how strong the mood is — 0.3 = mild, 0.7 = strong, 0.9 = overwhelming),
+  "evidence": short phrase quoting what tipped you off (max 100 chars),
+  "suggestedTone": one short sentence telling the replier exactly how to adjust tone (e.g. "softer, shorter, no jokes — let her feel heard", "match the hype, caps + 🔥", "stay light, don't pry, give space")
+}
+
+Rules:
+- Default to "neutral" with intensity 0.2 if the messages are mundane.
+- "upset/sad/angry/hurt/grieving/anxious" should trigger softer tone guidance — NO jokes, NO sarcasm, shorter replies.
+- "happy/excited/playful/flirty" can match energy.
+- Don't invent emotions that aren't in the text. Be conservative.`,
+          },
+          { role: 'user', content: `Recent messages from ${contactName || 'them'}:\n${joined}` },
+        ],
+        max_tokens: 200,
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+      }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+    if (!parsed.mood) return null;
+    return {
+      mood: String(parsed.mood).toLowerCase(),
+      intensity: Math.max(0, Math.min(1, Number(parsed.intensity) || 0.3)),
+      evidence: String(parsed.evidence || '').slice(0, 140),
+      suggestedTone: String(parsed.suggestedTone || '').slice(0, 220),
+      detectedAt: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract / update the relationship memory graph from recent messages.
+ * Merges with the existing graph JSON and returns a new graph object:
+ * { people: [{name, relation, notes}], places: [{name, notes}],
+ *   events: [{name, date, notes}], promises: [{who, what, due, status}] }.
+ * Returns the existing graph on failure.
+ */
+export async function updateRelationshipGraph(apiKey, messages, existingGraph, contactName, { timezone } = {}) {
+  if (!apiKey) return existingGraph || null;
+  const convoText = (messages || [])
+    .map(m => `${m.direction === 'sent' ? 'You' : (contactName || 'Them')}: ${m.content || '(media)'}`)
+    .join('\n')
+    .slice(-6000);
+  if (!convoText.trim()) return existingGraph || null;
+
+  const t = buildTimeContext(timezone);
+  const existingJson = existingGraph ? JSON.stringify(existingGraph).slice(0, 6000) : '{}';
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You maintain a RELATIONSHIP MEMORY GRAPH for a private chat between the phone owner ("You") and ${contactName || 'a contact'}. Today is ${t.todayFull} (${t.tz}).
+
+You are given:
+1. The CURRENT graph (JSON, may be empty).
+2. NEW messages from the conversation.
+
+Your job: return an UPDATED graph as JSON. Merge new facts with the existing graph. Do not lose existing entries unless they're clearly resolved or contradicted.
+
+Schema (return EXACTLY this shape):
+{
+  "people": [{"name": "string", "relation": "who they are to the contact (e.g. mom, best friend, boss, ex)", "notes": "short context"}],
+  "places": [{"name": "string", "notes": "what this place means (home, gym, hometown, planned trip)"}],
+  "events": [{"name": "string", "date": "YYYY-MM-DD or null", "notes": "what's happening"}],
+  "promises": [{"who": "you" | "them", "what": "the commitment", "due": "YYYY-MM-DD or natural phrase or null", "status": "open" | "done" | "missed"}]
+}
+
+Rules:
+- ONLY include entries with real evidence in the conversation. Don't invent.
+- For promises: capture concrete commitments ("i'll call you friday", "send me the pic later", "we'll meet sunday"). Resolve to "done" if a later message clearly fulfilled it, "missed" if the deadline passed without fulfillment.
+- Normalize dates relative to today when possible (e.g. "friday" → next Friday's YYYY-MM-DD).
+- Cap each array at 25 most relevant items. Drop oldest "done"/"missed" promises first.
+- Return ONLY the JSON, no commentary.`,
+          },
+          { role: 'user', content: `CURRENT GRAPH:\n${existingJson}\n\nNEW MESSAGES:\n${convoText}` },
+        ],
+        max_tokens: 1400,
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+      }),
+    });
+    if (!response.ok) return existingGraph || null;
+    const data = await response.json();
+    const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+    return {
+      people: Array.isArray(parsed.people) ? parsed.people.slice(0, 25) : [],
+      places: Array.isArray(parsed.places) ? parsed.places.slice(0, 25) : [],
+      events: Array.isArray(parsed.events) ? parsed.events.slice(0, 25) : [],
+      promises: Array.isArray(parsed.promises) ? parsed.promises.slice(0, 25) : [],
+      updatedAt: new Date().toISOString(),
+    };
+  } catch {
+    return existingGraph || null;
+  }
+}
