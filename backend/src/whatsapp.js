@@ -2145,7 +2145,19 @@ function buildContactSystemPrompt(db, userId, contactId) {
     systemPrompt = `🎯 ACTIVE BEHAVIOR DIRECTIVE (must be followed on EVERY reply, no exceptions):\n${directive}\n\n────────\n\n${systemPrompt}\n\n────────\n\n🎯 REMINDER — ACTIVE DIRECTIVE STILL APPLIES: ${directive}`;
   }
   if (memory) {
-    systemPrompt += `\n\nMEMORY OF PAST CONVERSATIONS — DO NOT REPEAT QUESTIONS ALREADY ASKED OR ASK FOR INFO ALREADY KNOWN. Build on what's here, don't restart. If they already told you their job/plans/feelings, reference them naturally instead of asking again.\n${memory}`;
+    systemPrompt += `\n\n🧠 MEMORY OF PAST CONVERSATIONS — READ THIS BEFORE YOU WRITE A SINGLE WORD.
+
+MANDATORY PRE-REPLY CHECK (do this silently every time, even on a short reply):
+1. Scan the "Knows" list — does the contact's latest message reference anything you already KNOW? (a name, a plan, a feeling, a place, a person, a date). If yes, USE that fact — don't re-ask, don't act surprised, don't restart context.
+2. Scan the "Asked" list — have you already asked a question of this shape before? If yes, DO NOT ask it again. Pick a different angle or just react.
+3. Scan the "Open" threads — is there an unresolved promise or follow-up you owe them (or they owe you)? If the moment fits, close the loop ("did you end up…", "you said you'd send…"). Don't force it if it doesn't fit.
+4. Scan the most recent dated narrative — what was the LAST vibe and topic? Continue from there, don't reset.
+5. Check dates in memory against today's date above — if a trip/birthday/event has now passed or is today, react accordingly ("how was hawaii", "happy birthday today!!"), don't ask future-tense about a past event.
+
+If the latest incoming message asks you something factual that's in memory, ANSWER from memory. If it references a person/event in memory, acknowledge them by name. Never say "who?" or "what?" about something already in the Knows list.
+
+MEMORY:
+${memory}`;
   }
   return systemPrompt;
 }
