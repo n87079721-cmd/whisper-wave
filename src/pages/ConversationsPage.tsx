@@ -2026,6 +2026,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                     >
                                       <Star className={`w-3 h-3 ${msg.is_starred ? 'fill-yellow-500 text-yellow-500' : ''}`} />
                                     </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); togglePinMessage(msg.id); }}
+                                      className={`inline-btn p-0.5 hover:text-primary ${pinnedMsgIds.has(msg.id) ? 'text-primary' : 'text-muted-foreground/50 md:text-muted-foreground'}`}
+                                      title={pinnedMsgIds.has(msg.id) ? 'Unpin' : 'Pin'}
+                                    >
+                                      <Pin className={`w-3 h-3 ${pinnedMsgIds.has(msg.id) ? 'fill-primary' : ''}`} />
+                                    </button>
                                     {msg.direction === 'sent' && msg.type === 'text' && (
                                       <button
                                         onClick={(e) => { e.stopPropagation(); setEditingMsgId(msg.id); setEditingText(msg.content || ''); }}
