@@ -506,24 +506,32 @@ export async function generateConversationSummary(apiKey, messages, contactName,
       messages: [
         {
           role: 'system',
-          content: `Summarize this WhatsApp conversation so the AI does NOT repeat itself next time.
+          content: `You are writing a CONVERSATION MEMORY LOG so the AI can read it later and behave like it actually remembers this person.
 
-${existingMemory ? `EXISTING MEMORY (do NOT restate items already covered here):\n${existingMemory}\n\n` : ''}Output EXACTLY this format and nothing else:
+${existingMemory ? `EXISTING MEMORY (do NOT restate items already in here — only capture what's NEW or changed in this batch):\n${existingMemory}\n\n` : ''}Output EXACTLY this format and nothing else:
 
-[${dateLabel}] <2-3 sentence narrative of what happened: topics, decisions, tone>
-Asked: <comma-separated list of distinct questions YOU already asked them — keep short, e.g. "their job, weekend plans, how they slept">
-Knows: <comma-separated key facts THEY shared — name, job, family, plans, preferences, feelings>
-Open: <unresolved threads or follow-ups either side promised — or "none">
+[${dateLabel}] <narrative — see rules below>
+Asked: <NEW questions YOU asked them in this batch only — short noun phrases, comma-separated. Skip anything already in existing memory's Asked list. If nothing new: "none">
+Knows: <NEW concrete facts they revealed in this batch — names, places, plans, feelings, opinions, dates, people in their life, what they're doing right now. Be specific. Skip anything already in existing memory's Knows list. If nothing new: "none">
+Open: <unresolved threads from this batch — promises made, questions left hanging, plans to confirm. If everything was resolved: "none">
 
-Rules:
+NARRATIVE RULES (this is the part most often done badly — read carefully):
+- 2-4 sentences MAX. Be SPECIFIC, not generic.
+- BANNED phrases (do not write these — they're meaningless filler): "exchanged affectionate messages", "shared a warm conversation", "discussed various topics", "the tone was warm/playful/supportive", "expressed love and care", "had a meaningful exchange".
+- Instead, write what ACTUALLY happened with concrete nouns: who said/did what, which topic, what shifted. Example GOOD: "Bonnie sent a beach pic from South Beach, said she forgot her amber ring. Lenny told her about Zoë's reaction to a poem he wrote about her. They planned to FaceTime tomorrow after her ferry."
+- If a real fact, plan, name, place, or feeling came up — name it in the narrative. If nothing real happened (just emojis/affection), say so plainly: "Mostly emojis and goodnight wishes, no new info."
+- Capture EMOTIONAL SHIFTS (got upset, cheered up, opened up about X) — those matter for next reply.
+- Capture TIME-SENSITIVE items (she's flying tomorrow, his show is tonight) — flag them in Open so the next reply can follow up.
+
+GENERAL RULES:
 - Use EXACTLY the date "[${dateLabel}]" — do not change it or guess.
-- If a section has nothing new vs existing memory, write "none".
-- Keep each line tight. No extra commentary, no markdown, no headers other than Asked/Knows/Open.`,
+- No markdown, no bullets, no extra commentary, no headers other than Asked/Knows/Open.
+- Keep Asked/Knows/Open as tight comma lists, not full sentences.`,
         },
         { role: 'user', content: convoText.slice(-4000) },
       ],
       max_tokens: 700,
-      temperature: 0.3,
+      temperature: 0.4,
     }),
   });
 
