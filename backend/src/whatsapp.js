@@ -4748,6 +4748,7 @@ function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactNa
         const chat = await inst.client.getChatById(chatId);
         await chat.sendStateTyping();
       } catch {}
+      emit(userId, 'ai_typing', { contactId, typing: true });
 
       pendingReply.typingTimer = setTimeout(async () => {
         if (pendingReply.aborted) return;
@@ -4765,11 +4766,13 @@ function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactNa
           debugLog(db, userId, 'telegram_custom_reply_sent', { contact: contactName || phone, replyPreview: replyText.slice(0, 80) });
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
+          emit(userId, 'ai_typing', { contactId, typing: false });
           emit(userId, 'message', { contactId, msgId: replyId });
         } catch (err) {
           console.error('Telegram custom reply failed:', err?.message);
           inst.pendingAutoReplies.delete(jid);
           await clearTypingState(userId, jid);
+          emit(userId, 'ai_typing', { contactId, typing: false });
         }
       }, typingDuration);
     } catch (err) {
