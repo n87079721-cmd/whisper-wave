@@ -40,6 +40,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const conversationsRefreshTimerRef = useRef<number | null>(null);
   const contactsRefreshTimerRef = useRef<number | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [chatReady, setChatReady] = useState(false);
+  const chatReadyTimerRef = useRef<number | null>(null);
   const [chatSearch, setChatSearch] = useState('');
   const [recoveringChat, setRecoveringChat] = useState(false);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
@@ -306,6 +308,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     if (!selectedContact?.id) return;
     shouldAutoScrollRef.current = true;
     setShowScrollDown(false);
+    // Hide message viewport until first paint + scroll settles to prevent jumpy load
+    setChatReady(false);
+    setMessages([]);
+    if (chatReadyTimerRef.current) { window.clearTimeout(chatReadyTimerRef.current); chatReadyTimerRef.current = null; }
     setReplyText(replyDraftsRef.current[selectedContact.id] ?? '');
     // voice preview removed
     setQuotedMessage(null);
@@ -338,8 +344,29 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     api.getContactAutoInitiate(selectedContact.id).then(data => {
       setContactAutoInitiate(data.autoInitiate);
     }).catch(() => setContactAutoInitiate(false));
-    refreshMessages(selectedContact.id, { forceScroll: true });
-  }, [selectedContact?.id, refreshMessages]);
+    refreshMessages(selectedContact.id, { forceScroll: true }).finally(() => {
+      // After messages render, scroll then reveal once layout is stable
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          scrollMessagesToBottom('auto');
+          chatReadyTimerRef.current = window.setTimeout(() => {
+            scrollMessagesToBottom('auto');
+            setChatReady(true);
+          }, 120);
+        });
+      });
+    });
+  }, [selectedContact?.id, refreshMessages, scrollMessagesToBottom]);
+
+  // While chat is loading, keep pinned to bottom as images/media resolve their height
+  useEffect(() => {
+    if (chatReady) return;
+    const viewport = messagesViewportRef.current;
+    if (!viewport) return;
+    const onLoad = () => scrollMessagesToBottom('auto');
+    viewport.addEventListener('load', onLoad, true);
+    return () => viewport.removeEventListener('load', onLoad, true);
+  }, [chatReady, scrollMessagesToBottom, messages.length]);
 
   // Mark chat as read when opened
   useEffect(() => {
@@ -1653,7 +1680,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 <div
                   ref={messagesViewportRef}
                   onScroll={syncAutoScrollState}
-                  className="absolute inset-0 overflow-y-auto overscroll-contain p-3 md:p-4 bg-chat-bg"
+                  className={`absolute inset-0 overflow-y-auto overscroll-contain p-3 md:p-4 bg-chat-bg transition-opacity duration-150 ${chatReady ? 'opacity-100' : 'opacity-0'}`}
                 >
                   {/* Load older messages button */}
                   {hasMoreMessages && (
