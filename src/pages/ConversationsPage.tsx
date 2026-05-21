@@ -1854,9 +1854,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                           const inSelectionMode = selectedMsgIds.size > 0;
                           const showUnreadDivider = firstUnreadId === msg.id;
                           return (
-                          <>
+                          <Fragment key={msg.id}>
                           {showUnreadDivider && (
-                            <div key={`unread-${msg.id}`} className="flex items-center gap-2 my-2 px-2">
+                            <div className="flex items-center gap-2 my-2 px-2">
                               <div className="flex-1 h-px bg-primary/40" />
                               <span className="text-[10px] font-medium text-primary uppercase tracking-wider whitespace-nowrap">
                                 {initialUnreadCountRef.current} new message{initialUnreadCountRef.current === 1 ? '' : 's'}
@@ -1865,7 +1865,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                             </div>
                           )}
                           <div
-                            key={msg.id}
                             data-msg-idx={msg._idx}
                             data-msg-id={msg.id}
                             className={`flex ${msg.type === 'call' ? 'justify-center' : msg.direction === 'sent' ? 'justify-end' : 'justify-start'} ${isSelected ? 'bg-primary/10 -mx-2 px-2 py-0.5 rounded-md' : ''}`}
@@ -2069,7 +2068,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                               </div>
                             </div>
                           </div>
-                          </>
+                          </Fragment>
                           );
                         })}
                       </div>
