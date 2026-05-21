@@ -2103,6 +2103,36 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             </div>
           </div>
         )}
+        {lightbox && (
+          <div
+            className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 animate-in fade-in"
+            onClick={() => setLightbox(null)}
+          >
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
+              className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white"
+              aria-label="Close"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <a
+              href={lightbox.url}
+              download
+              onClick={(e) => e.stopPropagation()}
+              className="absolute top-4 right-16 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white"
+              aria-label="Download"
+            >
+              <Download className="w-6 h-6" />
+            </a>
+            <img
+              src={lightbox.url}
+              alt={lightbox.alt}
+              onClick={(e) => e.stopPropagation()}
+              className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl"
+            />
+          </div>
+        )}
       </div>
     </div>
   );
