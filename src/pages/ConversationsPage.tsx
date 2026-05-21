@@ -71,6 +71,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [globalSearching, setGlobalSearching] = useState(false);
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [lightbox, setLightbox] = useState<{ url: string; alt: string } | null>(null);
   const [contactPromptId, setContactPromptId] = useState<string | null>(null);
   const [showPersonaPicker, setShowPersonaPicker] = useState(false);
   const [showMemoryPanel, setShowMemoryPanel] = useState(false);
@@ -865,14 +866,21 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         <div className="space-y-2">
           {viewOnceBadge}
           {imageUrl ? (
-            <a href={imageUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl bg-muted/60">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightbox({ url: imageUrl, alt: msg.content || msg.media_name || 'Shared image' });
+              }}
+              className="block overflow-hidden rounded-xl bg-muted/60 cursor-zoom-in"
+            >
               <img
                 src={imageUrl}
                 alt={msg.content || msg.media_name || 'Shared image'}
                 loading="lazy"
                 className="max-h-80 w-full object-cover"
               />
-            </a>
+            </button>
           ) : (
             <div className="flex items-center gap-2 rounded-xl border border-border/50 bg-background/30 px-3 py-2 text-xs text-muted-foreground">
               <ImageIcon className="w-4 h-4" />
