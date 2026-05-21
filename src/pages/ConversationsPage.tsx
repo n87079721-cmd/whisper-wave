@@ -63,6 +63,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [profileMedia, setProfileMedia] = useState<Message[]>([]);
   const [profileMediaLoading, setProfileMediaLoading] = useState(false);
   const swipeRef = useRef<{ startX: number; msgId: string } | null>(null);
+  const longPressRef = useRef<number | null>(null);
+  const longPressFiredRef = useRef(false);
+  const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
   const [forwardingMsg, setForwardingMsg] = useState<Message | null>(null);
   const [forwardSearch, setForwardSearch] = useState('');
   const [forwardSending, setForwardSending] = useState(false);
@@ -749,17 +752,113 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const handleSwipeStart = useCallback((e: React.TouchEvent, msg: Message) => {
     if (msg.type === 'call') return;
     swipeRef.current = { startX: e.touches[0].clientX, msgId: msg.id };
+    longPressFiredRef.current = false;
+    if (longPressRef.current) window.clearTimeout(longPressRef.current);
+    longPressRef.current = window.setTimeout(() => {
+      longPressFiredRef.current = true;
+      if (navigator.vibrate) try { navigator.vibrate(30); } catch {}
+      setSelectedMsgIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(msg.id)) next.delete(msg.id); else next.add(msg.id);
+        return next;
+      });
+    }, 450);
   }, []);
 
   const handleSwipeEnd = useCallback((e: React.TouchEvent, msg: Message) => {
+    if (longPressRef.current) { window.clearTimeout(longPressRef.current); longPressRef.current = null; }
     if (!swipeRef.current || swipeRef.current.msgId !== msg.id) return;
     const deltaX = e.changedTouches[0].clientX - swipeRef.current.startX;
     const threshold = 60;
+    // Suppress reply-swipe when we're selecting messages or just fired a long-press.
+    if (longPressFiredRef.current || selectedMsgIds.size > 0) {
+      swipeRef.current = null;
+      return;
+    }
     if ((msg.direction === 'received' && deltaX > threshold) || (msg.direction === 'sent' && deltaX < -threshold)) {
       setQuotedMessage(msg);
     }
     swipeRef.current = null;
+  }, [selectedMsgIds]);
+
+  const handleLongPressMouseDown = useCallback((msg: Message) => {
+    if (msg.type === 'call') return;
+    longPressFiredRef.current = false;
+    if (longPressRef.current) window.clearTimeout(longPressRef.current);
+    longPressRef.current = window.setTimeout(() => {
+      longPressFiredRef.current = true;
+      setSelectedMsgIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(msg.id)) next.delete(msg.id); else next.add(msg.id);
+        return next;
+      });
+    }, 500);
   }, []);
+
+  const cancelLongPress = useCallback(() => {
+    if (longPressRef.current) { window.clearTimeout(longPressRef.current); longPressRef.current = null; }
+  }, []);
+
+  const toggleMsgSelected = useCallback((msgId: string) => {
+    setSelectedMsgIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(msgId)) next.delete(msgId); else next.add(msgId);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedMsgIds(new Set()), []);
+
+  const handleBulkDelete = useCallback(async (mode: 'me' | 'everyone') => {
+    const ids = Array.from(selectedMsgIds);
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} message${ids.length === 1 ? '' : 's'} ${mode === 'everyone' ? 'for everyone' : 'for you'}?`)) return;
+    try {
+      await Promise.all(ids.map((id) => api.deleteMessage(id, mode)));
+      if (mode === 'everyone') {
+        setMessages((prev) => prev.map((m) => ids.includes(m.id) ? { ...m, is_deleted: 1, content: '🚫 You deleted this message', media_path: null, type: 'text' as const } : m));
+      } else {
+        setMessages((prev) => prev.filter((m) => !ids.includes(m.id)));
+      }
+      toast.success(`Deleted ${ids.length} message${ids.length === 1 ? '' : 's'}`);
+      clearSelection();
+      refreshConversations();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete');
+    }
+  }, [selectedMsgIds, clearSelection, refreshConversations]);
+
+  const handleBulkStar = useCallback(async () => {
+    const ids = Array.from(selectedMsgIds);
+    if (!ids.length) return;
+    try {
+      await Promise.all(ids.map((id) => api.starMessage(id, true)));
+      setMessages((prev) => prev.map((m) => ids.includes(m.id) ? { ...m, is_starred: 1 } : m));
+      toast.success(`Starred ${ids.length}`);
+      clearSelection();
+    } catch (err: any) { toast.error(err?.message || 'Failed'); }
+  }, [selectedMsgIds, clearSelection]);
+
+  const handleBulkForward = useCallback(() => {
+    const ids = Array.from(selectedMsgIds);
+    if (!ids.length) return;
+    const first = messages.find((m) => m.id === ids[0]);
+    if (first) {
+      setForwardingMsg(first);
+      if (allContacts.length === 0) refreshAllContacts();
+    }
+  }, [selectedMsgIds, messages, allContacts.length]);
+
+  const handleBulkCopy = useCallback(async () => {
+    const ids = Array.from(selectedMsgIds);
+    const lines = messages.filter((m) => ids.includes(m.id)).map((m) => m.content || '').filter(Boolean);
+    if (!lines.length) return;
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      toast.success(`Copied ${lines.length} message${lines.length === 1 ? '' : 's'}`);
+      clearSelection();
+    } catch { toast.error('Copy failed'); }
+  }, [selectedMsgIds, messages, clearSelection]);
 
   const renderMessageContent = (msg: Message) => {
     // Deleted message placeholder
@@ -1133,7 +1232,35 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         <div className={`${!showChatOnMobile && !showNewChat ? 'hidden md:flex' : showNewChat && !showChatOnMobile ? 'hidden md:flex' : 'flex'} flex-1 flex-col min-w-0`}>
           {selectedContact ? (
             <>
-              {/* Chat header */}
+              {/* Selection action bar (replaces chat header when messages are selected) */}
+              {selectedMsgIds.size > 0 ? (
+                <div className="px-3 md:px-4 py-2.5 border-b border-border flex items-center gap-2 bg-primary/10 backdrop-blur-sm">
+                  <button onClick={clearSelection} className="p-1.5 -ml-1 text-foreground hover:bg-background/50 rounded-full" title="Clear selection">
+                    <X className="w-5 h-5" />
+                  </button>
+                  <p className="text-[15px] font-semibold text-foreground flex-1">{selectedMsgIds.size} selected</p>
+                  <button onClick={handleBulkStar} className="p-2 text-foreground hover:bg-background/50 rounded-full" title="Star">
+                    <Star className="w-5 h-5" />
+                  </button>
+                  <button onClick={handleBulkCopy} className="p-2 text-foreground hover:bg-background/50 rounded-full" title="Copy">
+                    <Copy className="w-5 h-5" />
+                  </button>
+                  <button onClick={handleBulkForward} className="p-2 text-foreground hover:bg-background/50 rounded-full" title="Forward">
+                    <Forward className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      const choice = window.prompt('Delete: type "me" to delete for you, or "all" to delete for everyone. Cancel to abort.', 'me');
+                      if (choice === 'me') handleBulkDelete('me');
+                      else if (choice === 'all') handleBulkDelete('everyone');
+                    }}
+                    className="p-2 text-destructive hover:bg-background/50 rounded-full"
+                    title="Delete"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
+              ) : (
               <div className="px-3 md:px-4 py-2.5 border-b border-border flex items-center gap-3 bg-background">
                 <button
                   onClick={() => setSelectedContact(null)}
@@ -1221,6 +1348,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   {selectedContact.is_archived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                 </button>
               </div>
+              )}
 
               {/* Memory/Directive/AI Sheet */}
               <Sheet open={showMemoryPanel} onOpenChange={setShowMemoryPanel}>
@@ -1584,14 +1712,31 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                         {group.messages.map((msg) => {
                           const isMatch = chatSearchMatchSet.has(msg._idx);
                           const isActive = msg._idx === activeChatSearchIdx;
+                          const isSelected = selectedMsgIds.has(msg.id);
+                          const inSelectionMode = selectedMsgIds.size > 0;
                           return (
                           <div
                             key={msg.id}
                             data-msg-idx={msg._idx}
                             data-msg-id={msg.id}
-                            className={`flex ${msg.type === 'call' ? 'justify-center' : msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}
+                            className={`flex ${msg.type === 'call' ? 'justify-center' : msg.direction === 'sent' ? 'justify-end' : 'justify-start'} ${isSelected ? 'bg-primary/10 -mx-2 px-2 py-0.5 rounded-md' : ''}`}
                             onTouchStart={(e) => handleSwipeStart(e, msg)}
                             onTouchEnd={(e) => handleSwipeEnd(e, msg)}
+                            onMouseDown={() => handleLongPressMouseDown(msg)}
+                            onMouseUp={cancelLongPress}
+                            onMouseLeave={cancelLongPress}
+                            onContextMenu={(e) => {
+                              if (msg.type === 'call') return;
+                              e.preventDefault();
+                              toggleMsgSelected(msg.id);
+                            }}
+                            onClickCapture={(e) => {
+                              if (inSelectionMode && msg.type !== 'call') {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                toggleMsgSelected(msg.id);
+                              }
+                            }}
                           >
                             <div
                               className={`group max-w-[88%] sm:max-w-[80%] md:max-w-[65%] ${
@@ -1604,7 +1749,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                         ? 'bg-bubble-out text-bubble-out-foreground rounded-br-md'
                                         : 'bg-bubble-in text-bubble-in-foreground rounded-bl-md'
                                     }`
-                              } ${isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''}`}
+                              } ${isSelected ? 'ring-2 ring-primary shadow-lg' : isActive ? 'ring-2 ring-primary' : isMatch ? 'ring-1 ring-primary/40' : ''} transition-all`}
                             >
                               {/* Quoted message preview - tap to scroll to original */}
                               {msg.reply_to_content && (
