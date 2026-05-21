@@ -543,6 +543,8 @@ export function createApiRouter(db) {
         send('message_ack', data);
       } else if (event === 'message_reaction') {
         send('message_reaction', data);
+      } else if (event === 'ai_typing') {
+        send('ai_typing', data);
       }
     });
 
