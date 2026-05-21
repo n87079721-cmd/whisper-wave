@@ -1314,7 +1314,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       {contact.is_archived ? <ArchiveRestore className="w-5 h-5" /> : <Archive className="w-5 h-5" />}
                     </div>
                   <button
-                    key={contact.id}
                     onClick={() => { setSelectedContact(contact); if (showArchived) setShowArchived(false); }}
                     style={{ transform: `translateX(${swipeOffset}px)`, transition: chatSwipeRef.current?.contactId === contact.id ? 'none' : 'transform 0.2s ease' }}
                     className={`relative w-full flex items-center gap-3 px-3 py-3 text-left transition-colors ${
