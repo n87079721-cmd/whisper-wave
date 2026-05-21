@@ -408,6 +408,50 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     }
   }, [selectedContact?.id]);
 
+  // Compute first-unread message id once messages load, using captured count.
+  useEffect(() => {
+    if (!selectedContact?.id) return;
+    if (firstUnreadId) return;
+    const n = initialUnreadCountRef.current;
+    if (!n || n <= 0 || messages.length === 0) return;
+    let count = 0;
+    let firstUnseen: string | null = null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.direction !== 'received') continue;
+      firstUnseen = m.id;
+      count++;
+      if (count >= n) break;
+    }
+    if (firstUnseen) setFirstUnreadId(firstUnseen);
+  }, [messages, selectedContact?.id, firstUnreadId]);
+
+  // Pinned helpers
+  const togglePinMessage = useCallback((msgId: string) => {
+    if (!selectedContact?.id) return;
+    setPinnedMsgIds(prev => {
+      const next = new Set(prev);
+      if (next.has(msgId)) next.delete(msgId); else next.add(msgId);
+      try { localStorage.setItem(`pinned:${selectedContact.id}`, JSON.stringify(Array.from(next))); } catch {}
+      return next;
+    });
+  }, [selectedContact?.id]);
+
+  const jumpToMessage = useCallback((targetId: string) => {
+    const wrapper = messagesViewportRef.current?.querySelector(`[data-msg-id="${CSS.escape(targetId)}"]`) as HTMLElement | null;
+    if (!wrapper) return;
+    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const bubble = wrapper.querySelector(':scope > div') as HTMLElement | null;
+    const target = bubble || wrapper;
+    target.style.transition = 'box-shadow 0.3s ease';
+    target.style.boxShadow = '0 0 0 2px hsl(211 100% 50%)';
+    target.style.borderRadius = '1rem';
+    setTimeout(() => {
+      target.style.boxShadow = '';
+      setTimeout(() => { target.style.transition = ''; target.style.borderRadius = ''; }, 300);
+    }, 2000);
+  }, []);
+
   const normalizePhoneDigits = (value: string) => value.replace(/\D/g, '');
   const formatPhoneDraft = (value: string) => {
     const trimmed = value.trim();
