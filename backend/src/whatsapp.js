@@ -3365,6 +3365,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
         const chat = await inst.client.getChatById(chatId);
         await chat.sendStateTyping();
       } catch {}
+      emit(userId, 'ai_typing', { contactId, typing: true });
 
       pendingReply.typingTimer = setTimeout(async () => {
         if (pendingReply.aborted) return;
@@ -3473,6 +3474,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
           }
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
+          emit(userId, 'ai_typing', { contactId, typing: false });
           emit(userId, 'message', { contactId, msgId: replyId });
           // Send reaction after reply with a natural delay
           if (pendingReaction) {
@@ -3487,6 +3489,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
           debugLog(db, userId, 'auto_reply_failed', { contact: contactName || phone, error: err?.message || String(err), replyPreview: replyText.slice(0, 80) });
           inst.pendingAutoReplies.delete(jid);
           await clearTypingState(userId, jid);
+          emit(userId, 'ai_typing', { contactId, typing: false });
           // Queue for retry when connection restores
           if (inst.failedReplyQueue.length < 20) {
             inst.failedReplyQueue.push({ jid, contactId, contactName, phone, replyText, latestMessageId, queuedAt: Date.now() });
@@ -4745,6 +4748,7 @@ function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactNa
         const chat = await inst.client.getChatById(chatId);
         await chat.sendStateTyping();
       } catch {}
+      emit(userId, 'ai_typing', { contactId, typing: true });
 
       pendingReply.typingTimer = setTimeout(async () => {
         if (pendingReply.aborted) return;
@@ -4762,11 +4766,13 @@ function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactNa
           debugLog(db, userId, 'telegram_custom_reply_sent', { contact: contactName || phone, replyPreview: replyText.slice(0, 80) });
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
+          emit(userId, 'ai_typing', { contactId, typing: false });
           emit(userId, 'message', { contactId, msgId: replyId });
         } catch (err) {
           console.error('Telegram custom reply failed:', err?.message);
           inst.pendingAutoReplies.delete(jid);
           await clearTypingState(userId, jid);
+          emit(userId, 'ai_typing', { contactId, typing: false });
         }
       }, typingDuration);
     } catch (err) {
