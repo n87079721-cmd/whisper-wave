@@ -3,45 +3,46 @@
 @tailwind utilities;
 
 @layer base {
-  /* ===== LIGHT MODE — iMessage ===== */
+  /* ===== LIGHT MODE — WhatsApp Web (blue accent) ===== */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 0%;
+    /* App + panels */
+    --background: 200 13% 96%;          /* #f0f2f5 panel header gray */
+    --foreground: 202 9% 15%;           /* #111b21 */
 
-    --card: 0 0% 97%;
-    --card-foreground: 0 0% 0%;
+    --card: 0 0% 100%;                  /* white panels (chat list rows) */
+    --card-foreground: 202 9% 15%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 0%;
+    --popover-foreground: 202 9% 15%;
 
-    --primary: 211 100% 50%;
+    --primary: 211 100% 50%;            /* keep iMessage blue */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 240 5% 96%;
-    --secondary-foreground: 0 0% 25%;
+    --secondary: 200 13% 94%;           /* WA chip / hover gray */
+    --secondary-foreground: 202 9% 25%;
 
-    --muted: 240 5% 96%;
-    --muted-foreground: 0 0% 45%;
+    --muted: 200 13% 94%;
+    --muted-foreground: 202 6% 42%;     /* WA secondary text */
 
-    --accent: 211 100% 95%;
-    --accent-foreground: 211 100% 35%;
+    --accent: 200 18% 92%;              /* WA hover / active row */
+    --accent-foreground: 202 9% 15%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
+    --border: 200 11% 86%;              /* #d1d7db */
+    --input: 200 11% 86%;
     --ring: 211 100% 50%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;                   /* WA uses tighter corners on chrome */
 
-    --sidebar-background: 240 5% 97%;
-    --sidebar-foreground: 0 0% 40%;
+    --sidebar-background: 0 0% 100%;    /* WA left panel is white */
+    --sidebar-foreground: 202 6% 38%;
     --sidebar-primary: 211 100% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 5% 93%;
-    --sidebar-accent-foreground: 0 0% 0%;
-    --sidebar-border: 0 0% 91%;
+    --sidebar-accent: 200 18% 92%;      /* selected/hover row */
+    --sidebar-accent-foreground: 202 9% 15%;
+    --sidebar-border: 200 11% 88%;
     --sidebar-ring: 211 100% 50%;
 
     --success: 142 71% 45%;
@@ -50,48 +51,48 @@
 
     --bubble-out: 211 100% 50%;
     --bubble-out-foreground: 0 0% 100%;
-    --bubble-in: 240 5% 91%;
-    --bubble-in-foreground: 0 0% 0%;
-    --chat-bg: 0 0% 100%;
+    --bubble-in: 0 0% 100%;             /* WA white received bubble */
+    --bubble-in-foreground: 202 9% 15%;
+    --chat-bg: 36 25% 91%;              /* #efeae2 WA wallpaper warm beige */
   }
 
-  /* ===== DARK MODE — iMessage ===== */
+  /* ===== DARK MODE — WhatsApp Web 2024 (blue accent) ===== */
   .dark {
-    --background: 0 0% 0%;
-    --foreground: 0 0% 93%;
+    --background: 202 23% 9%;           /* #111b21 panel header */
+    --foreground: 200 15% 90%;          /* #e9edef */
 
-    --card: 0 0% 11%;
-    --card-foreground: 0 0% 93%;
+    --card: 202 23% 11%;                /* #1a2730 raised panel */
+    --card-foreground: 200 15% 90%;
 
-    --popover: 0 0% 11%;
-    --popover-foreground: 0 0% 93%;
+    --popover: 202 23% 13%;
+    --popover-foreground: 200 15% 90%;
 
     --primary: 211 100% 50%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 17%;
-    --secondary-foreground: 0 0% 80%;
+    --secondary: 202 18% 17%;           /* #202c33 received bubble tone */
+    --secondary-foreground: 200 12% 82%;
 
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 50%;
+    --muted: 202 18% 15%;
+    --muted-foreground: 200 8% 60%;     /* #8696a0 WA secondary text */
 
-    --accent: 211 60% 20%;
-    --accent-foreground: 0 0% 95%;
+    --accent: 200 12% 22%;              /* #2a3942 hover/active row */
+    --accent-foreground: 200 15% 92%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 0 0% 18%;
-    --input: 0 0% 18%;
+    --border: 200 10% 18%;              /* #222d34 */
+    --input: 200 10% 18%;
     --ring: 211 100% 50%;
 
-    --sidebar-background: 0 0% 7%;
-    --sidebar-foreground: 0 0% 60%;
+    --sidebar-background: 202 23% 9%;   /* matches WA left panel */
+    --sidebar-foreground: 200 8% 65%;
     --sidebar-primary: 211 100% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 14%;
-    --sidebar-accent-foreground: 0 0% 93%;
-    --sidebar-border: 0 0% 14%;
+    --sidebar-accent: 200 12% 22%;      /* #2a3942 */
+    --sidebar-accent-foreground: 200 15% 92%;
+    --sidebar-border: 200 10% 16%;
     --sidebar-ring: 211 100% 50%;
 
     --success: 142 71% 45%;
@@ -100,9 +101,9 @@
 
     --bubble-out: 211 100% 50%;
     --bubble-out-foreground: 0 0% 100%;
-    --bubble-in: 0 0% 17%;
-    --bubble-in-foreground: 0 0% 93%;
-    --chat-bg: 0 0% 0%;
+    --bubble-in: 202 18% 17%;           /* #202c33 WA received */
+    --bubble-in-foreground: 200 15% 90%;
+    --chat-bg: 200 16% 6%;              /* #0b141a WA chat background */
   }
 }
 
