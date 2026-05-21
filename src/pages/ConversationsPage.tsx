@@ -333,6 +333,15 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     // Hide message viewport until first paint + scroll settles to prevent jumpy load
     setChatReady(false);
     setMessages([]);
+    // Capture initial unread count BEFORE we mark-as-read, so we can place the divider
+    initialUnreadCountRef.current = selectedContact.unread_count ?? 0;
+    setFirstUnreadId(null);
+    // Load pinned messages for this contact from localStorage
+    try {
+      const raw = localStorage.getItem(`pinned:${selectedContact.id}`);
+      const arr = raw ? JSON.parse(raw) : [];
+      setPinnedMsgIds(new Set(Array.isArray(arr) ? arr : []));
+    } catch { setPinnedMsgIds(new Set()); }
     if (chatReadyTimerRef.current) { window.clearTimeout(chatReadyTimerRef.current); chatReadyTimerRef.current = null; }
     setReplyText(replyDraftsRef.current[selectedContact.id] ?? '');
     // voice preview removed
