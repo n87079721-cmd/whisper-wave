@@ -1374,9 +1374,20 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   <Avatar contact={selectedContact} size="lg" />
                   <div className="min-w-0 flex-1 text-left">
                     <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {contactPromptId ? prompts.find(p => p.id === contactPromptId)?.name || 'Custom persona' : 'tap for info'}
-                    </p>
+                    {aiTypingContactIds.has(selectedContact.id) ? (
+                      <p className="text-xs text-primary truncate flex items-center gap-1">
+                        <span>typing</span>
+                        <span className="inline-flex gap-0.5">
+                          <span className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
+                          <span className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '120ms' }} />
+                          <span className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '240ms' }} />
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground truncate">
+                        {contactPromptId ? prompts.find(p => p.id === contactPromptId)?.name || 'Custom persona' : 'tap for info'}
+                      </p>
+                    )}
                   </div>
                 </button>
                 {/* Persona picker */}
