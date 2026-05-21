@@ -71,6 +71,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [globalSearching, setGlobalSearching] = useState(false);
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [lightbox, setLightbox] = useState<{ url: string; alt: string } | null>(null);
   const [contactPromptId, setContactPromptId] = useState<string | null>(null);
   const [showPersonaPicker, setShowPersonaPicker] = useState(false);
   const [showMemoryPanel, setShowMemoryPanel] = useState(false);
@@ -865,14 +866,21 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         <div className="space-y-2">
           {viewOnceBadge}
           {imageUrl ? (
-            <a href={imageUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl bg-muted/60">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightbox({ url: imageUrl, alt: msg.content || msg.media_name || 'Shared image' });
+              }}
+              className="block overflow-hidden rounded-xl bg-muted/60 cursor-zoom-in"
+            >
               <img
                 src={imageUrl}
                 alt={msg.content || msg.media_name || 'Shared image'}
                 loading="lazy"
                 className="max-h-80 w-full object-cover"
               />
-            </a>
+            </button>
           ) : (
             <div className="flex items-center gap-2 rounded-xl border border-border/50 bg-background/30 px-3 py-2 text-xs text-muted-foreground">
               <ImageIcon className="w-4 h-4" />
@@ -1926,14 +1934,23 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     ) : (
                       <div className="grid grid-cols-3 gap-1 max-h-[200px] overflow-y-auto rounded-lg">
                         {profileMedia.filter(m => m.type === 'image' || m.type === 'video').map((m) => (
-                          <div key={m.id} className="aspect-square rounded-md overflow-hidden bg-muted">
+                          <button
+                            type="button"
+                            key={m.id}
+                            onClick={() => {
+                              if (m.type === 'image' && m.media_path) {
+                                setLightbox({ url: api.getMessageMediaUrl(m.media_path), alt: m.content || m.media_name || 'Shared image' });
+                              }
+                            }}
+                            className="aspect-square rounded-md overflow-hidden bg-muted cursor-zoom-in"
+                          >
                             {m.type === 'image' && m.media_path && (
                               <img src={api.getMessageMediaUrl(m.media_path)} alt="" className="w-full h-full object-cover" />
                             )}
                             {m.type === 'video' && m.media_path && (
                               <video src={api.getMessageMediaUrl(m.media_path)} className="w-full h-full object-cover" muted playsInline />
                             )}
-                          </div>
+                          </button>
                         ))}
                         {profileMedia.filter(m => m.type === 'image' || m.type === 'video').length === 0 && (
                           <p className="col-span-3 text-xs text-muted-foreground text-center py-4">No media shared yet</p>
@@ -2084,6 +2101,36 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 )}
               </div>
             </div>
+          </div>
+        )}
+        {lightbox && (
+          <div
+            className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 animate-in fade-in"
+            onClick={() => setLightbox(null)}
+          >
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
+              className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white"
+              aria-label="Close"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <a
+              href={lightbox.url}
+              download
+              onClick={(e) => e.stopPropagation()}
+              className="absolute top-4 right-16 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white"
+              aria-label="Download"
+            >
+              <Download className="w-6 h-6" />
+            </a>
+            <img
+              src={lightbox.url}
+              alt={lightbox.alt}
+              onClick={(e) => e.stopPropagation()}
+              className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl"
+            />
           </div>
         )}
       </div>

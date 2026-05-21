@@ -6,7 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
-import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory, detectAndTranslate, translateToLanguage } from './ai.js';
+import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory, detectAndTranslate, translateToLanguage, buildTimeContext } from './ai.js';
 import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, claimPreviewByToken, consumeSensitiveAlert, sendVoiceNoteTranscript, sendForeignLanguageAlert } from './telegram.js';
 import { transcribeAudio, generateVoiceNote } from './elevenlabs.js';
 
@@ -2132,6 +2132,15 @@ function buildContactSystemPrompt(db, userId, contactId) {
     const globalRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'ai_system_prompt'").get(userId);
     systemPrompt = globalRow?.value || '';
   }
+  // Anchor the persona to TODAY in the phone owner's configured timezone so any
+  // dates inside the persona (tour dates, gigs, trips, deadlines, birthdays)
+  // can be reasoned about correctly ("is it today?", "did it pass?").
+  try {
+    const tz = getConfigValue(db, userId, 'ai_timezone', 'America/New_York');
+    const t = buildTimeContext(tz);
+    const dateAnchor = `📅 RIGHT NOW (use this for ALL date/time math, including dates mentioned in the persona below):\n• Today: ${t.todayFull}\n• ISO: ${t.todayISO}\n• Local clock: ${t.clockTime} (${t.timeLabel}, ${t.tz})\n• Compare any date in the persona to this BEFORE answering "is it soon / today / past / how many days?". Do the actual math, don't guess.\n• Match your tone to the time of day above (morning energy, midday, evening, late night).\n\n`;
+    systemPrompt = `${dateAnchor}${systemPrompt}`;
+  } catch {}
   if (directive) {
     systemPrompt = `🎯 ACTIVE BEHAVIOR DIRECTIVE (must be followed on EVERY reply, no exceptions):\n${directive}\n\n────────\n\n${systemPrompt}\n\n────────\n\n🎯 REMINDER — ACTIVE DIRECTIVE STILL APPLIES: ${directive}`;
   }
@@ -4058,11 +4067,12 @@ export async function triggerConversationSummary(userId, db, contactId, jid, con
     // Manual "Summarize now" button bypasses this gate via { force: true }.
     if (!force && count < 10) return { ran: false, reason: 'not_enough_new_messages', count };
 
-    // Get recent messages for summary
+    // Get recent messages for summary (raised from 40 → 80 so the summary
+    // captures roughly twice as much context per pass).
     const messages = db.prepare(`
       SELECT content, direction, type FROM messages
       WHERE contact_id = ? AND user_id = ? AND content IS NOT NULL AND content != ''
-      ORDER BY timestamp DESC LIMIT 40
+      ORDER BY timestamp DESC LIMIT 80
     `).all(contactId, userId).reverse();
 
     // For forced runs allow as few as 4 messages (quick manual capture).
@@ -4078,8 +4088,9 @@ export async function triggerConversationSummary(userId, db, contactId, jid, con
       ? `${existingMemory}\n\n${summary}`
       : summary;
 
-    // Compact if memory is getting bloated to keep prompts tight.
-    if (newMemory.length > 4000) {
+    // Compact only when memory gets truly bloated — raised from 4000 → 8000 so
+    // we retain more dated narratives before consolidating.
+    if (newMemory.length > 8000) {
       try {
         const compacted = await compactMemory(apiKey, newMemory, { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') });
         if (compacted && compacted.length < newMemory.length) {

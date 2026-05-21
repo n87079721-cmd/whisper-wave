@@ -1,7 +1,33 @@
 import crypto from 'crypto';
 import { v4 as uuid } from 'uuid';
+import fs from 'fs';
+import path from 'path';
 
-const JWT_SECRET = process.env.AUTH_TOKEN || 'change-me-to-a-secure-random-string';
+// ── Stable JWT signing secret ──
+// If the operator sets AUTH_TOKEN we honor it. Otherwise we persist a random
+// secret to disk on first boot so the secret stays the same across restarts
+// and deploys — without this, every container restart silently invalidated
+// every saved login token (this caused users to get logged out every couple
+// of weeks whenever the backend was redeployed).
+function loadOrCreatePersistedSecret() {
+  try {
+    const dataDir = path.resolve(process.cwd(), 'data');
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    const secretFile = path.join(dataDir, '.auth-secret');
+    if (fs.existsSync(secretFile)) {
+      const existing = fs.readFileSync(secretFile, 'utf8').trim();
+      if (existing && existing.length >= 32) return existing;
+    }
+    const fresh = crypto.randomBytes(64).toString('hex');
+    fs.writeFileSync(secretFile, fresh, { mode: 0o600 });
+    return fresh;
+  } catch (err) {
+    console.warn('[auth] Could not persist auth secret, falling back to in-memory:', err?.message);
+    return crypto.randomBytes(64).toString('hex');
+  }
+}
+
+const JWT_SECRET = process.env.AUTH_TOKEN || loadOrCreatePersistedSecret();
 const ITERATIONS = 100000;
 const KEYLEN = 64;
 const DIGEST = 'sha512';
