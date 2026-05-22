@@ -61,15 +61,15 @@ const Index = () => {
   };
 
   return (
-    <div className="flex h-[100dvh] bg-background overflow-hidden safe-top">
+    <div className="flex h-[100svh] min-h-[100svh] supports-[height:100dvh]:h-[100dvh] supports-[height:100dvh]:min-h-[100dvh] bg-background overflow-hidden safe-top">
       <div className="hidden md:block flex-shrink-0">
         <DashboardSidebar activePage={activePage} onPageChange={setActivePage} theme={theme} onToggleTheme={toggleTheme} />
       </div>
       <main className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Mobile bottom padding clears the fixed bottom nav (~64px) + iOS safe-area inset + breathing room
             so action buttons (Voice Studio Send, etc.) are never hidden behind the nav. */}
-        <div className="flex-1 overflow-y-auto px-2 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-2 sm:px-3 sm:pt-3 md:px-6 md:pb-6 md:pt-5">
-          <div className="mx-auto w-full max-w-7xl h-full">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-2 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-2 sm:px-3 sm:pt-3 md:px-6 md:pb-6 md:pt-5" style={{ WebkitOverflowScrolling: 'touch' }}>
+          <div className="mx-auto w-full max-w-7xl min-h-full">
             {renderPage()}
           </div>
         </div>
