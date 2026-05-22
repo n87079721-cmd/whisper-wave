@@ -119,6 +119,7 @@ const VoiceStudioPage = () => {
   const [bgVolume, setBgVolume] = useState(0.15);
   const [customSounds, setCustomSounds] = useState<SoundItem[]>([]);
   const [isUploadingSound, setIsUploadingSound] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ name: string; phase: 'uploading' | 'processing'; percent: number; label: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [previewingSound, setPreviewingSound] = useState<string | null>(null);
   const soundAudioRef = useRef<HTMLAudioElement | null>(null);
