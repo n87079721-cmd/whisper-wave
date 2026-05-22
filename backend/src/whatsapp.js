@@ -672,6 +672,7 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
 }
 
 export function initWhatsApp(userId, db) {
+  rememberDb(db);
   startConnection(userId, db);
   return {
     getState: () => getWhatsAppState(userId),
@@ -690,6 +691,7 @@ export function initWhatsApp(userId, db) {
 }
 
 export function getOrInitWhatsApp(userId, db) {
+  rememberDb(db);
   const inst = getInstance(userId);
 
   const savedSessionExists = hasSavedSession(userId);
