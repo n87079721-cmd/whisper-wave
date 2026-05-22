@@ -462,6 +462,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     for (let i = 0; i < 5; i++) {
       const more = await loadOlderMessages();
       if (!more) break;
+      // Wait a frame for React to render new messages into the DOM
+      await new Promise<void>(r => requestAnimationFrame(() => r()));
       wrapper = findEl();
       if (wrapper) { highlightAndScroll(wrapper); return; }
     }
