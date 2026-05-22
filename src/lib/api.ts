@@ -87,7 +87,7 @@ export type UploadProgress = {
 function xhrSend<T>(
   url: string,
   method: string,
-  body: BodyInit,
+  body: XMLHttpRequestBodyInit,
   extraHeaders: Record<string, string>,
   onProgress?: (p: UploadProgress) => void,
 ): Promise<T> {
