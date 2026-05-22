@@ -548,13 +548,22 @@ export function createApiRouter(db) {
       }
     });
 
+    let cleanedUp = false;
     const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
       clearInterval(heartbeat);
-      unsub();
+      try { unsub(); } catch {}
     };
 
     req.on('close', cleanup);
     req.on('end', cleanup);
+    // Without an 'error' listener a stalled SSE connection (network drop,
+    // proxy timeout) would leak the heartbeat interval + event listener
+    // forever. Treat any socket error as a close.
+    req.on('error', cleanup);
+    res.on('error', cleanup);
+    res.on('close', cleanup);
   });
 
   // ── ElevenLabs ───────────────────────────────────────────
