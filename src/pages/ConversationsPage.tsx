@@ -363,6 +363,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     // Capture initial unread count BEFORE we mark-as-read, so we can place the divider
     initialUnreadCountRef.current = selectedContact.unread_count ?? 0;
     setFirstUnreadId(null);
+    chatOpenedAtRef.current = Date.now();
     // Load pinned messages for this contact from localStorage
     try {
       const raw = localStorage.getItem(`pinned:${selectedContact.id}`);
