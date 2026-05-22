@@ -149,7 +149,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     // token itself is bad. Endpoint-level 401s (rate limit, missing perm,
     // race during reconnect, etc.) should NOT nuke the saved login.
     let body: any = null;
-    try { body = isJsonResponse(res) ? await res.json() : null; } catch {}
+    try { body = ct.includes('application/json') ? await res.json() : null; } catch {}
     const msg = (body?.error || '').toLowerCase();
     const isTokenInvalid = msg.includes('invalid') || msg.includes('expired') || msg.includes('authentication required');
     if (isTokenInvalid) {
