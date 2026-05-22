@@ -103,6 +103,8 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const initialUnreadCountRef = useRef(0);
   // Pinned messages per chat (localStorage-backed)
   const [pinnedMsgIds, setPinnedMsgIds] = useState<Set<string>>(new Set());
+  // Map of contactId -> count of pinned messages (read from localStorage for sidebar badge)
+  const [pinnedCountsByContact, setPinnedCountsByContact] = useState<Record<string, number>>({});
   const [sendProgress, setSendProgress] = useState<{ phase: 'uploading' | 'processing'; percent: number } | null>(null);
   // Swipe-to-archive on chat list
   const [swipeOffsetByContact, setSwipeOffsetByContact] = useState<Record<string, number>>({});
