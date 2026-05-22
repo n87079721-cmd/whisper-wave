@@ -2210,6 +2210,26 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   </div>
                 )}
 
+                {sendProgress && (
+                  <div className="space-y-1 px-1">
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>
+                        {sendProgress.phase === 'uploading'
+                          ? `Uploading ${pendingAttachment?.kind === 'audio' ? 'voice note' : 'attachment'}…`
+                          : 'Delivering to WhatsApp…'}
+                      </span>
+                      <span>{sendProgress.phase === 'uploading' ? `${sendProgress.percent}%` : '…'}</span>
+                    </div>
+                    <div className="h-1 w-full rounded-full bg-secondary overflow-hidden">
+                      {sendProgress.phase === 'uploading' ? (
+                        <div className="h-full bg-primary transition-all duration-200" style={{ width: `${sendProgress.percent}%` }} />
+                      ) : (
+                        <div className="h-full w-full bg-primary/60 animate-pulse" />
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Composer */}
                 <div className="flex gap-2">
                   <button
