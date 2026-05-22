@@ -3874,6 +3874,16 @@ async function clearSession(userId, db) {
 export async function shutdownAllWhatsAppClients() {
   const instances = Array.from(userInstances.entries());
 
+  // Stop module-level background loops first so they don't trigger work
+  // against a tearing-down socket.
+  try {
+    const { stopTelegramPolling } = await import('./telegram.js');
+    for (const [userId] of instances) {
+      try { stopTelegramPolling(userId); } catch {}
+      try { stopConversationStarterLoop(userId); } catch {}
+    }
+  } catch {}
+
   for (const [userId, inst] of instances) {
     stopHeartbeat(userId);
     clearConnectionWatchdog(userId);
@@ -3888,6 +3898,9 @@ export async function shutdownAllWhatsAppClients() {
       const clientRef = inst.client;
       inst.client = null;
       try { await clientRef.destroy(); } catch {}
+      // Best-effort: ensure the puppeteer browser is closed so we don't
+      // leak Chromium processes after shutdown.
+      try { await clientRef?.pupBrowser?.close?.(); } catch {}
     }
   }
 }
