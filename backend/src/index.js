@@ -69,6 +69,20 @@ const server = app.listen(PORT, () => {
   }, 5000);
 });
 
+// Prune old debug_log rows so the stats table doesn't grow unbounded on
+// busy accounts (debugLog writes on most incoming messages). Keep 7 days of
+// debug logs and 90 days of everything else. Runs hourly.
+function pruneStats() {
+  try {
+    db.prepare("DELETE FROM stats WHERE event = 'debug_log' AND datetime(created_at) < datetime('now', '-7 days')").run();
+    db.prepare("DELETE FROM stats WHERE datetime(created_at) < datetime('now', '-90 days')").run();
+  } catch (e) {
+    console.error('stats prune error:', e?.message || e);
+  }
+}
+setTimeout(pruneStats, 30_000);
+setInterval(pruneStats, 60 * 60 * 1000).unref();
+
 let isShuttingDown = false;
 
 async function gracefulShutdown(signal) {
