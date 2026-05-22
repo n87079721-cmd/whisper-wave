@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { initDatabase } from './db.js';
 import { createApiRouter } from './api.js';
+import { bindAuthDb } from './auth.js';
 import { autoReconnectAll, shutdownAllWhatsAppClients } from './whatsapp.js';
 import { startTelegramPolling, isTelegramConfigured } from './telegram.js';
 import { getTelegramCallbackHandlers, startConversationStarterLoop } from './whatsapp.js';
@@ -20,6 +21,8 @@ app.use(express.json({ limit: '25mb' }));
 
 // Initialize database
 const db = initDatabase();
+// Bind the auth secret to the DB so tokens survive redeploys as long as the DB does.
+bindAuthDb(db);
 
 // API routes (no longer needs wa — per-user instances created on demand)
 app.use('/api', createApiRouter(db));
