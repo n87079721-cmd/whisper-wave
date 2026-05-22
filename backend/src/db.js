@@ -219,6 +219,9 @@ function ensureCurrentTables(db) {
     if (!cols.has('mood_state')) {
       db.exec("ALTER TABLE contacts ADD COLUMN mood_state TEXT");
     }
+    if (!cols.has('is_hidden')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN is_hidden INTEGER DEFAULT 0");
+    }
   } catch {}
 
   try {
