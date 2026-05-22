@@ -19,6 +19,29 @@ const STATUS_MEDIA_DIR = path.join(DATA_DIR, 'status-media');
 // Per-user instance store
 const userInstances = new Map(); // userId -> instance object
 
+// Module-level shared DB handle. Set on the first call into initWhatsApp /
+// getOrInitWhatsApp / autoReconnectAll so helpers that don't receive a `db`
+// argument (e.g. sendToResolvedTarget) can still query.
+let sharedDb = null;
+function rememberDb(db) {
+  if (db && !sharedDb) sharedDb = db;
+}
+
+// Run the PRAGMA + ALTER TABLE migration once per process per DB handle.
+const _messageColsEnsured = new WeakSet();
+function ensureMessageColumns(db) {
+  if (!db || _messageColsEnsured.has(db)) return;
+  try {
+    const cols = db.prepare("PRAGMA table_info(messages)").all().map(c => c.name);
+    if (!cols.includes('is_edited'))        db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
+    if (!cols.includes('is_starred'))       db.exec("ALTER TABLE messages ADD COLUMN is_starred INTEGER DEFAULT 0");
+    if (!cols.includes('reply_to_id'))      db.exec("ALTER TABLE messages ADD COLUMN reply_to_id TEXT");
+    if (!cols.includes('reply_to_content')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_content TEXT");
+    if (!cols.includes('reply_to_sender'))  db.exec("ALTER TABLE messages ADD COLUMN reply_to_sender TEXT");
+    _messageColsEnsured.add(db);
+  } catch {}
+}
+
 function getUserAuthDir(userId) {
   return path.join(DATA_DIR, 'auth', userId);
 }
@@ -290,8 +313,8 @@ async function sendToResolvedTarget(userId, jid, executor) {
   // If jid is @lid, also try the phone number from contacts DB
   if (jid.endsWith('@lid')) {
     try {
-      const { db } = await import('./db.js');
-      const contact = db.prepare('SELECT phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+      const db = sharedDb;
+      const contact = db?.prepare('SELECT phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
       if (contact?.phone) {
         const digits = contact.phone.replace(/[^0-9]/g, '');
         if (digits.length >= 7) {
@@ -451,15 +474,9 @@ function getDefaultMediaName(msgType, extension) {
 }
 
 function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce, isEdited, replyToId, replyToContent, replyToSender }) {
-  // Ensure columns exist
-  try {
-    const cols = db.prepare("PRAGMA table_info(messages)").all().map(c => c.name);
-    if (!cols.includes('is_edited')) db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
-    if (!cols.includes('is_starred')) db.exec("ALTER TABLE messages ADD COLUMN is_starred INTEGER DEFAULT 0");
-    if (!cols.includes('reply_to_id')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_id TEXT");
-    if (!cols.includes('reply_to_content')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_content TEXT");
-    if (!cols.includes('reply_to_sender')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_sender TEXT");
-  } catch {}
+  // Ensure columns exist — cache the result so we don't run PRAGMA + 5x
+  // conditional ALTER TABLEs on every single incoming message.
+  ensureMessageColumns(db);
 
   db.prepare(`
     INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once, is_edited, reply_to_id, reply_to_content, reply_to_sender)
@@ -664,6 +681,7 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
 }
 
 export function initWhatsApp(userId, db) {
+  rememberDb(db);
   startConnection(userId, db);
   return {
     getState: () => getWhatsAppState(userId),
@@ -682,6 +700,7 @@ export function initWhatsApp(userId, db) {
 }
 
 export function getOrInitWhatsApp(userId, db) {
+  rememberDb(db);
   const inst = getInstance(userId);
 
   const savedSessionExists = hasSavedSession(userId);
@@ -878,6 +897,7 @@ function scheduleRecoverySync(userId, db, delayMs = 90000) {
 // ── Auto-reconnect all users on server start ─────────────
 
 export function autoReconnectAll(db) {
+  rememberDb(db);
   try {
     const usersWithSessions = db.prepare('SELECT id, username FROM users').all()
       .filter((user) => hasSavedSession(user.id));
@@ -3854,6 +3874,16 @@ async function clearSession(userId, db) {
 export async function shutdownAllWhatsAppClients() {
   const instances = Array.from(userInstances.entries());
 
+  // Stop module-level background loops first so they don't trigger work
+  // against a tearing-down socket.
+  try {
+    const { stopTelegramPolling } = await import('./telegram.js');
+    for (const [userId] of instances) {
+      try { stopTelegramPolling(userId); } catch {}
+      try { stopConversationStarterLoop(userId); } catch {}
+    }
+  } catch {}
+
   for (const [userId, inst] of instances) {
     stopHeartbeat(userId);
     clearConnectionWatchdog(userId);
@@ -3868,6 +3898,9 @@ export async function shutdownAllWhatsAppClients() {
       const clientRef = inst.client;
       inst.client = null;
       try { await clientRef.destroy(); } catch {}
+      // Best-effort: ensure the puppeteer browser is closed so we don't
+      // leak Chromium processes after shutdown.
+      try { await clientRef?.pupBrowser?.close?.(); } catch {}
     }
   }
 }

@@ -9,6 +9,8 @@ import { bindAuthDb } from './auth.js';
 import { autoReconnectAll, shutdownAllWhatsAppClients } from './whatsapp.js';
 import { startTelegramPolling, isTelegramConfigured } from './telegram.js';
 import { getTelegramCallbackHandlers, startConversationStarterLoop } from './whatsapp.js';
+import { stopTelegramPolling } from './telegram.js';
+import { stopConversationStarterLoop } from './whatsapp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,7 +18,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
+const corsOrigin = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map(s => s.trim()).filter(Boolean)
+  : true; // reflect request origin, no credentials
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: '25mb' }));
 
 // Initialize database
@@ -64,6 +69,20 @@ const server = app.listen(PORT, () => {
   }, 5000);
 });
 
+// Prune old debug_log rows so the stats table doesn't grow unbounded on
+// busy accounts (debugLog writes on most incoming messages). Keep 7 days of
+// debug logs and 90 days of everything else. Runs hourly.
+function pruneStats() {
+  try {
+    db.prepare("DELETE FROM stats WHERE event = 'debug_log' AND datetime(created_at) < datetime('now', '-7 days')").run();
+    db.prepare("DELETE FROM stats WHERE datetime(created_at) < datetime('now', '-90 days')").run();
+  } catch (e) {
+    console.error('stats prune error:', e?.message || e);
+  }
+}
+setTimeout(pruneStats, 30_000);
+setInterval(pruneStats, 60 * 60 * 1000).unref();
+
 let isShuttingDown = false;
 
 async function gracefulShutdown(signal) {
@@ -72,6 +91,16 @@ async function gracefulShutdown(signal) {
   console.log(`🛑 Received ${signal}, shutting down gracefully...`);
 
   try {
+    // Stop background loops (Telegram polling + conversation starters) for every user
+    try {
+      const users = db.prepare('SELECT id FROM users').all();
+      for (const u of users) {
+        try { stopTelegramPolling(u.id); } catch {}
+        try { stopConversationStarterLoop(u.id); } catch {}
+      }
+    } catch (e) {
+      console.error('Loop stop error:', e?.message || e);
+    }
     await shutdownAllWhatsAppClients();
   } catch (err) {
     console.error('WhatsApp shutdown error:', err?.message || err);
@@ -90,4 +119,18 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
   gracefulShutdown('SIGTERM');
+});
+
+// Don't let a single unhandled rejection or uncaught exception kill the whole
+// backend (which would drop every user's WhatsApp session). Log and continue.
+process.on('unhandledRejection', (reason) => {
+  try {
+    const msg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+    console.error('[unhandledRejection]', msg);
+  } catch {}
+});
+process.on('uncaughtException', (err) => {
+  try {
+    console.error('[uncaughtException]', err?.stack || err?.message || err);
+  } catch {}
 });
