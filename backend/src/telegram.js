@@ -27,8 +27,12 @@ const botInstances = new Map();
 //   sensitiveAlerts: Map<token, { jid, contactName }>, // token -> sensitive alert context for "🤖 AI reply" button
 // }
 
+import { randomBytes } from 'crypto';
 function makeToken() {
-  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+  // Cryptographically random 12-char token (~72 bits). Telegram callback_data
+  // is limited to 64 bytes total, so keep this short. Unguessable so an
+  // attacker who somehow sees a chat ID can't forge button taps.
+  return randomBytes(9).toString('base64url');
 }
 
 function parseChatIds(raw) {
