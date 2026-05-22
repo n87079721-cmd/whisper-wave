@@ -106,6 +106,22 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   // Map of contactId -> count of pinned messages (read from localStorage for sidebar badge)
   const [pinnedCountsByContact, setPinnedCountsByContact] = useState<Record<string, number>>({});
   const [sendProgress, setSendProgress] = useState<{ phase: 'uploading' | 'processing'; percent: number } | null>(null);
+
+  // Initial scan of all pinned:* localStorage entries to populate sidebar pin badges
+  useEffect(() => {
+    try {
+      const counts: Record<string, number> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith('pinned:')) continue;
+        try {
+          const arr = JSON.parse(localStorage.getItem(key) || '[]');
+          if (Array.isArray(arr) && arr.length > 0) counts[key.slice('pinned:'.length)] = arr.length;
+        } catch {}
+      }
+      setPinnedCountsByContact(counts);
+    } catch {}
+  }, []);
   // Swipe-to-archive on chat list
   const [swipeOffsetByContact, setSwipeOffsetByContact] = useState<Record<string, number>>({});
   const chatSwipeRef = useRef<{ contactId: string; startX: number; startY: number; axis: 'h' | 'v' | null } | null>(null);
