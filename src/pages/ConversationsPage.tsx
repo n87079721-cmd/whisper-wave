@@ -542,10 +542,14 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     try {
       const d = new Date(ts);
       const now = new Date();
-      const diff = now.getTime() - d.getTime();
-      if (diff < 86400000 && d.getDate() === now.getDate()) return 'Today';
-      if (diff < 172800000) return 'Yesterday';
-      return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      const tz = aiTimezone || undefined;
+      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+      const dKey = fmt.format(d);
+      const nowKey = fmt.format(now);
+      if (dKey === nowKey) return 'Today';
+      const y = new Date(now.getTime() - 86400000);
+      if (fmt.format(y) === dKey) return 'Yesterday';
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: tz });
     } catch { return ''; }
   };
 
