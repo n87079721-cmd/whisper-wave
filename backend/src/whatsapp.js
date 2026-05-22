@@ -2032,6 +2032,9 @@ export async function recoverSingleChat(userId, db, contactId) {
   const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (!contact) throw new Error('Contact not found');
 
+  // Explicit user recovery → un-hide the chat (they want it back).
+  try { db.prepare('UPDATE contacts SET is_hidden = 0 WHERE id = ? AND user_id = ?').run(contactId, userId); } catch {}
+
   const chatId = fromJid(contact.jid);
   console.log(`📜 [${userId}] On-demand history request for ${contact.jid}`);
 
