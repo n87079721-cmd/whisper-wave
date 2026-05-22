@@ -105,6 +105,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   // Unread divider: id of the first unread message when chat was opened
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
   const initialUnreadCountRef = useRef(0);
+  const chatOpenedAtRef = useRef<number>(0);
   // Pinned messages per chat (localStorage-backed)
   const [pinnedMsgIds, setPinnedMsgIds] = useState<Set<string>>(new Set());
   // Map of contactId -> count of pinned messages (read from localStorage for sidebar badge)
