@@ -3346,7 +3346,14 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const directiveTail = activeDirective
     ? `\n\n════════════\n🎯 FINAL OVERRIDE — ACTIVE DIRECTIVE WINS:\n"${activeDirective}"\n\nThis directive OVERRIDES every guideline above (depth engine, question rhythm, casual texting rules). If anything above contradicts this directive, IGNORE the contradicting guideline and follow the directive instead. Apply it on THIS reply, every reply, until removed.\n════════════`
     : '';
-  const promptForGen = `${basePrompt}${guardrails}${directiveTail}`;
+  // Hard rules go AFTER the directive so they survive any "directive wins" override.
+  // The question cooldown and human-texting style are non-negotiable.
+  let hardTail = '';
+  if (overQuestionBudget) {
+    hardTail += `\n\n════════════\n⛔ NON-NEGOTIABLE — QUESTION COOLDOWN:\nThis reply MUST contain ZERO question marks. No "?". No rhetorical questions. End on a statement, a reaction, or a small share. This overrides EVERYTHING above including any directive. Let them lead next.\n════════════`;
+  }
+  hardTail += `\n\n════════════\n📱 NON-NEGOTIABLE — HUMAN TEXTING STYLE:\n• lowercase by default. no capitalized sentence starts unless it's a proper noun.\n• no em dashes (—), no en dashes (–), no semicolons. use commas, periods, or just line breaks.\n• contractions always: "i'm", "don't", "you're", "it's" — never "I am", "do not".\n• no formal words: "indeed", "perhaps", "however", "moreover", "additionally", "regarding", "shall", "furthermore" → BANNED.\n• no AI tells: "I'm here for you", "I understand", "that's a great point", "absolutely", "certainly", "of course!", "feel free to", "let me know if".\n• keep it short. 1-2 sentences usually. fragments are fine. one-word replies are fine.\n• no stage directions, no asterisks, no [brackets], no (parens around feelings).\n• it's a phone text, not an email. type how a tired 20-something texts a friend.\n════════════`;
+  const promptForGen = `${basePrompt}${guardrails}${directiveTail}${hardTail}`;
 
   if (guardrails) {
     debugLog(db, userId, 'reply_guardrails_injected', {
@@ -3368,6 +3375,29 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   let replyText = await generateReply(keyRow.value, messages, promptForGen, contactName || phone, { unrepliedCount, timezone: tz, replyLanguage });
   replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
+
+  // Enforce question cooldown at the post-processing layer. If the model still
+  // slipped in a question while cooldown is active, regenerate ONCE with an
+  // even harder rule. If it still fails, surgically strip questions.
+  if (overQuestionBudget && /\?/.test(replyText)) {
+    debugLog(db, userId, 'cooldown_violated_regenerating', { contact: contactName || phone, originalReply: replyText.slice(0, 80) });
+    const noQPrompt = `${basePrompt}\n\n⛔ ABSOLUTE RULE: Your reply CANNOT contain a question mark "?". Not one. End on a statement or reaction. If you're tempted to ask, share something about yourself instead.${hardTail}`;
+    try {
+      const retry = await generateReply(keyRow.value, messages, noQPrompt, contactName || phone, { unrepliedCount, timezone: tz, replyLanguage });
+      const cleaned = stripStageDirections(String(retry || '').replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
+      if (cleaned && !/\?/.test(cleaned)) replyText = cleaned;
+    } catch {}
+    // Final safety net: strip any remaining "?" and the question sentence around it.
+    if (/\?/.test(replyText)) {
+      replyText = replyText
+        .split(/(?<=[.!\n])\s+/)
+        .filter((s) => !/\?/.test(s))
+        .join(' ')
+        .trim();
+      if (!replyText) replyText = 'mhm';
+      debugLog(db, userId, 'cooldown_stripped_questions', { contact: contactName || phone, finalReply: replyText.slice(0, 80) });
+    }
+  }
 
   if (isReplyTooSimilar(replyText, recentOutgoing)) {
     debugLog(db, userId, 'reply_too_similar_regenerating', { contact: contactName || phone, originalReply: replyText.slice(0, 60) });
