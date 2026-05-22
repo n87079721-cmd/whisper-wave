@@ -7,6 +7,7 @@ import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getCon
 import { LANGUAGES } from '@/lib/languages';
 import SyncBanner from '@/components/SyncBanner';
 import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
+import RelationshipInsight from '@/components/RelationshipInsight';
 
 interface ConversationsPageProps {
   initialContact?: Contact | null;
