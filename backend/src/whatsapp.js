@@ -4221,7 +4221,10 @@ export async function triggerConversationSummary(userId, db, contactId, jid, con
             events: (updated.events || []).length,
           });
         })
-        .catch(() => {});
+        .catch((err) => {
+          console.error(`[${userId}] Relationship graph update failed:`, err?.message || err);
+          try { debugLog(db, userId, 'relationship_graph_failed', { contact: contactName, error: err?.message || String(err) }); } catch {}
+        });
     } catch {}
 
     return { ran: true, summary, memory: newMemory };
