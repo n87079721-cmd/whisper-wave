@@ -103,7 +103,25 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const initialUnreadCountRef = useRef(0);
   // Pinned messages per chat (localStorage-backed)
   const [pinnedMsgIds, setPinnedMsgIds] = useState<Set<string>>(new Set());
+  // Map of contactId -> count of pinned messages (read from localStorage for sidebar badge)
+  const [pinnedCountsByContact, setPinnedCountsByContact] = useState<Record<string, number>>({});
   const [sendProgress, setSendProgress] = useState<{ phase: 'uploading' | 'processing'; percent: number } | null>(null);
+
+  // Initial scan of all pinned:* localStorage entries to populate sidebar pin badges
+  useEffect(() => {
+    try {
+      const counts: Record<string, number> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith('pinned:')) continue;
+        try {
+          const arr = JSON.parse(localStorage.getItem(key) || '[]');
+          if (Array.isArray(arr) && arr.length > 0) counts[key.slice('pinned:'.length)] = arr.length;
+        } catch {}
+      }
+      setPinnedCountsByContact(counts);
+    } catch {}
+  }, []);
   // Swipe-to-archive on chat list
   const [swipeOffsetByContact, setSwipeOffsetByContact] = useState<Record<string, number>>({});
   const chatSwipeRef = useRef<{ contactId: string; startX: number; startY: number; axis: 'h' | 'v' | null } | null>(null);
@@ -141,16 +159,18 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [scrollMessagesToBottom]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (!selectedContact || loadingOlder || !hasMoreMessages || messages.length === 0) return;
+    if (!selectedContact || loadingOlder || !hasMoreMessages || messages.length === 0) return false;
     setLoadingOlder(true);
     const viewport = messagesViewportRef.current;
     const prevScrollHeight = viewport?.scrollHeight || 0;
+    let loaded = false;
     try {
       const oldest = messages[0]?.timestamp;
       const result = await api.getMessages(selectedContact.id, { limit: 50, before: oldest });
       if (result.messages.length > 0) {
         setMessages(prev => [...result.messages, ...prev]);
         setHasMoreMessages(result.hasMore);
+        loaded = true;
         // Maintain scroll position
         window.requestAnimationFrame(() => {
           if (viewport) {
@@ -162,6 +182,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       }
     } catch {}
     setLoadingOlder(false);
+    return loaded;
   }, [selectedContact, loadingOlder, hasMoreMessages, messages]);
 
   const refreshAllContacts = useCallback(async (search?: string) => {
@@ -434,13 +455,12 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       const next = new Set(prev);
       if (next.has(msgId)) next.delete(msgId); else next.add(msgId);
       try { localStorage.setItem(`pinned:${selectedContact.id}`, JSON.stringify(Array.from(next))); } catch {}
+      setPinnedCountsByContact(curr => ({ ...curr, [selectedContact.id]: next.size }));
       return next;
     });
   }, [selectedContact?.id]);
 
-  const jumpToMessage = useCallback((targetId: string) => {
-    const wrapper = messagesViewportRef.current?.querySelector(`[data-msg-id="${CSS.escape(targetId)}"]`) as HTMLElement | null;
-    if (!wrapper) return;
+  const highlightAndScroll = useCallback((wrapper: HTMLElement) => {
     wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
     const bubble = wrapper.querySelector(':scope > div') as HTMLElement | null;
     const target = bubble || wrapper;
@@ -452,6 +472,22 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setTimeout(() => { target.style.transition = ''; target.style.borderRadius = ''; }, 300);
     }, 2000);
   }, []);
+
+  const jumpToMessage = useCallback(async (targetId: string) => {
+    const findEl = () => messagesViewportRef.current?.querySelector(`[data-msg-id="${CSS.escape(targetId)}"]`) as HTMLElement | null;
+    let wrapper = findEl();
+    if (wrapper) { highlightAndScroll(wrapper); return; }
+    // Not rendered yet — page in older messages until we find it (max 5 pages)
+    for (let i = 0; i < 5; i++) {
+      const more = await loadOlderMessages();
+      if (!more) break;
+      // Wait a frame for React to render new messages into the DOM
+      await new Promise<void>(r => requestAnimationFrame(() => r()));
+      wrapper = findEl();
+      if (wrapper) { highlightAndScroll(wrapper); return; }
+    }
+    toast.message('Message not found in history');
+  }, [highlightAndScroll, loadOlderMessages]);
 
   const normalizePhoneDigits = (value: string) => value.replace(/\D/g, '');
   const formatPhoneDraft = (value: string) => {
@@ -1340,9 +1376,16 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <p className={`text-[13px] truncate flex-1 ${(contact.unread_count ?? 0) > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
-                          {getConversationPreview(contact)}
-                        </p>
+                        {aiTypingContactIds.has(contact.id) ? (
+                          <p className="text-[13px] truncate flex-1 italic text-primary">typing…</p>
+                        ) : (
+                          <p className={`text-[13px] truncate flex-1 ${(contact.unread_count ?? 0) > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                            {getConversationPreview(contact)}
+                          </p>
+                        )}
+                        {pinnedCountsByContact[contact.id] > 0 && (
+                          <Pin className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                        )}
                         {(contact.unread_count ?? 0) > 0 && (
                           <span className="flex-shrink-0 min-w-[20px] h-5 rounded-full bg-primary text-primary-foreground text-[11px] font-bold flex items-center justify-center px-1.5">
                             {contact.unread_count}

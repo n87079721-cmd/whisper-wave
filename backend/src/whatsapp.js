@@ -2032,6 +2032,9 @@ export async function recoverSingleChat(userId, db, contactId) {
   const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (!contact) throw new Error('Contact not found');
 
+  // Explicit user recovery → un-hide the chat (they want it back).
+  try { db.prepare('UPDATE contacts SET is_hidden = 0 WHERE id = ? AND user_id = ?').run(contactId, userId); } catch {}
+
   const chatId = fromJid(contact.jid);
   console.log(`📜 [${userId}] On-demand history request for ${contact.jid}`);
 
@@ -3780,6 +3783,10 @@ async function clearSession(userId, db) {
           avatar_url = NULL
       WHERE user_id = ?
     `).run(userId);
+    // Tell connected clients to refresh their conversation list so stale unread
+    // badges disappear immediately instead of waiting for the next manual refresh.
+    try { emit(userId, 'status', { status: 'disconnected', reason: 'logout' }); } catch {}
+    try { emit(userId, 'message', { contactsRefresh: true }); } catch {}
   } catch (err) {
     console.error('Failed to clear DB tables:', err?.message || err);
   }
@@ -4218,7 +4225,10 @@ export async function triggerConversationSummary(userId, db, contactId, jid, con
             events: (updated.events || []).length,
           });
         })
-        .catch(() => {});
+        .catch((err) => {
+          console.error(`[${userId}] Relationship graph update failed:`, err?.message || err);
+          try { debugLog(db, userId, 'relationship_graph_failed', { contact: contactName, error: err?.message || String(err) }); } catch {}
+        });
     } catch {}
 
     return { ran: true, summary, memory: newMemory };
