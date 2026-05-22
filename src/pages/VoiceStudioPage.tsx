@@ -136,6 +136,7 @@ const VoiceStudioPage = () => {
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     api.getContacts({ limit: 5000 }).then(res => setContacts(res.contacts)).catch(() => {});
@@ -156,6 +157,25 @@ const VoiceStudioPage = () => {
       setCustomSounds(custom);
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!audioUrl) return;
+    // iOS Safari sometimes skips repaint when content appears below the
+    // viewport after an async action. Force a reflow + scroll into view so
+    // the preview block is actually visible without needing to scroll/rotate.
+    const el = previewRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      // Trigger reflow
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      el.offsetHeight;
+      try {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch {
+        el.scrollIntoView();
+      }
+    });
+  }, [audioUrl]);
 
   const handleGenerate = async () => {
     if (!text) return;
