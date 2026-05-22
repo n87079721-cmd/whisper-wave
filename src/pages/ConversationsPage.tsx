@@ -439,20 +439,43 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   // Compute first-unread message id once messages load, using captured count.
   useEffect(() => {
     if (!selectedContact?.id) return;
-    if (firstUnreadId) return;
-    const n = initialUnreadCountRef.current;
-    if (!n || n <= 0 || messages.length === 0) return;
-    let count = 0;
-    let firstUnseen: string | null = null;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.direction !== 'received') continue;
-      firstUnseen = m.id;
-      count++;
-      if (count >= n) break;
+    if (messages.length === 0) return;
+    // Initial placement: use the unread count captured on chat open.
+    if (!firstUnreadId) {
+      const n = initialUnreadCountRef.current;
+      if (n && n > 0) {
+        let count = 0;
+        let firstUnseen: string | null = null;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const m = messages[i];
+          if (m.direction !== 'received') continue;
+          firstUnseen = m.id;
+          count++;
+          if (count >= n) break;
+        }
+        if (firstUnseen) { setFirstUnreadId(firstUnseen); return; }
+      }
+      // Live placement: if a received message arrived AFTER chat opened while
+      // user is scrolled up (not auto-scrolling), mark the first such message.
+      if (!shouldAutoScrollRef.current && chatOpenedAtRef.current > 0) {
+        const openedAt = chatOpenedAtRef.current;
+        for (const m of messages) {
+          if (m.direction !== 'received') continue;
+          const ts = new Date(m.timestamp).getTime();
+          if (ts > openedAt) { setFirstUnreadId(m.id); return; }
+        }
+      }
     }
-    if (firstUnseen) setFirstUnreadId(firstUnseen);
   }, [messages, selectedContact?.id, firstUnreadId]);
+
+  // Clear divider once the user is back at the bottom (mark as seen).
+  useEffect(() => {
+    if (!firstUnreadId) return;
+    if (!showScrollDown) {
+      const t = window.setTimeout(() => setFirstUnreadId(null), 1500);
+      return () => window.clearTimeout(t);
+    }
+  }, [firstUnreadId, showScrollDown]);
 
   // Pinned helpers
   const togglePinMessage = useCallback((msgId: string) => {
