@@ -4020,15 +4020,24 @@ export async function deleteConversation(userId, db, contactId) {
     try {
       const chatId = fromJid(contact.jid);
       const chat = await inst.client.getChatById(chatId);
-      await chat.clearMessages();
-      console.log(`🗑️ [${userId}] Cleared chat ${contact.jid} on WhatsApp`);
+      // Try full delete first; fall back to clearMessages if delete isn't supported for this chat type
+      try {
+        await chat.delete();
+        console.log(`🗑️ [${userId}] Deleted chat ${contact.jid} on WhatsApp`);
+      } catch (delErr) {
+        try { await chat.clearMessages(); } catch {}
+        console.log(`🗑️ [${userId}] Cleared chat ${contact.jid} on WhatsApp (delete fallback: ${delErr?.message})`);
+      }
     } catch (err) {
       console.log(`🗑️ [${userId}] WhatsApp chat clear failed: ${err?.message}`);
     }
   }
 
   const deleted = db.prepare('DELETE FROM messages WHERE contact_id = ? AND user_id = ?').run(contactId, userId);
-  db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(contactId, userId);
+  // Soft-delete: keep the row but hide it, so history-sync upserts don't resurrect the chat.
+  // A new incoming live message will clear is_hidden (see message handler).
+  db.prepare("UPDATE contacts SET is_hidden = 1, unread_count = 0, last_summary_at = NULL WHERE id = ? AND user_id = ?")
+    .run(contactId, userId);
   return { success: true, deletedMessages: deleted.changes };
 }
 
