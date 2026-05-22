@@ -5,6 +5,8 @@ import { toast } from 'sonner';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
 import { LANGUAGES } from '@/lib/languages';
+import SyncBanner from '@/components/SyncBanner';
+import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
 
 interface ConversationsPageProps {
   initialContact?: Contact | null;
@@ -13,6 +15,8 @@ interface ConversationsPageProps {
 }
 
 const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPageProps) => {
+  const { status: waStatus, syncState } = useWhatsAppStatus();
+  const isWAConnected = waStatus === 'connected';
   const [conversations, setConversations] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
