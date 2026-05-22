@@ -1357,9 +1357,16 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <p className={`text-[13px] truncate flex-1 ${(contact.unread_count ?? 0) > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
-                          {getConversationPreview(contact)}
-                        </p>
+                        {aiTypingContactIds.has(contact.id) ? (
+                          <p className="text-[13px] truncate flex-1 italic text-primary">typing…</p>
+                        ) : (
+                          <p className={`text-[13px] truncate flex-1 ${(contact.unread_count ?? 0) > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                            {getConversationPreview(contact)}
+                          </p>
+                        )}
+                        {pinnedCountsByContact[contact.id] > 0 && (
+                          <Pin className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                        )}
                         {(contact.unread_count ?? 0) > 0 && (
                           <span className="flex-shrink-0 min-w-[20px] h-5 rounded-full bg-primary text-primary-foreground text-[11px] font-bold flex items-center justify-center px-1.5">
                             {contact.unread_count}
