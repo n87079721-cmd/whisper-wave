@@ -3753,6 +3753,11 @@ async function softDisconnect(userId) {
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
   inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid, { rescue: true }));
+  // Drop per-jid caches so a paused/disconnected user doesn't keep memory
+  // pinned for the previous session. They'll repopulate on reconnect.
+  try { inst.contactCache?.clear?.(); } catch {}
+  try { inst.recentAiSends?.clear?.(); } catch {}
+  try { inst.manualReplyMutes?.clear?.(); } catch {}
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
   if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
@@ -3797,6 +3802,9 @@ async function clearSession(userId, db) {
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
   inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid)); // no rescue on full logout
+  try { inst.contactCache?.clear?.(); } catch {}
+  try { inst.recentAiSends?.clear?.(); } catch {}
+  try { inst.manualReplyMutes?.clear?.(); } catch {}
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
   if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
