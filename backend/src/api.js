@@ -889,7 +889,7 @@ RULES:
              COALESCE(c.is_archived, 0) as is_archived, COALESCE(c.unread_count, 0) as unread_count
       FROM contacts c
       INNER JOIN ranked_messages rm ON rm.contact_id = c.id AND rm.rn = 1
-      WHERE c.user_id = ? AND c.is_group = 0
+      WHERE c.user_id = ? AND c.is_group = 0 AND COALESCE(c.is_hidden, 0) = 0
       ORDER BY rm.timestamp DESC
     `).all(req.userId, req.userId);
     res.json(conversations);
