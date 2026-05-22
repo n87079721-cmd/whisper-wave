@@ -439,6 +439,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       const next = new Set(prev);
       if (next.has(msgId)) next.delete(msgId); else next.add(msgId);
       try { localStorage.setItem(`pinned:${selectedContact.id}`, JSON.stringify(Array.from(next))); } catch {}
+      setPinnedCountsByContact(curr => ({ ...curr, [selectedContact.id]: next.size }));
       return next;
     });
   }, [selectedContact?.id]);
