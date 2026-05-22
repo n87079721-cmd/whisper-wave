@@ -888,6 +888,7 @@ function scheduleRecoverySync(userId, db, delayMs = 90000) {
 // ── Auto-reconnect all users on server start ─────────────
 
 export function autoReconnectAll(db) {
+  rememberDb(db);
   try {
     const usersWithSessions = db.prepare('SELECT id, username FROM users').all()
       .filter((user) => hasSavedSession(user.id));
