@@ -575,13 +575,18 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     if (!trimmedReply && !pendingAttachment) return;
 
     setSending(true);
+    setSendProgress(pendingAttachment ? { phase: 'uploading', percent: 0 } : null);
     try {
       const isTemp = activeContactId.startsWith('temp-');
+      const onProgress = (p: { phase: 'uploading' | 'processing' | 'done'; percent?: number }) => {
+        if (p.phase === 'done') setSendProgress(null);
+        else setSendProgress({ phase: p.phase, percent: p.percent ?? 0 });
+      };
 
       const res = pendingAttachment
         ? isTemp
-          ? await api.sendMediaToPhone(activeContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
-          : await api.sendMedia(activeContactId, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
+          ? await api.sendMediaToPhone(activeContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce, onProgress)
+          : await api.sendMedia(activeContactId, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce, onProgress)
         : isTemp
           ? await api.sendTextToPhone(activeContact.phone || '', trimmedReply, quotedMessage?.id)
           : await api.sendText(activeContactId, trimmedReply, quotedMessage?.id);
@@ -614,6 +619,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       toast.error(err.message || 'Failed to send');
     } finally {
       setSending(false);
+      setSendProgress(null);
     }
   };
 
