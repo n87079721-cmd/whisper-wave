@@ -1344,6 +1344,16 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
           {/* Conversation list */}
           <div className="flex-1 overflow-y-auto">
+            {isWAConnected && syncState && (syncState.phase !== 'ready' || syncState.unresolvedLids > 0) && (
+              <div className="px-3 pt-3">
+                <SyncBanner
+                  syncState={syncState}
+                  isConnected={isWAConnected}
+                  onResync={() => { api.triggerSync().catch(() => {}); }}
+                  compact
+                />
+              </div>
+            )}
             {loading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
