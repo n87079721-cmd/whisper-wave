@@ -1727,6 +1727,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       </div>
                     </div>
 
+                    {/* Relationship Insight viewer */}
+                    <RelationshipInsight contactId={selectedContact.id} />
+
                     {/* Reply Language */}
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
