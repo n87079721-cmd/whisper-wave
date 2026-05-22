@@ -145,11 +145,20 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
   // Handle auth errors
   if (res.status === 401) {
-    // Token expired or invalid — clear auth
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem('wa_auth_user');
-    window.location.reload();
-    throw new Error('Session expired. Please log in again.');
+    // Only treat as "session expired" when the backend explicitly says the
+    // token itself is bad. Endpoint-level 401s (rate limit, missing perm,
+    // race during reconnect, etc.) should NOT nuke the saved login.
+    let body: any = null;
+    try { body = ct.includes('application/json') ? await res.json() : null; } catch {}
+    const msg = (body?.error || '').toLowerCase();
+    const isTokenInvalid = msg.includes('invalid') || msg.includes('expired') || msg.includes('authentication required');
+    if (isTokenInvalid) {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem('wa_auth_user');
+      window.location.reload();
+      throw new Error('Session expired. Please log in again.');
+    }
+    throw new Error(body?.error || 'Unauthorized');
   }
 
   const isJson = ct.includes('application/json');
@@ -182,10 +191,17 @@ async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
     throw new Error('Backend unreachable — got HTML instead of JSON. Check your Backend URL in Settings.');
   }
   if (res.status === 401) {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem('wa_auth_user');
-    window.location.reload();
-    throw new Error('Session expired. Please log in again.');
+    let body: any = null;
+    try { body = await res.clone().json(); } catch {}
+    const msg = (body?.error || '').toLowerCase();
+    const isTokenInvalid = msg.includes('invalid') || msg.includes('expired') || msg.includes('authentication required');
+    if (isTokenInvalid) {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem('wa_auth_user');
+      window.location.reload();
+      throw new Error('Session expired. Please log in again.');
+    }
+    throw new Error(body?.error || 'Unauthorized');
   }
   if (!res.ok) {
     let message = `Request failed (${res.status})`;

@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { v4 as uuid } from 'uuid';
 import fs from 'fs';
 import path from 'path';
+import { getAppMeta, setAppMeta } from './db.js';
 
 // ── Stable JWT signing secret ──
 // If the operator sets AUTH_TOKEN we honor it. Otherwise we persist a random
@@ -9,7 +10,7 @@ import path from 'path';
 // and deploys — without this, every container restart silently invalidated
 // every saved login token (this caused users to get logged out every couple
 // of weeks whenever the backend was redeployed).
-function loadOrCreatePersistedSecret() {
+function loadOrCreateFileSecret() {
   try {
     const dataDir = path.resolve(process.cwd(), 'data');
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
@@ -27,7 +28,41 @@ function loadOrCreatePersistedSecret() {
   }
 }
 
-const JWT_SECRET = process.env.AUTH_TOKEN || loadOrCreatePersistedSecret();
+// The signing secret is loaded lazily from the DB so it survives any
+// redeploy that preserves user data. Falls back to env / file secret
+// only if no DB-backed secret exists yet (then persists into the DB).
+let JWT_SECRET = null;
+let JWT_SECRET_DB = null;
+
+export function bindAuthDb(db) {
+  JWT_SECRET_DB = db;
+  if (process.env.AUTH_TOKEN) {
+    JWT_SECRET = process.env.AUTH_TOKEN;
+    return;
+  }
+  try {
+    let secret = getAppMeta(db, 'auth_secret');
+    if (!secret || secret.length < 32) {
+      // Migrate from legacy on-disk file if present, otherwise mint fresh.
+      const fileSecret = loadOrCreateFileSecret();
+      secret = fileSecret;
+      setAppMeta(db, 'auth_secret', secret);
+      console.log('[auth] Persisted auth secret into DB (will survive redeploys).');
+    }
+    JWT_SECRET = secret;
+  } catch (err) {
+    console.warn('[auth] Could not load DB-backed secret, falling back to file:', err?.message);
+    JWT_SECRET = loadOrCreateFileSecret();
+  }
+}
+
+function getSecret() {
+  if (JWT_SECRET) return JWT_SECRET;
+  // Last-ditch fallback if bindAuthDb was never called (shouldn't happen).
+  JWT_SECRET = process.env.AUTH_TOKEN || loadOrCreateFileSecret();
+  return JWT_SECRET;
+}
+
 const ITERATIONS = 100000;
 const KEYLEN = 64;
 const DIGEST = 'sha512';
@@ -53,14 +88,14 @@ export function createToken(userId) {
   // 1 year token expiry — frontend silently refreshes on every /auth/me call so
   // active users effectively never get logged out.
   const payload = Buffer.from(JSON.stringify({ sub: userId, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 365 * 24 * 3600 })).toString('base64url');
-  const signature = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${payload}`).digest('base64url');
+  const signature = crypto.createHmac('sha256', getSecret()).update(`${header}.${payload}`).digest('base64url');
   return `${header}.${payload}.${signature}`;
 }
 
 export function verifyToken(token) {
   try {
     const [header, payload, signature] = token.split('.');
-    const expected = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${payload}`).digest('base64url');
+    const expected = crypto.createHmac('sha256', getSecret()).update(`${header}.${payload}`).digest('base64url');
     if (signature !== expected) return null;
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString());
     if (data.exp && data.exp < Math.floor(Date.now() / 1000)) return null;
