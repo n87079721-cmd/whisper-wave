@@ -78,6 +78,54 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+export type UploadProgress = {
+  phase: 'uploading' | 'processing' | 'done';
+  /** 0-100 for uploading, undefined for processing */
+  percent?: number;
+};
+
+function xhrSend<T>(
+  url: string,
+  method: string,
+  body: BodyInit,
+  extraHeaders: Record<string, string>,
+  onProgress?: (p: UploadProgress) => void,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+    const headers = { ...authHeaders(), ...extraHeaders };
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    if (xhr.upload && onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          onProgress({ phase: 'uploading', percent });
+          if (percent >= 100) onProgress({ phase: 'processing' });
+        }
+      };
+      xhr.upload.onload = () => onProgress({ phase: 'processing' });
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.({ phase: 'done', percent: 100 });
+        try {
+          const parsed = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+          resolve(parsed as T);
+        } catch {
+          resolve({} as T);
+        }
+      } else {
+        let msg = `Request failed (${xhr.status})`;
+        try { msg = JSON.parse(xhr.responseText)?.error || msg; } catch {}
+        reject(new Error(msg));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.send(body);
+  });
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   if (!getApiUrl()) {
     throw new Error('Backend URL not configured. Go to Settings → Backend URL to set it.');
