@@ -561,15 +561,22 @@ const VoiceStudioPage = () => {
                 if (!files.length) return;
                 setIsUploadingSound(true);
                 const previousSelection = backgroundSound;
+                let idx = 0;
                 for (const file of files) {
+                  idx++;
                   try {
                     const name = file.name.replace(/\.[^.]+$/, '');
-                    const result = await api.uploadCustomSound(file, name);
+                    const label = files.length > 1 ? ` (${idx}/${files.length})` : '';
+                    setUploadProgress({ name: file.name, phase: 'uploading', percent: 0, label });
+                    const result = await api.uploadCustomSound(file, name, (p) => {
+                      setUploadProgress({ name: file.name, phase: p.phase === 'done' ? 'processing' : p.phase, percent: p.percent ?? 0, label });
+                    });
                     toast.success(`"${result.name}" added`);
                   } catch (err: any) {
                     toast.error(`${file.name}: ${err.message || 'Upload failed'}`);
                   }
                 }
+                setUploadProgress(null);
                 // Refresh full list and preserve previous selection
                 try {
                   const { custom } = await api.getSounds();
