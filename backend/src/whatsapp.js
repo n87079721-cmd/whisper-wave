@@ -1234,6 +1234,13 @@ async function startConnection(userId, db, options = {}) {
         const contactId = getOrCreateContact(db, userId, resolvedJid, phone, candidate, isGroup);
         if (!contactId) return;
 
+        // If this contact was previously hidden via "Delete conversation", a fresh live
+        // message means the user is back in touch — un-hide so it reappears in the chat list.
+        try {
+          db.prepare('UPDATE contacts SET is_hidden = 0 WHERE id = ? AND user_id = ? AND COALESCE(is_hidden, 0) = 1')
+            .run(contactId, userId);
+        } catch {}
+
         // Determine message type and content
         const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
         const direction = isFromMe ? 'sent' : 'received';
