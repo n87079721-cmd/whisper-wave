@@ -710,45 +710,6 @@ export function createApiRouter(db) {
   });
 
   router.put('/contacts/:id/memory', (req, res) => {
-
-  // Relationship graph + mood — viewable and resettable
-  router.get('/contacts/:id/relationship', (req, res) => {
-    try {
-      const row = db.prepare('SELECT relationship_graph, mood_state FROM contacts WHERE id = ? AND user_id = ?')
-        .get(req.params.id, req.userId);
-      if (!row) return res.status(404).json({ error: 'Contact not found' });
-      let graph = null;
-      let mood = null;
-      try { if (row.relationship_graph) graph = JSON.parse(row.relationship_graph); } catch {}
-      try { if (row.mood_state) mood = JSON.parse(row.mood_state); } catch { mood = row.mood_state; }
-      res.json({ relationship_graph: graph, mood_state: mood });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  router.delete('/contacts/:id/relationship', (req, res) => {
-    try {
-      db.prepare('UPDATE contacts SET relationship_graph = NULL, mood_state = NULL WHERE id = ? AND user_id = ?')
-        .run(req.params.id, req.userId);
-      res.json({ success: true });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-    try {
-      const { memory } = req.body;
-      db.prepare("UPDATE contacts SET memory = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
-        .run(memory || null, req.params.id, req.userId);
-      res.json({ success: true });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  router.put('/contacts/:id/directive', (req, res) => {
-  router.put('/contacts/:id/memory', (req, res) => {
     try {
       const { memory } = req.body;
       db.prepare("UPDATE contacts SET memory = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
@@ -784,6 +745,7 @@ export function createApiRouter(db) {
       res.status(500).json({ error: err.message });
     }
   });
+
 
   router.put('/contacts/:id/directive', (req, res) => {
     try {
