@@ -141,16 +141,18 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [scrollMessagesToBottom]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (!selectedContact || loadingOlder || !hasMoreMessages || messages.length === 0) return;
+    if (!selectedContact || loadingOlder || !hasMoreMessages || messages.length === 0) return false;
     setLoadingOlder(true);
     const viewport = messagesViewportRef.current;
     const prevScrollHeight = viewport?.scrollHeight || 0;
+    let loaded = false;
     try {
       const oldest = messages[0]?.timestamp;
       const result = await api.getMessages(selectedContact.id, { limit: 50, before: oldest });
       if (result.messages.length > 0) {
         setMessages(prev => [...result.messages, ...prev]);
         setHasMoreMessages(result.hasMore);
+        loaded = true;
         // Maintain scroll position
         window.requestAnimationFrame(() => {
           if (viewport) {
@@ -162,6 +164,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       }
     } catch {}
     setLoadingOlder(false);
+    return loaded;
   }, [selectedContact, loadingOlder, hasMoreMessages, messages]);
 
   const refreshAllContacts = useCallback(async (search?: string) => {
