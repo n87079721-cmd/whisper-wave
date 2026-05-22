@@ -687,10 +687,9 @@ const VoiceStudioPage = () => {
 
         {/* Preview */}
         {audioUrl && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-secondary rounded-lg p-4 space-y-4"
+          <div
+            ref={previewRef}
+            className="bg-secondary rounded-lg p-4 space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-200"
           >
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Preview</p>
             <div className="flex items-center gap-3">
