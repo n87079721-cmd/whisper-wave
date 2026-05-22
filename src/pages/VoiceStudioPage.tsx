@@ -119,6 +119,7 @@ const VoiceStudioPage = () => {
   const [bgVolume, setBgVolume] = useState(0.15);
   const [customSounds, setCustomSounds] = useState<SoundItem[]>([]);
   const [isUploadingSound, setIsUploadingSound] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ name: string; phase: 'uploading' | 'processing'; percent: number; label: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [previewingSound, setPreviewingSound] = useState<string | null>(null);
   const soundAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -561,15 +562,22 @@ const VoiceStudioPage = () => {
                 if (!files.length) return;
                 setIsUploadingSound(true);
                 const previousSelection = backgroundSound;
+                let idx = 0;
                 for (const file of files) {
+                  idx++;
                   try {
                     const name = file.name.replace(/\.[^.]+$/, '');
-                    const result = await api.uploadCustomSound(file, name);
+                    const label = files.length > 1 ? ` (${idx}/${files.length})` : '';
+                    setUploadProgress({ name: file.name, phase: 'uploading', percent: 0, label });
+                    const result = await api.uploadCustomSound(file, name, (p) => {
+                      setUploadProgress({ name: file.name, phase: p.phase === 'done' ? 'processing' : p.phase, percent: p.percent ?? 0, label });
+                    });
                     toast.success(`"${result.name}" added`);
                   } catch (err: any) {
                     toast.error(`${file.name}: ${err.message || 'Upload failed'}`);
                   }
                 }
+                setUploadProgress(null);
                 // Refresh full list and preserve previous selection
                 try {
                   const { custom } = await api.getSounds();
@@ -590,9 +598,36 @@ const VoiceStudioPage = () => {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary text-secondary-foreground border border-border hover:bg-secondary/80 transition-colors disabled:opacity-50"
             >
               {isUploadingSound ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-              {isUploadingSound ? 'Extracting...' : 'Upload Video/Audio'}
+              {isUploadingSound
+                ? (uploadProgress?.phase === 'uploading'
+                    ? `Uploading ${uploadProgress.percent}%${uploadProgress.label}`
+                    : `Extracting audio…${uploadProgress?.label ?? ''}`)
+                : 'Upload Video/Audio'}
             </button>
           </div>
+
+          {uploadProgress && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span className="truncate max-w-[70%]">{uploadProgress.name}</span>
+                <span>
+                  {uploadProgress.phase === 'uploading'
+                    ? `${uploadProgress.percent}%`
+                    : 'processing…'}
+                </span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
+                {uploadProgress.phase === 'uploading' ? (
+                  <div
+                    className="h-full bg-primary transition-all duration-200"
+                    style={{ width: `${uploadProgress.percent}%` }}
+                  />
+                ) : (
+                  <div className="h-full bg-primary/60 animate-pulse w-full" />
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Volume slider */}
           {backgroundSound !== 'none' && (

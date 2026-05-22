@@ -103,6 +103,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const initialUnreadCountRef = useRef(0);
   // Pinned messages per chat (localStorage-backed)
   const [pinnedMsgIds, setPinnedMsgIds] = useState<Set<string>>(new Set());
+  const [sendProgress, setSendProgress] = useState<{ phase: 'uploading' | 'processing'; percent: number } | null>(null);
   // Swipe-to-archive on chat list
   const [swipeOffsetByContact, setSwipeOffsetByContact] = useState<Record<string, number>>({});
   const chatSwipeRef = useRef<{ contactId: string; startX: number; startY: number; axis: 'h' | 'v' | null } | null>(null);
@@ -575,13 +576,18 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     if (!trimmedReply && !pendingAttachment) return;
 
     setSending(true);
+    setSendProgress(pendingAttachment ? { phase: 'uploading', percent: 0 } : null);
     try {
       const isTemp = activeContactId.startsWith('temp-');
+      const onProgress = (p: { phase: 'uploading' | 'processing' | 'done'; percent?: number }) => {
+        if (p.phase === 'done') setSendProgress(null);
+        else setSendProgress({ phase: p.phase, percent: p.percent ?? 0 });
+      };
 
       const res = pendingAttachment
         ? isTemp
-          ? await api.sendMediaToPhone(activeContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
-          : await api.sendMedia(activeContactId, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
+          ? await api.sendMediaToPhone(activeContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce, onProgress)
+          : await api.sendMedia(activeContactId, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce, onProgress)
         : isTemp
           ? await api.sendTextToPhone(activeContact.phone || '', trimmedReply, quotedMessage?.id)
           : await api.sendText(activeContactId, trimmedReply, quotedMessage?.id);
@@ -614,6 +620,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       toast.error(err.message || 'Failed to send');
     } finally {
       setSending(false);
+      setSendProgress(null);
     }
   };
 
@@ -2200,6 +2207,26 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     >
                       <X className="w-4 h-4" />
                     </button>
+                  </div>
+                )}
+
+                {sendProgress && (
+                  <div className="space-y-1 px-1">
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>
+                        {sendProgress.phase === 'uploading'
+                          ? `Uploading ${pendingAttachment?.kind === 'audio' ? 'voice note' : 'attachment'}…`
+                          : 'Delivering to WhatsApp…'}
+                      </span>
+                      <span>{sendProgress.phase === 'uploading' ? `${sendProgress.percent}%` : '…'}</span>
+                    </div>
+                    <div className="h-1 w-full rounded-full bg-secondary overflow-hidden">
+                      {sendProgress.phase === 'uploading' ? (
+                        <div className="h-full bg-primary transition-all duration-200" style={{ width: `${sendProgress.percent}%` }} />
+                      ) : (
+                        <div className="h-full w-full bg-primary/60 animate-pulse" />
+                      )}
+                    </div>
                   </div>
                 )}
 

@@ -78,6 +78,54 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+export type UploadProgress = {
+  phase: 'uploading' | 'processing' | 'done';
+  /** 0-100 for uploading, undefined for processing */
+  percent?: number;
+};
+
+function xhrSend<T>(
+  url: string,
+  method: string,
+  body: XMLHttpRequestBodyInit,
+  extraHeaders: Record<string, string>,
+  onProgress?: (p: UploadProgress) => void,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+    const headers = { ...authHeaders(), ...extraHeaders };
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    if (xhr.upload && onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          onProgress({ phase: 'uploading', percent });
+          if (percent >= 100) onProgress({ phase: 'processing' });
+        }
+      };
+      xhr.upload.onload = () => onProgress({ phase: 'processing' });
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.({ phase: 'done', percent: 100 });
+        try {
+          const parsed = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+          resolve(parsed as T);
+        } catch {
+          resolve({} as T);
+        }
+      } else {
+        let msg = `Request failed (${xhr.status})`;
+        try { msg = JSON.parse(xhr.responseText)?.error || msg; } catch {}
+        reject(new Error(msg));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.send(body);
+  });
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   if (!getApiUrl()) {
     throw new Error('Backend URL not configured. Go to Settings → Backend URL to set it.');
@@ -237,40 +285,38 @@ export const api = {
   },
 
 
-  async sendMedia(contactId: string, file: File, caption?: string, isViewOnce?: boolean) {
+  async sendMedia(contactId: string, file: File, caption?: string, isViewOnce?: boolean, onProgress?: (p: UploadProgress) => void) {
     const mimeType = file.type || 'application/octet-stream';
     const data = await fileToBase64(file);
-    return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/media', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contactId,
-        fileName: file.name,
-        mimeType,
-        data,
-        caption,
-        sendAsDocument: !(mimeType.startsWith('image/') || mimeType.startsWith('video/')),
-        isViewOnce: !!isViewOnce,
-      }),
+    const body = JSON.stringify({
+      contactId,
+      fileName: file.name,
+      mimeType,
+      data,
+      caption,
+      sendAsDocument: !(mimeType.startsWith('image/') || mimeType.startsWith('video/')),
+      isViewOnce: !!isViewOnce,
     });
+    return xhrSend<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>(
+      toUrl('/api/send/media'), 'POST', body, { 'Content-Type': 'application/json' }, onProgress,
+    );
   },
 
-  async sendMediaToPhone(phone: string, file: File, caption?: string, isViewOnce?: boolean) {
+  async sendMediaToPhone(phone: string, file: File, caption?: string, isViewOnce?: boolean, onProgress?: (p: UploadProgress) => void) {
     const mimeType = file.type || 'application/octet-stream';
     const data = await fileToBase64(file);
-    return requestJson<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>('/api/send/media', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jid: toPhoneJid(phone),
-        fileName: file.name,
-        mimeType,
-        data,
-        caption,
-        sendAsDocument: !(mimeType.startsWith('image/') || mimeType.startsWith('video/')),
-        isViewOnce: !!isViewOnce,
-      }),
+    const body = JSON.stringify({
+      jid: toPhoneJid(phone),
+      fileName: file.name,
+      mimeType,
+      data,
+      caption,
+      sendAsDocument: !(mimeType.startsWith('image/') || mimeType.startsWith('video/')),
+      isViewOnce: !!isViewOnce,
     });
+    return xhrSend<{ success?: boolean; messageId?: string; error?: string; contactId?: string }>(
+      toUrl('/api/send/media'), 'POST', body, { 'Content-Type': 'application/json' }, onProgress,
+    );
   },
 
   sendVoice(contactId: string, text: string, voiceId?: string, modelId?: string, backgroundSound?: string, bgVolume?: number) {
@@ -456,21 +502,14 @@ export const api = {
     return requestJson<{ presets: SoundItem[]; custom: SoundItem[] }>('/api/sounds');
   },
 
-  async uploadCustomSound(file: File, name: string) {
+  async uploadCustomSound(file: File, name: string, onProgress?: (p: UploadProgress) => void) {
     if (!getApiUrl()) throw new Error('Backend URL not configured.');
     const formData = new FormData();
     formData.append('file', file);
     formData.append('name', name);
-    const res = await fetch(toUrl('/api/sounds/upload'), {
-      method: 'POST',
-      headers: authHeaders(),
-      body: formData,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Upload failed' }));
-      throw new Error(err.error || 'Upload failed');
-    }
-    return res.json() as Promise<{ soundId: string; name: string; duration: number }>;
+    return xhrSend<{ soundId: string; name: string; duration: number }>(
+      toUrl('/api/sounds/upload'), 'POST', formData, {}, onProgress,
+    );
   },
 
   deleteSound(id: number) {
