@@ -19,6 +19,14 @@ const STATUS_MEDIA_DIR = path.join(DATA_DIR, 'status-media');
 // Per-user instance store
 const userInstances = new Map(); // userId -> instance object
 
+// Module-level shared DB handle. Set on the first call into initWhatsApp /
+// getOrInitWhatsApp / autoReconnectAll so helpers that don't receive a `db`
+// argument (e.g. sendToResolvedTarget) can still query.
+let sharedDb = null;
+function rememberDb(db) {
+  if (db && !sharedDb) sharedDb = db;
+}
+
 function getUserAuthDir(userId) {
   return path.join(DATA_DIR, 'auth', userId);
 }
