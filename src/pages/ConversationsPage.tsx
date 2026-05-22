@@ -1365,6 +1365,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
               filtered.map(contact => {
                 const isActive = selectedContact?.id === contact.id;
                 const swipeOffset = swipeOffsetByContact[contact.id] || 0;
+                  // Only reveal the archive background once the user has clearly
+                  // committed to a horizontal swipe (>24px). Prevents a flash on
+                  // taps with tiny finger drift.
+                  const showSwipeBg = Math.abs(swipeOffset) > 24;
                 return (
                   <div
                     key={contact.id}
@@ -1378,12 +1382,18 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       const dx = e.touches[0].clientX - s.startX;
                       const dy = e.touches[0].clientY - s.startY;
                       if (s.axis === null) {
-                        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-                        s.axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+                          // Require a more deliberate movement before locking
+                          // axis — and require dx to clearly dominate dy so a
+                          // diagonal tap-drift never becomes a swipe.
+                          if (Math.abs(dx) < 18 && Math.abs(dy) < 18) return;
+                          s.axis = Math.abs(dx) > Math.abs(dy) * 1.5 ? 'h' : 'v';
                       }
                       if (s.axis !== 'h') return;
-                      // Only allow swipe-left (negative dx) for active chats; swipe-right for archived
-                      const clamped = contact.is_archived ? Math.max(0, Math.min(120, dx)) : Math.max(-120, Math.min(0, dx));
+                        // Subtract the dead zone so the row doesn't jump 18px
+                        // the instant axis locks.
+                        const adjusted = dx > 0 ? Math.max(0, dx - 18) : Math.min(0, dx + 18);
+                        // Only allow swipe-left (negative dx) for active chats; swipe-right for archived
+                        const clamped = contact.is_archived ? Math.max(0, Math.min(120, adjusted)) : Math.max(-120, Math.min(0, adjusted));
                       setSwipeOffsetByContact(prev => ({ ...prev, [contact.id]: clamped }));
                     }}
                     onTouchEnd={() => {
@@ -1391,17 +1401,23 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       chatSwipeRef.current = null;
                       const off = swipeOffsetByContact[contact.id] || 0;
                       setSwipeOffsetByContact(prev => ({ ...prev, [contact.id]: 0 }));
-                      if (s?.axis === 'h' && Math.abs(off) > 70) {
+                        // Require a substantially longer pull to confirm archive.
+                        if (s?.axis === 'h' && Math.abs(off) > 95) {
                         handleArchiveChat(contact.id, !contact.is_archived);
                       }
                     }}
                   >
                     {/* Swipe action background */}
-                    <div className={`absolute inset-y-0 ${contact.is_archived ? 'left-0' : 'right-0'} w-[120px] flex items-center justify-center bg-primary text-primary-foreground`}>
+                      <div className={`absolute inset-y-0 ${contact.is_archived ? 'left-0' : 'right-0'} w-[120px] flex items-center justify-center bg-primary text-primary-foreground transition-opacity duration-150 ${showSwipeBg ? 'opacity-100' : 'opacity-0'}`}>
                       {contact.is_archived ? <ArchiveRestore className="w-5 h-5" /> : <Archive className="w-5 h-5" />}
                     </div>
                   <button
-                    onClick={() => { setSelectedContact(contact); }}
+                      onClick={(e) => {
+                        // Guard: if a horizontal swipe just happened, the row
+                        // still snaps back via touchend — don't also open the chat.
+                        if (Math.abs(swipeOffset) > 4) { e.preventDefault(); return; }
+                        setSelectedContact(contact);
+                      }}
                     style={{ transform: `translateX(${swipeOffset}px)`, transition: chatSwipeRef.current?.contactId === contact.id ? 'none' : 'transform 0.2s ease' }}
                     className={`relative w-full flex items-center gap-3 px-3 py-3 text-left transition-colors ${
                       isActive ? 'bg-accent' : 'hover:bg-secondary/60'
