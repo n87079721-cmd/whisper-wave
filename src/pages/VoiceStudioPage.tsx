@@ -136,6 +136,7 @@ const VoiceStudioPage = () => {
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     api.getContacts({ limit: 5000 }).then(res => setContacts(res.contacts)).catch(() => {});
@@ -156,6 +157,25 @@ const VoiceStudioPage = () => {
       setCustomSounds(custom);
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!audioUrl) return;
+    // iOS Safari sometimes skips repaint when content appears below the
+    // viewport after an async action. Force a reflow + scroll into view so
+    // the preview block is actually visible without needing to scroll/rotate.
+    const el = previewRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      // Trigger reflow
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      el.offsetHeight;
+      try {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch {
+        el.scrollIntoView();
+      }
+    });
+  }, [audioUrl]);
 
   const handleGenerate = async () => {
     if (!text) return;
@@ -667,10 +687,9 @@ const VoiceStudioPage = () => {
 
         {/* Preview */}
         {audioUrl && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-secondary rounded-lg p-4 space-y-4"
+          <div
+            ref={previewRef}
+            className="bg-secondary rounded-lg p-4 space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-200"
           >
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Preview</p>
             <div className="flex items-center gap-3">
@@ -783,7 +802,7 @@ const VoiceStudioPage = () => {
                 Discard
               </button>
             </div>
-          </motion.div>
+          </div>
         )}
       </motion.div>
 
