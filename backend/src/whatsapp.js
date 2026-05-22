@@ -27,6 +27,21 @@ function rememberDb(db) {
   if (db && !sharedDb) sharedDb = db;
 }
 
+// Run the PRAGMA + ALTER TABLE migration once per process per DB handle.
+const _messageColsEnsured = new WeakSet();
+function ensureMessageColumns(db) {
+  if (!db || _messageColsEnsured.has(db)) return;
+  try {
+    const cols = db.prepare("PRAGMA table_info(messages)").all().map(c => c.name);
+    if (!cols.includes('is_edited'))        db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
+    if (!cols.includes('is_starred'))       db.exec("ALTER TABLE messages ADD COLUMN is_starred INTEGER DEFAULT 0");
+    if (!cols.includes('reply_to_id'))      db.exec("ALTER TABLE messages ADD COLUMN reply_to_id TEXT");
+    if (!cols.includes('reply_to_content')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_content TEXT");
+    if (!cols.includes('reply_to_sender'))  db.exec("ALTER TABLE messages ADD COLUMN reply_to_sender TEXT");
+    _messageColsEnsured.add(db);
+  } catch {}
+}
+
 function getUserAuthDir(userId) {
   return path.join(DATA_DIR, 'auth', userId);
 }
