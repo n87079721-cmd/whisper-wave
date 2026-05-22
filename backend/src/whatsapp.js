@@ -3783,6 +3783,10 @@ async function clearSession(userId, db) {
           avatar_url = NULL
       WHERE user_id = ?
     `).run(userId);
+    // Tell connected clients to refresh their conversation list so stale unread
+    // badges disappear immediately instead of waiting for the next manual refresh.
+    try { emit(userId, 'status', { status: 'disconnected', reason: 'logout' }); } catch {}
+    try { emit(userId, 'message', { contactsRefresh: true }); } catch {}
   } catch (err) {
     console.error('Failed to clear DB tables:', err?.message || err);
   }
