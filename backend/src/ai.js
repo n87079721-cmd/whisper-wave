@@ -244,7 +244,7 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
 
   // Reinforce reading the full chat history (the model sees up to 80 recent messages)
   if (messages && messages.length >= 20) {
-    prompt += `\n\nYou have the last ${messages.length} messages from this conversation as context. USE THEM. Reference earlier topics, inside jokes, plans, or details they mentioned before — that's how a real friend would text. Don't reply like you just walked into the chat.`;
+    prompt += `\n\n📜 FULL CONVERSATION CONTEXT: You have the last ${messages.length} messages from this conversation. Each message is prefixed with its date/time in [brackets] — USE those timestamps to understand WHEN things happened. Scan the WHOLE thread before replying:\n• What have they already told you (name, plans, job, where they live, what they're going through)?\n• What did YOU already say or promise? Don't contradict yourself, don't repeat the same question, don't ask them something they already answered earlier in the thread.\n• What's the current vibe and topic — pick up the thread, don't reset.\n• Compare timestamps to "today" so you know if something was hours ago vs days ago vs weeks ago. Don't ask "how was X" if X was a month ago and never came up again.\nReply as if you've actually been in this conversation the whole time — because you have been.`;
   }
 
   // For rewrites: explicitly ask for a DIFFERENT reply
@@ -291,7 +291,19 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
         }
       }
 
-      return { role, content: m.content || '(sent a photo)' };
+      // Prefix every text message with a compact timestamp so the model has
+      // temporal context across the full 300-message window. Format mirrors the
+      // memory block: [Mon DD HH:MM].
+      let stamp = '';
+      try {
+        if (m.timestamp) {
+          const d = new Date(m.timestamp);
+          if (!Number.isNaN(d.getTime())) {
+            stamp = `[${d.toLocaleString('en-US', { timeZone: tz, month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}] `;
+          }
+        }
+      } catch {}
+      return { role, content: `${stamp}${m.content || '(sent a photo)'}` };
     });
 
   if (chatMessages.length === 0) {
