@@ -485,6 +485,15 @@ export const api = {
     });
   },
 
+  // Relationship graph + mood (per-contact AI insight)
+  getRelationshipGraph(contactId: string) {
+    return requestJson<{ relationship_graph: any; mood_state: any }>(`/api/contacts/${contactId}/relationship`);
+  },
+
+  resetRelationshipGraph(contactId: string) {
+    return requestJson<{ success: boolean }>(`/api/contacts/${contactId}/relationship`, { method: 'DELETE' });
+  },
+
   reactToMessage(messageId: string, emoji: string) {
     return requestJson<{ success: boolean }>(`/api/messages/${messageId}/react`, {
       method: 'POST',

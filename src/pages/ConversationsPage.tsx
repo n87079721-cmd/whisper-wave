@@ -5,6 +5,9 @@ import { toast } from 'sonner';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
 import { LANGUAGES } from '@/lib/languages';
+import SyncBanner from '@/components/SyncBanner';
+import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
+import RelationshipInsight from '@/components/RelationshipInsight';
 
 interface ConversationsPageProps {
   initialContact?: Contact | null;
@@ -13,6 +16,8 @@ interface ConversationsPageProps {
 }
 
 const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPageProps) => {
+  const { status: waStatus, syncState } = useWhatsAppStatus();
+  const isWAConnected = waStatus === 'connected';
   const [conversations, setConversations] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -101,6 +106,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   // Unread divider: id of the first unread message when chat was opened
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
   const initialUnreadCountRef = useRef(0);
+  const chatOpenedAtRef = useRef<number>(0);
   // Pinned messages per chat (localStorage-backed)
   const [pinnedMsgIds, setPinnedMsgIds] = useState<Set<string>>(new Set());
   // Map of contactId -> count of pinned messages (read from localStorage for sidebar badge)
@@ -358,6 +364,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     // Capture initial unread count BEFORE we mark-as-read, so we can place the divider
     initialUnreadCountRef.current = selectedContact.unread_count ?? 0;
     setFirstUnreadId(null);
+    chatOpenedAtRef.current = Date.now();
     // Load pinned messages for this contact from localStorage
     try {
       const raw = localStorage.getItem(`pinned:${selectedContact.id}`);
@@ -433,20 +440,43 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   // Compute first-unread message id once messages load, using captured count.
   useEffect(() => {
     if (!selectedContact?.id) return;
-    if (firstUnreadId) return;
-    const n = initialUnreadCountRef.current;
-    if (!n || n <= 0 || messages.length === 0) return;
-    let count = 0;
-    let firstUnseen: string | null = null;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.direction !== 'received') continue;
-      firstUnseen = m.id;
-      count++;
-      if (count >= n) break;
+    if (messages.length === 0) return;
+    // Initial placement: use the unread count captured on chat open.
+    if (!firstUnreadId) {
+      const n = initialUnreadCountRef.current;
+      if (n && n > 0) {
+        let count = 0;
+        let firstUnseen: string | null = null;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const m = messages[i];
+          if (m.direction !== 'received') continue;
+          firstUnseen = m.id;
+          count++;
+          if (count >= n) break;
+        }
+        if (firstUnseen) { setFirstUnreadId(firstUnseen); return; }
+      }
+      // Live placement: if a received message arrived AFTER chat opened while
+      // user is scrolled up (not auto-scrolling), mark the first such message.
+      if (!shouldAutoScrollRef.current && chatOpenedAtRef.current > 0) {
+        const openedAt = chatOpenedAtRef.current;
+        for (const m of messages) {
+          if (m.direction !== 'received') continue;
+          const ts = new Date(m.timestamp).getTime();
+          if (ts > openedAt) { setFirstUnreadId(m.id); return; }
+        }
+      }
     }
-    if (firstUnseen) setFirstUnreadId(firstUnseen);
   }, [messages, selectedContact?.id, firstUnreadId]);
+
+  // Clear divider once the user is back at the bottom (mark as seen).
+  useEffect(() => {
+    if (!firstUnreadId) return;
+    if (!showScrollDown) {
+      const t = window.setTimeout(() => setFirstUnreadId(null), 1500);
+      return () => window.clearTimeout(t);
+    }
+  }, [firstUnreadId, showScrollDown]);
 
   // Pinned helpers
   const togglePinMessage = useCallback((msgId: string) => {
@@ -513,10 +543,14 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     try {
       const d = new Date(ts);
       const now = new Date();
-      const diff = now.getTime() - d.getTime();
-      if (diff < 86400000 && d.getDate() === now.getDate()) return 'Today';
-      if (diff < 172800000) return 'Yesterday';
-      return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      const tz = aiTimezone || undefined;
+      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+      const dKey = fmt.format(d);
+      const nowKey = fmt.format(now);
+      if (dKey === nowKey) return 'Today';
+      const y = new Date(now.getTime() - 86400000);
+      if (fmt.format(y) === dKey) return 'Yesterday';
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: tz });
     } catch { return ''; }
   };
 
@@ -1311,6 +1345,16 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
           {/* Conversation list */}
           <div className="flex-1 overflow-y-auto">
+            {isWAConnected && syncState && (syncState.phase !== 'ready' || syncState.unresolvedLids > 0) && (
+              <div className="px-3 pt-3">
+                <SyncBanner
+                  syncState={syncState}
+                  isConnected={isWAConnected}
+                  onResync={() => { api.triggerSync().catch(() => {}); }}
+                  compact
+                />
+              </div>
+            )}
             {loading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -1683,6 +1727,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                         >{summarizingNow ? 'Summarizing…' : 'Summarize now'}</button>
                       </div>
                     </div>
+
+                    {/* Relationship Insight viewer */}
+                    <RelationshipInsight contactId={selectedContact.id} />
 
                     {/* Reply Language */}
                     <div>
