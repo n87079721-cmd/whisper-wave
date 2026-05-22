@@ -298,8 +298,8 @@ async function sendToResolvedTarget(userId, jid, executor) {
   // If jid is @lid, also try the phone number from contacts DB
   if (jid.endsWith('@lid')) {
     try {
-      const { db } = await import('./db.js');
-      const contact = db.prepare('SELECT phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+      const db = sharedDb;
+      const contact = db?.prepare('SELECT phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
       if (contact?.phone) {
         const digits = contact.phone.replace(/[^0-9]/g, '');
         if (digits.length >= 7) {
