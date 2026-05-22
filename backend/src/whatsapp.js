@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
 import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory, detectAndTranslate, translateToLanguage, buildTimeContext, detectContactMood, updateRelationshipGraph } from './ai.js';
-import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, claimPreviewByToken, consumeSensitiveAlert, sendVoiceNoteTranscript, sendForeignLanguageAlert } from './telegram.js';
+import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, getLastCustomInstructions, setLastCustomInstructions, clearLastCustomInstructions, claimPreviewByToken, consumeSensitiveAlert, sendVoiceNoteTranscript, sendForeignLanguageAlert } from './telegram.js';
 import { transcribeAudio, generateVoiceNote } from './elevenlabs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -2963,6 +2963,11 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
 async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestResolvedContent, latestMessageId, forceReply = false }) {
   const inst = getInstance(userId);
 
+  // A brand-new natural reply cycle begins here (triggered by an incoming
+  // message, not by a Rewrite/Custom tap). Drop any leftover custom-mode
+  // intent from a previous reply so it doesn't bleed into this new turn.
+  try { clearLastCustomInstructions(userId, jid); } catch {}
+
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
   if (!keyRow?.value) {
     debugLog(db, userId, 'skip_no_api_key', { contact: contactName || phone });
@@ -4543,6 +4548,8 @@ export function getTelegramCallbackHandlers(userId, db) {
 
     onCancel: (jid) => {
       clearPendingAutoReply(userId, jid);
+      // User cancelled — drop any custom-mode intent so the next reply starts clean.
+      clearLastCustomInstructions(userId, jid);
       const contact = db.prepare('SELECT name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
       debugLog(db, userId, 'telegram_cancel', { jid, contact: contact?.name || contact?.phone || jid });
     },
@@ -4572,11 +4579,27 @@ export function getTelegramCallbackHandlers(userId, db) {
       const systemPrompt = buildContactSystemPrompt(db, userId, contact.id);
       const contactName = contact.name || contact.phone || 'Unknown';
       const { generateReply } = await import('./ai.js');
-      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, {
-        mode: 'rewrite',
+
+      // If the user previously sent custom instructions for this jid's current
+      // reply session, keep applying them on subsequent rewrites so the rewrite
+      // is a *variation of the custom draft*, not a fresh reply that ignores
+      // what the user just asked for. Cleared on Cancel or a new conversation
+      // turn.
+      const pendingCustom = getLastCustomInstructions(userId, jid);
+      const previousReply = getLastPreviewedReply(userId, jid);
+      const baseOpts = {
         timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
         replyLanguage: getContactReplyLanguage(db, userId, contact.id),
-      });
+      };
+      let replyText = await generateReply(
+        keyRow.value,
+        messages,
+        systemPrompt,
+        contactName,
+        pendingCustom
+          ? { ...baseOpts, mode: 'custom', customInstructions: pendingCustom, previousReply }
+          : { ...baseOpts, mode: 'rewrite' }
+      );
       replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
       // Re-schedule with telegram preview
@@ -4584,6 +4607,10 @@ export function getTelegramCallbackHandlers(userId, db) {
     },
     onCustom: async (jid, instructions) => {
       clearPendingAutoReply(userId, jid);
+      // Remember this custom intent for the jid's current reply session, so
+      // a subsequent 🔄 Rewrite keeps honoring it instead of reverting to a
+      // vanilla rewrite.
+      setLastCustomInstructions(userId, jid, instructions);
       // Manual reply mute would block the AI from speaking. The user explicitly
       // asked for a custom reply via Telegram, so clear the mute for this jid.
       try { getInstance(userId).manualReplyMutes.delete(jid); } catch {}
