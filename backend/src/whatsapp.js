@@ -2963,6 +2963,11 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
 async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestResolvedContent, latestMessageId, forceReply = false }) {
   const inst = getInstance(userId);
 
+  // A brand-new natural reply cycle begins here (triggered by an incoming
+  // message, not by a Rewrite/Custom tap). Drop any leftover custom-mode
+  // intent from a previous reply so it doesn't bleed into this new turn.
+  try { clearLastCustomInstructions(userId, jid); } catch {}
+
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
   if (!keyRow?.value) {
     debugLog(db, userId, 'skip_no_api_key', { contact: contactName || phone });
