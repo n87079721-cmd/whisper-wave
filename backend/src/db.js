@@ -29,6 +29,21 @@ export function initDatabase() {
   return db;
 }
 
+// ── App-wide key/value store (auth secret, etc.) ──
+// Stored in the same DB so it survives container restarts and code deploys
+// for as long as the user data does. Wiping this would also wipe users, so
+// the secret is exactly as durable as the accounts it signs tokens for.
+export function getAppMeta(db, key) {
+  db.exec(`CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT)`);
+  const row = db.prepare('SELECT value FROM app_meta WHERE key = ?').get(key);
+  return row?.value || null;
+}
+
+export function setAppMeta(db, key, value) {
+  db.exec(`CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT)`);
+  db.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+}
+
 function ensureUsersTable(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
