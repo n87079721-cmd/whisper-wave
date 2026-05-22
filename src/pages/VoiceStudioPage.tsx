@@ -802,7 +802,7 @@ const VoiceStudioPage = () => {
                 Discard
               </button>
             </div>
-          </motion.div>
+          </div>
         )}
       </motion.div>
 
