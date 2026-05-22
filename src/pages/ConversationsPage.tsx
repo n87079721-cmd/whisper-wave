@@ -438,9 +438,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     });
   }, [selectedContact?.id]);
 
-  const jumpToMessage = useCallback((targetId: string) => {
-    const wrapper = messagesViewportRef.current?.querySelector(`[data-msg-id="${CSS.escape(targetId)}"]`) as HTMLElement | null;
-    if (!wrapper) return;
+  const highlightAndScroll = useCallback((wrapper: HTMLElement) => {
     wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
     const bubble = wrapper.querySelector(':scope > div') as HTMLElement | null;
     const target = bubble || wrapper;
@@ -452,6 +450,20 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       setTimeout(() => { target.style.transition = ''; target.style.borderRadius = ''; }, 300);
     }, 2000);
   }, []);
+
+  const jumpToMessage = useCallback(async (targetId: string) => {
+    const findEl = () => messagesViewportRef.current?.querySelector(`[data-msg-id="${CSS.escape(targetId)}"]`) as HTMLElement | null;
+    let wrapper = findEl();
+    if (wrapper) { highlightAndScroll(wrapper); return; }
+    // Not rendered yet — page in older messages until we find it (max 5 pages)
+    for (let i = 0; i < 5; i++) {
+      const more = await loadOlderMessages();
+      if (!more) break;
+      wrapper = findEl();
+      if (wrapper) { highlightAndScroll(wrapper); return; }
+    }
+    toast.message('Message not found in history');
+  }, [highlightAndScroll, loadOlderMessages]);
 
   const normalizePhoneDigits = (value: string) => value.replace(/\D/g, '');
   const formatPhoneDraft = (value: string) => {
