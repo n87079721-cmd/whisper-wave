@@ -293,11 +293,16 @@ function ensureIndexes(db) {
 }
 
 function needsLegacyMigration(db) {
+  // Brand-new DBs report "missing columns" on tables that don't exist yet.
+  // Don't treat that as legacy. Only migrate when at least one of these
+  // tables already exists AND is missing the user_id column.
+  const tables = ['contacts', 'messages', 'config', 'stats'];
+  if (!tables.some((t) => tableExists(db, t))) return false;
   return (
-    !hasColumn(db, 'contacts', 'user_id') ||
-    !hasColumn(db, 'messages', 'user_id') ||
-    !hasColumn(db, 'config', 'user_id') ||
-    !hasColumn(db, 'stats', 'user_id')
+    (tableExists(db, 'contacts') && !hasColumn(db, 'contacts', 'user_id')) ||
+    (tableExists(db, 'messages') && !hasColumn(db, 'messages', 'user_id')) ||
+    (tableExists(db, 'config')   && !hasColumn(db, 'config',   'user_id')) ||
+    (tableExists(db, 'stats')    && !hasColumn(db, 'stats',    'user_id'))
   );
 }
 

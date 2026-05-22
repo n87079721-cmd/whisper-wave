@@ -548,13 +548,22 @@ export function createApiRouter(db) {
       }
     });
 
+    let cleanedUp = false;
     const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
       clearInterval(heartbeat);
-      unsub();
+      try { unsub(); } catch {}
     };
 
     req.on('close', cleanup);
     req.on('end', cleanup);
+    // Without an 'error' listener a stalled SSE connection (network drop,
+    // proxy timeout) would leak the heartbeat interval + event listener
+    // forever. Treat any socket error as a close.
+    req.on('error', cleanup);
+    res.on('error', cleanup);
+    res.on('close', cleanup);
   });
 
   // ── ElevenLabs ───────────────────────────────────────────
@@ -2100,6 +2109,40 @@ RULES:
         await wa.clearSession();
       } catch {}
 
+      // Gather media file paths owned by this user BEFORE deleting their rows
+      // so we can unlink the orphans that would otherwise sit in shared
+      // directories (and would be readable to any logged-in user via the
+      // /message-media, /status-media, /sounds routes if their ownership
+      // checks ever regressed).
+      const dataRoot = path.join(__dirname, '..', 'data');
+      const orphanFiles = [];
+      try {
+        const msgMedia = db.prepare(
+          "SELECT media_path FROM messages WHERE user_id = ? AND media_path IS NOT NULL AND media_path NOT LIKE 'wa:%'"
+        ).all(targetId);
+        for (const r of msgMedia) {
+          const name = path.basename(String(r.media_path));
+          if (name) {
+            orphanFiles.push(path.join(dataRoot, 'message-media', name));
+            orphanFiles.push(path.join(dataRoot, 'voice-media', name));
+          }
+        }
+        const stMedia = db.prepare(
+          'SELECT media_path FROM statuses WHERE user_id = ? AND media_path IS NOT NULL'
+        ).all(targetId);
+        for (const r of stMedia) {
+          const name = path.basename(String(r.media_path));
+          if (name) orphanFiles.push(path.join(dataRoot, 'status-media', name));
+        }
+        const snd = db.prepare(
+          'SELECT filename FROM custom_sounds WHERE user_id = ?'
+        ).all(targetId);
+        for (const r of snd) {
+          const name = path.basename(String(r.filename));
+          if (name) orphanFiles.push(path.join(soundsDir, name));
+        }
+      } catch {}
+
       // Delete all user data in a transaction for atomicity
       const deleteUser = db.transaction(() => {
         db.prepare('DELETE FROM custom_sounds WHERE user_id = ?').run(targetId);
@@ -2114,19 +2157,19 @@ RULES:
       });
       deleteUser();
 
-      // Clean up auth directories
-      const path = await import('path');
-      const fs = await import('fs');
-      const { fileURLToPath } = await import('url');
-      const dataDir = path.default.join(path.default.dirname(fileURLToPath(import.meta.url)), '..', 'data');
-
-      const authDir = path.default.join(dataDir, 'auth', targetId);
-      if (fs.default.existsSync(authDir)) {
-        fs.default.rmSync(authDir, { recursive: true, force: true });
+      // Unlink orphan media (best-effort)
+      for (const f of orphanFiles) {
+        try { fs.unlinkSync(f); } catch {}
       }
-      const wwDir = path.default.join(dataDir, 'wwebjs_auth', `session-${targetId}`);
-      if (fs.default.existsSync(wwDir)) {
-        fs.default.rmSync(wwDir, { recursive: true, force: true });
+
+      // Clean up auth directories
+      const authDir = path.join(dataRoot, 'auth', targetId);
+      if (fs.existsSync(authDir)) {
+        fs.rmSync(authDir, { recursive: true, force: true });
+      }
+      const wwDir = path.join(dataRoot, 'wwebjs_auth', `session-${targetId}`);
+      if (fs.existsSync(wwDir)) {
+        fs.rmSync(wwDir, { recursive: true, force: true });
       }
 
       res.json({ success: true });
