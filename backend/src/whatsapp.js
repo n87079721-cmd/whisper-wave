@@ -540,6 +540,16 @@ function isUuidLike(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
 }
 
+function scopeMessageId(userId, id) {
+  const raw = String(id || uuid());
+  return raw.startsWith(`${userId}:`) ? raw : `${userId}:${raw}`;
+}
+
+function rawMessageId(userId, id) {
+  const raw = String(id || '');
+  return raw.startsWith(`${userId}:`) ? raw.slice(`${userId}:`.length) : raw;
+}
+
 // ── Exports ──────────────────────────────────────────────
 
 export function cancelAllPendingReplies(userId) {
