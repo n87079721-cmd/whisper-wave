@@ -713,6 +713,7 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
         if (typeof window.onCodeReceivedEvent !== 'function') {
           window.onCodeReceivedEvent = (code) => {
             window._pairingCode = code;
+            return code;
           };
         }
       });
@@ -722,7 +723,13 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
   }
 
   try {
-    const code = await inst.client.requestPairingCode(cleaned);
+    let code = await inst.client.requestPairingCode(cleaned);
+    if (!code && inst.client?.pupPage) {
+      code = await inst.client.pupPage.evaluate(() => window._pairingCode || null).catch(() => null);
+    }
+    if (!code) {
+      throw new Error('WhatsApp did not return a pairing code. Wait a few seconds and try again.');
+    }
     inst.pairingCode = code;
     emit(userId, 'pairing_code', { code });
     return code;
