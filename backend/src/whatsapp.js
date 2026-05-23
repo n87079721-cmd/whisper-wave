@@ -1279,6 +1279,7 @@ async function startConnection(userId, db, options = {}) {
 
         const contactId = getOrCreateContact(db, userId, resolvedJid, phone, candidate, isGroup);
         if (!contactId) return;
+        try { db.prepare('UPDATE contacts SET has_chat = 1 WHERE id = ? AND user_id = ?').run(contactId, userId); } catch {}
 
         // If this contact was previously hidden via "Delete conversation", a fresh live
         // message means the user is back in touch — un-hide so it reappears in the chat list.
@@ -1948,6 +1949,7 @@ async function syncChats(userId, db, { force = false } = {}) {
 
           const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
           if (!contactId) continue;
+          try { db.prepare('UPDATE contacts SET has_chat = 1 WHERE id = ? AND user_id = ?').run(contactId, userId); } catch {}
           contactChanges++;
 
           // Sync archive status
