@@ -217,10 +217,15 @@ function getReconnectStaleThresholdMs(userId, db) {
 }
 
 function getBackgroundContactSyncDelayMs(userId, db) {
+  // Contact-book sync is what upgrades phone-number labels to real names
+  // (pushname/verifiedName/saved). Delaying it by 10–45s left the chat list
+  // showing raw numbers until the user manually hit Recover Chats. Kick it
+  // off almost immediately — getContacts() is cheap and runs in parallel
+  // with the chat history import.
   const scale = getAccountScale(userId, db);
-  if (scale === 'huge') return 45000;
-  if (scale === 'large') return 20000;
-  return 10000;
+  if (scale === 'huge') return 3000;
+  if (scale === 'large') return 2000;
+  return 1000;
 }
 
 function getRecoverySyncDelayMs(userId, db) {
