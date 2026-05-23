@@ -719,7 +719,7 @@ export function initWhatsApp(userId, db) {
     disconnect: () => softDisconnect(userId),
     clearSession: () => clearSession(userId, db),
     getSocket: () => getInstance(userId).client,
-    getMessageById: (msgId) => getInstance(userId).client?.getMessageById(msgId),
+    getMessageById: (msgId) => getInstance(userId).client?.getMessageById(rawMessageId(userId, msgId)),
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
     triggerSync: (opts) => recoverSync(userId, db, opts || { force: true }),
   };
@@ -751,7 +751,7 @@ export function getOrInitWhatsApp(userId, db) {
     disconnect: () => softDisconnect(userId),
     clearSession: () => clearSession(userId, db),
     getSocket: () => inst.client,
-    getMessageById: (msgId) => inst.client?.getMessageById(msgId),
+    getMessageById: (msgId) => inst.client?.getMessageById(rawMessageId(userId, msgId)),
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
     triggerSync: (opts) => recoverSync(userId, db, opts || { force: true }),
     getInstance: () => inst,
