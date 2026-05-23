@@ -1580,15 +1580,29 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
-    // Initialize client with a timeout to prevent infinite hangs
-    const INIT_TIMEOUT_MS = 60_000; // 60s — if no QR/auth by then, something is stuck
-    let initTimedOut = false;
+    // Initialize client. For fresh accounts, initialize() can stay pending while
+    // the QR is waiting to be scanned, so never kill a live QR after 60 seconds.
+    const INIT_TIMEOUT_MS = 60_000;
     const initPromise = client.initialize();
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => { initTimedOut = true; reject(new Error('initialize() timed out after 60s')); }, INIT_TIMEOUT_MS)
+    initPromise
+      .then(() => console.log(`🔄 [${userId}] WhatsApp client initialized successfully`))
+      .catch((err) => {
+        if (generation !== inst.connectionGeneration || inst.client !== client) return;
+        console.error(`initialize error [${userId}]:`, err?.message || err);
+        inst.lastDisconnectReason = String(err?.message || err || 'initialize_error');
+        if (inst.connectionStatus !== 'qr_waiting' && inst.connectionStatus !== 'connected') {
+          inst.connectionStatus = 'reconnecting';
+          emit(userId, 'status', { status: 'reconnecting' });
+          scheduleReconnect(userId, db, generation);
+        }
+      });
+    const timeoutPromise = new Promise((resolve, reject) =>
+      setTimeout(() => {
+        if (inst.connectionStatus === 'qr_waiting' || inst.connectionStatus === 'connected') return resolve('waiting');
+        reject(new Error('initialize() timed out before QR/auth'));
+      }, INIT_TIMEOUT_MS)
     );
     await Promise.race([initPromise, timeoutPromise]);
-    console.log(`🔄 [${userId}] WhatsApp client initialized successfully`);
   } catch (err) {
     console.error(`startConnection error [${userId}]:`, err?.message || err);
     clearConnectionWatchdog(userId);
