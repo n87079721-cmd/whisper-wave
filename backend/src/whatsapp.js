@@ -35,6 +35,7 @@ function ensureMessageColumns(db) {
     const cols = db.prepare("PRAGMA table_info(messages)").all().map(c => c.name);
     if (!cols.includes('is_edited'))        db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
     if (!cols.includes('is_starred'))       db.exec("ALTER TABLE messages ADD COLUMN is_starred INTEGER DEFAULT 0");
+    if (!cols.includes('is_view_once'))     db.exec("ALTER TABLE messages ADD COLUMN is_view_once INTEGER DEFAULT 0");
     if (!cols.includes('reply_to_id'))      db.exec("ALTER TABLE messages ADD COLUMN reply_to_id TEXT");
     if (!cols.includes('reply_to_content')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_content TEXT");
     if (!cols.includes('reply_to_sender'))  db.exec("ALTER TABLE messages ADD COLUMN reply_to_sender TEXT");
@@ -1034,9 +1035,6 @@ async function startConnection(userId, db, options = {}) {
   }
 
   try {
-    const authDir = getUserAuthDir(userId);
-    if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
-
     const client = new Client({
       authStrategy: new LocalAuth({
         clientId: userId,
