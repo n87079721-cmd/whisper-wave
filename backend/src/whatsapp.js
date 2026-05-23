@@ -3688,15 +3688,15 @@ async function sendTextMessage(userId, jid, text, options = {}) {
   return sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
     if (quotedMessageId && typeof client.getMessageById === 'function') {
       try {
-        const quotedMessage = await client.getMessageById(quotedMessageId);
+        const quotedMessage = await client.getMessageById(rawMessageId(userId, quotedMessageId));
         if (quotedMessage) {
           return await quotedMessage.reply(text);
         }
       } catch {}
     }
 
-    if (chat) return await chat.sendMessage(text);
-    return await client.sendMessage(target, text);
+    if (chat) return await chat.sendMessage(text, { linkPreview: false });
+    return await client.sendMessage(target, text, { linkPreview: false });
   });
 }
 
