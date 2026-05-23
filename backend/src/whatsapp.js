@@ -536,7 +536,7 @@ async function editMessage(userId, db, messageId, newContent) {
 
   // Try to edit via whatsapp-web.js
   try {
-    const msg = await inst.client.getMessageById(messageId);
+    const msg = await inst.client.getMessageById(rawMessageId(userId, messageId));
     if (!msg) throw new Error('Message not found in WhatsApp');
     await msg.edit(newContent);
   } catch (err) {
