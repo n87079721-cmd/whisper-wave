@@ -57,7 +57,20 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
     setPairingCode(null);
     setPairingError(null);
     try {
-      if (status === 'disconnected') { await api.reconnect(); await new Promise(r => setTimeout(r, 2000)); }
+      // requestPairingCode only works once the WA Web page has loaded the
+      // AuthStore (i.e. it has reached qr_waiting). Kick off a connect if
+      // we're disconnected, then poll status until we're ready — up to 30s.
+      if (status === 'disconnected' || status === 'reconnecting') {
+        try { await api.reconnect(); } catch {}
+      }
+      const deadline = Date.now() + 30_000;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const s = await api.getStatus().catch(() => null);
+        if (s?.status === 'qr_waiting' || s?.status === 'connected') break;
+        if (Date.now() > deadline) break;
+        await new Promise(r => setTimeout(r, 1500));
+      }
       const result = await api.pairPhone(phoneNumber.trim());
       const nextCode = String(result?.code || '').trim();
       if (nextCode) {
