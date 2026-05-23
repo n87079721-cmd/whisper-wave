@@ -479,6 +479,7 @@ function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, di
   // Ensure columns exist — cache the result so we don't run PRAGMA + 5x
   // conditional ALTER TABLEs on every single incoming message.
   ensureMessageColumns(db);
+  const scopedId = String(id || uuid()).includes(':') ? String(id || uuid()) : `${userId}:${id || uuid()}`;
 
   db.prepare(`
     INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once, is_edited, reply_to_id, reply_to_content, reply_to_sender)
@@ -506,7 +507,7 @@ function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, di
       reply_to_id = COALESCE(excluded.reply_to_id, messages.reply_to_id),
       reply_to_content = COALESCE(excluded.reply_to_content, messages.reply_to_content),
       reply_to_sender = COALESCE(excluded.reply_to_sender, messages.reply_to_sender)
-  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0, isEdited ? 1 : 0, replyToId || null, replyToContent || null, replyToSender || null);
+  `).run(scopedId, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0, isEdited ? 1 : 0, replyToId || null, replyToContent || null, replyToSender || null);
 }
 
 async function editMessage(userId, db, messageId, newContent) {
