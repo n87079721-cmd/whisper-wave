@@ -308,7 +308,7 @@ async function sendToResolvedTarget(userId, jid, executor) {
     throw new Error('WhatsApp not connected');
   }
 
-  const targets = await resolveSendTargets(inst.client, jid);
+  const targets = new Set(await resolveSendTargets(inst.client, jid));
 
   // If jid is @lid, also try the phone number from contacts DB
   if (jid.endsWith('@lid')) {
@@ -318,24 +318,26 @@ async function sendToResolvedTarget(userId, jid, executor) {
       if (contact?.phone) {
         const digits = contact.phone.replace(/[^0-9]/g, '');
         if (digits.length >= 7) {
-          targets.push(`${digits}@c.us`);
+          targets.add(`${digits}@c.us`);
           try {
             const numberId = await inst.client.getNumberId(digits);
             const serialized = numberId?._serialized || numberId?.id?._serialized || (typeof numberId === 'string' ? numberId : null);
-            if (serialized) targets.push(serialized);
+            if (serialized) targets.add(serialized);
           } catch {}
         }
       }
     } catch {}
   }
 
-  if (targets.length === 0) {
+  const targetList = Array.from(targets).filter(Boolean);
+
+  if (targetList.length === 0) {
     throw new Error('No valid WhatsApp target found');
   }
 
   let lastError = null;
 
-  for (const target of targets) {
+  for (const target of targetList) {
     try {
       const chat = await inst.client.getChatById(target);
       return await executor({ client: inst.client, target, chat });
