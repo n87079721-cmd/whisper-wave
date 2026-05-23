@@ -1489,7 +1489,7 @@ async function startConnection(userId, db, options = {}) {
     // ── Message edit events ──
     client.on('message_edit', async (msg, newBody, prevBody) => {
       try {
-        const msgId = msg.id?._serialized || msg.id?.id;
+        const msgId = scopeMessageId(userId, msg.id?._serialized || msg.id?.id);
         if (!msgId) return;
         const existing = db.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(msgId, userId);
         if (existing) {
@@ -1507,7 +1507,7 @@ async function startConnection(userId, db, options = {}) {
       try {
         if (generation !== inst.connectionGeneration) return;
         if (!msg.fromMe) return; // Only track acks for messages we sent
-        const msgId = msg.id?._serialized || msg.id?.id;
+        const msgId = scopeMessageId(userId, msg.id?._serialized || msg.id?.id);
         if (!msgId) return;
 
         // ACK levels: -1=error, 0=pending, 1=sent, 2=delivered, 3=read, 4=played
@@ -1527,7 +1527,7 @@ async function startConnection(userId, db, options = {}) {
     client.on('message_reaction', async (reaction) => {
       try {
         if (generation !== inst.connectionGeneration) return;
-        const msgId = reaction.msgId?._serialized || reaction.msgId?.id;
+        const msgId = scopeMessageId(userId, reaction.msgId?._serialized || reaction.msgId?.id);
         if (!msgId) return;
         const senderJid = toJid(reaction.senderId || reaction.id?.participant || '');
         const emoji = reaction.reaction || '';
