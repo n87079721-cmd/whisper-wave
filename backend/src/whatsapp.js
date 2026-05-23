@@ -479,7 +479,7 @@ function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, di
   // Ensure columns exist — cache the result so we don't run PRAGMA + 5x
   // conditional ALTER TABLEs on every single incoming message.
   ensureMessageColumns(db);
-  const scopedId = String(id || uuid()).includes(':') ? String(id || uuid()) : `${userId}:${id || uuid()}`;
+  const scopedId = scopeMessageId(userId, id);
 
   db.prepare(`
     INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once, is_edited, reply_to_id, reply_to_content, reply_to_sender)
