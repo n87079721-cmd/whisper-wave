@@ -1290,7 +1290,7 @@ async function startConnection(userId, db, options = {}) {
         // Determine message type and content
         const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
         const direction = isFromMe ? 'sent' : 'received';
-        const msgId = msg.id?._serialized || msg.id?.id || uuid();
+        const msgId = scopeMessageId(userId, msg.id?._serialized || msg.id?.id || uuid());
         const isViewOnce = !!(msg.isViewOnce || msg._data?.isViewOnce);
 
         let mediaPath = null;
@@ -4111,7 +4111,7 @@ export async function deleteMessageForEveryone(userId, db, messageId) {
       let waMsg = null;
       if (typeof inst.client.getMessageById === 'function') {
         try {
-          waMsg = await inst.client.getMessageById(messageId);
+          waMsg = await inst.client.getMessageById(rawMessageId(userId, messageId));
         } catch {}
       }
 
@@ -4119,7 +4119,8 @@ export async function deleteMessageForEveryone(userId, db, messageId) {
         const chatId = fromJid(msg.jid);
         const chat = await inst.client.getChatById(chatId);
         const messages = await chat.fetchMessages({ limit: 200 });
-        waMsg = messages.find(m => (m.id?._serialized === messageId || m.id?.id === messageId));
+        const waMessageId = rawMessageId(userId, messageId);
+        waMsg = messages.find(m => (m.id?._serialized === waMessageId || m.id?.id === waMessageId));
       }
 
       if (waMsg) {
