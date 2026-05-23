@@ -250,7 +250,12 @@ export function createApiRouter(db) {
 
   function getSentMessageId(sendResult, userId) {
     const rawId = String(sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id || uuid());
-    return rawId.includes(':') ? rawId : `${userId}:${rawId}`;
+    return rawId.startsWith(`${userId}:`) ? rawId : `${userId}:${rawId}`;
+  }
+
+  function rawMessageId(userId, id) {
+    const raw = String(id || '');
+    return raw.startsWith(`${userId}:`) ? raw.slice(`${userId}:`.length) : raw;
   }
 
   function detectOutgoingMessageType(mimeType, forceDocument = false) {
