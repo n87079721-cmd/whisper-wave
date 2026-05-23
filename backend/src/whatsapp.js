@@ -339,6 +339,19 @@ async function sendToResolvedTarget(userId, jid, executor) {
 
   for (const target of targetList) {
     try {
+      if (typeof inst.client.getNumberId === 'function' && /@c\.us$/.test(target)) {
+        const digits = phoneFromJid(toJid(target)).replace(/[^0-9]/g, '');
+        const numberId = digits ? await inst.client.getNumberId(digits) : null;
+        if (!numberId) {
+          lastError = new Error('WhatsApp number is not registered');
+          continue;
+        }
+      }
+    } catch (err) {
+      lastError = err;
+    }
+
+    try {
       const chat = await inst.client.getChatById(target);
       return await executor({ client: inst.client, target, chat });
     } catch (err) {
