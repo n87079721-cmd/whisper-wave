@@ -1740,7 +1740,7 @@ export async function streamMediaForMessage(userId, messageId) {
   }
 
   try {
-    const msg = await inst.client.getMessageById(messageId);
+    const msg = await inst.client.getMessageById(rawMessageId(userId, messageId));
     if (!msg) throw new Error('Message not found in WhatsApp');
     if (!msg.hasMedia) throw new Error('Message has no media');
 
