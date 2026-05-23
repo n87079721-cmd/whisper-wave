@@ -237,6 +237,9 @@ function ensureCurrentTables(db) {
     if (!cols.has('is_hidden')) {
       db.exec("ALTER TABLE contacts ADD COLUMN is_hidden INTEGER DEFAULT 0");
     }
+    if (!cols.has('has_chat')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN has_chat INTEGER DEFAULT 0");
+    }
   } catch {}
 
   try {

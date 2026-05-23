@@ -35,6 +35,7 @@ function ensureMessageColumns(db) {
     const cols = db.prepare("PRAGMA table_info(messages)").all().map(c => c.name);
     if (!cols.includes('is_edited'))        db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
     if (!cols.includes('is_starred'))       db.exec("ALTER TABLE messages ADD COLUMN is_starred INTEGER DEFAULT 0");
+    if (!cols.includes('is_view_once'))     db.exec("ALTER TABLE messages ADD COLUMN is_view_once INTEGER DEFAULT 0");
     if (!cols.includes('reply_to_id'))      db.exec("ALTER TABLE messages ADD COLUMN reply_to_id TEXT");
     if (!cols.includes('reply_to_content')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_content TEXT");
     if (!cols.includes('reply_to_sender'))  db.exec("ALTER TABLE messages ADD COLUMN reply_to_sender TEXT");
@@ -308,7 +309,7 @@ async function sendToResolvedTarget(userId, jid, executor) {
     throw new Error('WhatsApp not connected');
   }
 
-  const targets = await resolveSendTargets(inst.client, jid);
+  const targets = new Set(await resolveSendTargets(inst.client, jid));
 
   // If jid is @lid, also try the phone number from contacts DB
   if (jid.endsWith('@lid')) {
@@ -318,24 +319,39 @@ async function sendToResolvedTarget(userId, jid, executor) {
       if (contact?.phone) {
         const digits = contact.phone.replace(/[^0-9]/g, '');
         if (digits.length >= 7) {
-          targets.push(`${digits}@c.us`);
+          targets.add(`${digits}@c.us`);
           try {
             const numberId = await inst.client.getNumberId(digits);
             const serialized = numberId?._serialized || numberId?.id?._serialized || (typeof numberId === 'string' ? numberId : null);
-            if (serialized) targets.push(serialized);
+            if (serialized) targets.add(serialized);
           } catch {}
         }
       }
     } catch {}
   }
 
-  if (targets.length === 0) {
+  const targetList = Array.from(targets).filter(Boolean);
+
+  if (targetList.length === 0) {
     throw new Error('No valid WhatsApp target found');
   }
 
   let lastError = null;
 
-  for (const target of targets) {
+  for (const target of targetList) {
+    try {
+      if (typeof inst.client.getNumberId === 'function' && /@c\.us$/.test(target)) {
+        const digits = phoneFromJid(toJid(target)).replace(/[^0-9]/g, '');
+        const numberId = digits ? await inst.client.getNumberId(digits) : null;
+        if (!numberId) {
+          lastError = new Error('WhatsApp number is not registered');
+          continue;
+        }
+      }
+    } catch (err) {
+      lastError = err;
+    }
+
     try {
       const chat = await inst.client.getChatById(target);
       return await executor({ client: inst.client, target, chat });
@@ -477,6 +493,7 @@ function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, di
   // Ensure columns exist — cache the result so we don't run PRAGMA + 5x
   // conditional ALTER TABLEs on every single incoming message.
   ensureMessageColumns(db);
+  const scopedId = scopeMessageId(userId, id);
 
   db.prepare(`
     INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once, is_edited, reply_to_id, reply_to_content, reply_to_sender)
@@ -504,7 +521,7 @@ function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, di
       reply_to_id = COALESCE(excluded.reply_to_id, messages.reply_to_id),
       reply_to_content = COALESCE(excluded.reply_to_content, messages.reply_to_content),
       reply_to_sender = COALESCE(excluded.reply_to_sender, messages.reply_to_sender)
-  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0, isEdited ? 1 : 0, replyToId || null, replyToContent || null, replyToSender || null);
+  `).run(scopedId, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0, isEdited ? 1 : 0, replyToId || null, replyToContent || null, replyToSender || null);
 }
 
 async function editMessage(userId, db, messageId, newContent) {
@@ -520,7 +537,7 @@ async function editMessage(userId, db, messageId, newContent) {
 
   // Try to edit via whatsapp-web.js
   try {
-    const msg = await inst.client.getMessageById(messageId);
+    const msg = await inst.client.getMessageById(rawMessageId(userId, messageId));
     if (!msg) throw new Error('Message not found in WhatsApp');
     await msg.edit(newContent);
   } catch (err) {
@@ -535,6 +552,28 @@ async function editMessage(userId, db, messageId, newContent) {
 
 function isUuidLike(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
+}
+
+function scopeMessageId(userId, id) {
+  const raw = String(id || uuid());
+  return raw.startsWith(`${userId}:`) ? raw : `${userId}:${raw}`;
+}
+
+function rawMessageId(userId, id) {
+  const raw = String(id || '');
+  return raw.startsWith(`${userId}:`) ? raw.slice(`${userId}:`.length) : raw;
+}
+
+function resolveStoredMessageId(db, userId, id) {
+  const raw = rawMessageId(userId, id) || uuid();
+  try {
+    const rawRow = db?.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(raw, userId);
+    if (rawRow?.id) return rawRow.id;
+    const scoped = scopeMessageId(userId, raw);
+    const scopedRow = db?.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(scoped, userId);
+    if (scopedRow?.id) return scopedRow.id;
+  } catch {}
+  return scopeMessageId(userId, raw);
 }
 
 // ── Exports ──────────────────────────────────────────────
@@ -693,7 +732,7 @@ export function initWhatsApp(userId, db) {
     disconnect: () => softDisconnect(userId),
     clearSession: () => clearSession(userId, db),
     getSocket: () => getInstance(userId).client,
-    getMessageById: (msgId) => getInstance(userId).client?.getMessageById(msgId),
+    getMessageById: (msgId) => getInstance(userId).client?.getMessageById(rawMessageId(userId, msgId)),
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
     triggerSync: (opts) => recoverSync(userId, db, opts || { force: true }),
   };
@@ -725,7 +764,7 @@ export function getOrInitWhatsApp(userId, db) {
     disconnect: () => softDisconnect(userId),
     clearSession: () => clearSession(userId, db),
     getSocket: () => inst.client,
-    getMessageById: (msgId) => inst.client?.getMessageById(msgId),
+    getMessageById: (msgId) => inst.client?.getMessageById(rawMessageId(userId, msgId)),
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
     triggerSync: (opts) => recoverSync(userId, db, opts || { force: true }),
     getInstance: () => inst,
@@ -996,9 +1035,6 @@ async function startConnection(userId, db, options = {}) {
   }
 
   try {
-    const authDir = getUserAuthDir(userId);
-    if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
-
     const client = new Client({
       authStrategy: new LocalAuth({
         clientId: userId,
@@ -1253,6 +1289,7 @@ async function startConnection(userId, db, options = {}) {
 
         const contactId = getOrCreateContact(db, userId, resolvedJid, phone, candidate, isGroup);
         if (!contactId) return;
+        try { db.prepare('UPDATE contacts SET has_chat = 1 WHERE id = ? AND user_id = ?').run(contactId, userId); } catch {}
 
         // If this contact was previously hidden via "Delete conversation", a fresh live
         // message means the user is back in touch — un-hide so it reappears in the chat list.
@@ -1264,7 +1301,7 @@ async function startConnection(userId, db, options = {}) {
         // Determine message type and content
         const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
         const direction = isFromMe ? 'sent' : 'received';
-        const msgId = msg.id?._serialized || msg.id?.id || uuid();
+        const msgId = resolveStoredMessageId(db, userId, msg.id?._serialized || msg.id?.id || uuid());
         const isViewOnce = !!(msg.isViewOnce || msg._data?.isViewOnce);
 
         let mediaPath = null;
@@ -1463,7 +1500,7 @@ async function startConnection(userId, db, options = {}) {
     // ── Message edit events ──
     client.on('message_edit', async (msg, newBody, prevBody) => {
       try {
-        const msgId = msg.id?._serialized || msg.id?.id;
+        const msgId = resolveStoredMessageId(db, userId, msg.id?._serialized || msg.id?.id);
         if (!msgId) return;
         const existing = db.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(msgId, userId);
         if (existing) {
@@ -1481,7 +1518,7 @@ async function startConnection(userId, db, options = {}) {
       try {
         if (generation !== inst.connectionGeneration) return;
         if (!msg.fromMe) return; // Only track acks for messages we sent
-        const msgId = msg.id?._serialized || msg.id?.id;
+        const msgId = resolveStoredMessageId(db, userId, msg.id?._serialized || msg.id?.id);
         if (!msgId) return;
 
         // ACK levels: -1=error, 0=pending, 1=sent, 2=delivered, 3=read, 4=played
@@ -1501,7 +1538,7 @@ async function startConnection(userId, db, options = {}) {
     client.on('message_reaction', async (reaction) => {
       try {
         if (generation !== inst.connectionGeneration) return;
-        const msgId = reaction.msgId?._serialized || reaction.msgId?.id;
+        const msgId = resolveStoredMessageId(db, userId, reaction.msgId?._serialized || reaction.msgId?.id);
         if (!msgId) return;
         const senderJid = toJid(reaction.senderId || reaction.id?.participant || '');
         const emoji = reaction.reaction || '';
@@ -1554,15 +1591,30 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
-    // Initialize client with a timeout to prevent infinite hangs
-    const INIT_TIMEOUT_MS = 60_000; // 60s — if no QR/auth by then, something is stuck
-    let initTimedOut = false;
+    // Initialize client. For fresh accounts, initialize() can stay pending while
+    // the QR is waiting to be scanned, so never kill a live QR after 60 seconds.
+    const INIT_TIMEOUT_MS = 60_000;
     const initPromise = client.initialize();
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => { initTimedOut = true; reject(new Error('initialize() timed out after 60s')); }, INIT_TIMEOUT_MS)
-    );
+    initPromise
+      .then(() => console.log(`🔄 [${userId}] WhatsApp client initialized successfully`))
+      .catch((err) => {
+        if (generation !== inst.connectionGeneration || inst.client !== client) return;
+        console.error(`initialize error [${userId}]:`, err?.message || err);
+        inst.lastDisconnectReason = String(err?.message || err || 'initialize_error');
+        if (inst.connectionStatus !== 'qr_waiting' && inst.connectionStatus !== 'connected') {
+          inst.connectionStatus = 'reconnecting';
+          emit(userId, 'status', { status: 'reconnecting' });
+          scheduleReconnect(userId, db, generation);
+        }
+      });
+    const timeoutPromise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (inst.connectionStatus === 'qr_waiting' || inst.connectionStatus === 'connected') return resolve('waiting');
+        reject(new Error('initialize() timed out before QR/auth'));
+      }, INIT_TIMEOUT_MS);
+      timer.unref?.();
+    });
     await Promise.race([initPromise, timeoutPromise]);
-    console.log(`🔄 [${userId}] WhatsApp client initialized successfully`);
   } catch (err) {
     console.error(`startConnection error [${userId}]:`, err?.message || err);
     clearConnectionWatchdog(userId);
@@ -1714,7 +1766,7 @@ export async function streamMediaForMessage(userId, messageId) {
   }
 
   try {
-    const msg = await inst.client.getMessageById(messageId);
+    const msg = await inst.client.getMessageById(rawMessageId(userId, messageId));
     if (!msg) throw new Error('Message not found in WhatsApp');
     if (!msg.hasMedia) throw new Error('Message has no media');
 
@@ -1895,8 +1947,9 @@ async function syncChats(userId, db, { force = false } = {}) {
           const isGroup = chat.isGroup;
           const candidate = getNameCandidate({ name: chat.name, pushName: chat.name });
 
-          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
+          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup, new Date(((chat.timestamp || Date.now() / 1000) * 1000)).toISOString());
           if (!contactId) continue;
+          try { db.prepare('UPDATE contacts SET has_chat = 1 WHERE id = ? AND user_id = ?').run(contactId, userId); } catch {}
           contactChanges++;
 
           // Sync archive status
@@ -1924,12 +1977,15 @@ async function syncChats(userId, db, { force = false } = {}) {
 
           // Fetch recent messages for this chat
           try {
+            if ((force || existingCount === 0) && typeof inst.client.syncHistory === 'function') {
+              try { await inst.client.syncHistory(chat.id._serialized); } catch {}
+            }
             const messages = await chat.fetchMessages({ limit: MSG_LIMIT_PER_CHAT });
             for (const msg of messages) {
               try {
                 if (!msg.body && !msg.hasMedia) continue;
 
-                const msgId = msg.id?._serialized || msg.id?.id || uuid();
+                const msgId = scopeMessageId(userId, msg.id?._serialized || msg.id?.id || uuid());
 
                 // Skip if message already exists in DB
                 const exists = db.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(msgId, userId);
@@ -2067,7 +2123,7 @@ export async function recoverSingleChat(userId, db, contactId) {
       try {
         if (!msg.body && !msg.hasMedia) continue;
         const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
-        const msgId = msg.id?._serialized || msg.id?.id || uuid();
+        const msgId = scopeMessageId(userId, msg.id?._serialized || msg.id?.id || uuid());
 
         let mediaPath = null;
         let resolvedMediaName = mediaName;
@@ -3675,15 +3731,15 @@ async function sendTextMessage(userId, jid, text, options = {}) {
   return sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
     if (quotedMessageId && typeof client.getMessageById === 'function') {
       try {
-        const quotedMessage = await client.getMessageById(quotedMessageId);
+        const quotedMessage = await client.getMessageById(rawMessageId(userId, quotedMessageId));
         if (quotedMessage) {
           return await quotedMessage.reply(text);
         }
       } catch {}
     }
 
-    if (chat) return await chat.sendMessage(text);
-    return await client.sendMessage(target, text);
+    if (chat) return await chat.sendMessage(text, { linkPreview: false });
+    return await client.sendMessage(target, text, { linkPreview: false });
   });
 }
 
@@ -4074,7 +4130,7 @@ export async function deleteMessageForEveryone(userId, db, messageId) {
       let waMsg = null;
       if (typeof inst.client.getMessageById === 'function') {
         try {
-          waMsg = await inst.client.getMessageById(messageId);
+          waMsg = await inst.client.getMessageById(rawMessageId(userId, messageId));
         } catch {}
       }
 
@@ -4082,7 +4138,8 @@ export async function deleteMessageForEveryone(userId, db, messageId) {
         const chatId = fromJid(msg.jid);
         const chat = await inst.client.getChatById(chatId);
         const messages = await chat.fetchMessages({ limit: 200 });
-        waMsg = messages.find(m => (m.id?._serialized === messageId || m.id?.id === messageId));
+        const waMessageId = rawMessageId(userId, messageId);
+        waMsg = messages.find(m => (m.id?._serialized === waMessageId || m.id?.id === waMessageId));
       }
 
       if (waMsg) {
@@ -4410,7 +4467,7 @@ export function startConversationStarterLoop(userId, db) {
           if (inst.connectionStatus !== 'connected') break;
 
           const sent = await sendTextMessage(userId, contact.jid, starter);
-          const msgId = sent?.id?._serialized || uuid();
+          const msgId = scopeMessageId(userId, sent?.id?._serialized || uuid());
 
           db.prepare(`
             INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)

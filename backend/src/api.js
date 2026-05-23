@@ -157,6 +157,10 @@ export function createApiRouter(db) {
     return raw;
   }
 
+  function fromJid(jid) {
+    return String(jid || '').replace(/@s\.whatsapp\.net$/, '@c.us');
+  }
+
   function detectMimeTypeFromFilename(filename) {
     const ext = path.extname(filename || '').toLowerCase();
     const mimeMap = {
@@ -248,8 +252,14 @@ export function createApiRouter(db) {
     }
   }
 
-  function getSentMessageId(sendResult) {
-    return sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id || uuid();
+  function getSentMessageId(sendResult, userId) {
+    const rawId = String(sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id || uuid());
+    return rawId.startsWith(`${userId}:`) ? rawId : `${userId}:${rawId}`;
+  }
+
+  function rawMessageId(userId, id) {
+    const raw = String(id || '');
+    return raw.startsWith(`${userId}:`) ? raw.slice(`${userId}:`.length) : raw;
   }
 
   function detectOutgoingMessageType(mimeType, forceDocument = false) {
@@ -457,12 +467,15 @@ export function createApiRouter(db) {
         const newId = uuid();
         const phone = normalizedPhone || (targetJid.endsWith('@lid') ? null : '+' + targetJid.replace(/@.*$/, ''));
         db.prepare(`
-          INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, 0)
+          INSERT INTO contacts (id, user_id, jid, name, phone, is_group, has_chat) VALUES (?, ?, ?, ?, ?, 0, 1)
         `).run(newId, userId, targetJid, phone || 'WhatsApp contact', phone);
         contactRow = { id: newId, jid: targetJid, phone };
+      } else {
+        try { db.prepare('UPDATE contacts SET has_chat = 1, is_hidden = 0 WHERE id = ? AND user_id = ?').run(contactRow.id, userId); } catch {}
       }
     }
 
+    try { db.prepare('UPDATE contacts SET has_chat = 1, is_hidden = 0 WHERE id = ? AND user_id = ?').run(contactRow.id, userId); } catch {}
     return { contactRow, targetJid };
   }
 
@@ -511,6 +524,11 @@ export function createApiRouter(db) {
     const wa = getWA(req);
     const state = wa.getState();
     send('status', { status: state.status });
+    if (state.qr) {
+      QRCode.toDataURL(state.qr, { width: 256, margin: 1 }).then(qrUrl => {
+        send('qr', { qr: qrUrl });
+      }).catch(() => {});
+    }
 
     const unsub = onWhatsAppEvent(req.userId, (event, data) => {
       if (event === 'qr') {
@@ -924,9 +942,10 @@ RULES:
       SELECT c.*, rm.content as last_message, rm.type as last_type, rm.timestamp as last_timestamp,
              COALESCE(c.is_archived, 0) as is_archived, COALESCE(c.unread_count, 0) as unread_count
       FROM contacts c
-      INNER JOIN ranked_messages rm ON rm.contact_id = c.id AND rm.rn = 1
+      LEFT JOIN ranked_messages rm ON rm.contact_id = c.id AND rm.rn = 1
       WHERE c.user_id = ? AND c.is_group = 0 AND COALESCE(c.is_hidden, 0) = 0
-      ORDER BY rm.timestamp DESC
+        AND (COALESCE(c.has_chat, 1) = 1 OR rm.id IS NOT NULL)
+      ORDER BY COALESCE(rm.timestamp, c.updated_at) DESC
     `).all(req.userId, req.userId);
     res.json(conversations);
   });
@@ -1003,7 +1022,8 @@ RULES:
       const inst = wa.getInstance();
       const chat = await inst.client.getChatById(chatId);
       const waMessages = await chat.fetchMessages({ limit: 50 });
-      const waMsg = waMessages.find(m => (m.id?._serialized || m.id?.id) === req.params.messageId);
+      const waId = rawMessageId(req.userId, req.params.messageId);
+      const waMsg = waMessages.find(m => (m.id?._serialized || m.id?.id) === waId);
       if (!waMsg) return res.status(404).json({ error: 'WhatsApp message not found in recent history' });
 
       await waMsg.react(emoji);
@@ -1053,7 +1073,7 @@ RULES:
 
       let sendResult;
       sendResult = await wa.sendTextMessage(targetJid, message, { quotedMessageId });
-      const msgId = getSentMessageId(sendResult);
+      const msgId = getSentMessageId(sendResult, req.userId);
 
       // Get quoted message info for DB
       let replyToId = null, replyToContent = null, replyToSender = null;
@@ -1082,6 +1102,7 @@ RULES:
           status = excluded.status
       `).run(msgId, req.userId, contactRow.id, targetJid, message, new Date().toISOString(), replyToId, replyToContent, replyToSender);
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
+      wa.getInstance?.().eventListeners?.forEach?.(listener => listener('message', { contactId: contactRow.id, msgId }));
 
       // Build memory from outbound text too (so info you share manually gets captured).
       try {
@@ -1153,7 +1174,7 @@ RULES:
         }
       }
 
-      const msgId = getSentMessageId(sendResult);
+      const msgId = getSentMessageId(sendResult, req.userId);
       db.prepare(`
         INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
         VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, 'sent', ?, ?, ?)
@@ -1201,7 +1222,7 @@ RULES:
         isViewOnce: !!isViewOnce,
       });
 
-      const msgId = getSentMessageId(sendResult);
+      const msgId = getSentMessageId(sendResult, req.userId);
       const savedMedia = persistOutgoingMedia(msgId, normalizedBase64, mimeType, fileName);
 
       db.prepare(`
@@ -1305,7 +1326,7 @@ RULES:
       const audioBuffer = await generateVoiceNote(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
 
       const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
-      const msgId = getSentMessageId(sendResult);
+      const msgId = getSentMessageId(sendResult, req.userId);
       const savedVoice = persistOutgoingVoiceNote(msgId, audioBuffer);
 
       db.prepare(`
@@ -1354,7 +1375,7 @@ RULES:
       const audioBuffer = normalizeRecordedVoiceAudio(rawAudioBuffer, mimeType || 'audio/webm');
 
       const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
-      const msgId = getSentMessageId(sendResult);
+      const msgId = getSentMessageId(sendResult, req.userId);
 
       // Don't persist to disk - use wa: reference
       const mediaRef = `wa:${msgId}`;
@@ -1980,7 +2001,7 @@ RULES:
         sendResult = await wa.sendTextMessage(senderJid, message);
       }
 
-      const msgId = getSentMessageId(sendResult);
+      const msgId = getSentMessageId(sendResult, req.userId);
 
       // Save as a regular message so it appears in the chat
       const { contactRow } = resolveOutgoingTarget(req.userId, { jid: senderJid });

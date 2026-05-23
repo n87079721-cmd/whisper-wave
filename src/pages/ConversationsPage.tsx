@@ -680,9 +680,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         || refreshedConversations.find(c => c.id === activeContactId)
         || null;
 
-      if (selectedContactRef.current?.id === activeContactId && nextContact) {
-        setSelectedContact(nextContact);
-        await refreshMessages(nextContact.id, { forceScroll: true });
+      const sentContactId = res.contactId || activeContactId;
+      if (selectedContactRef.current?.id === activeContactId && sentContactId) {
+        if (nextContact) setSelectedContact(nextContact);
+        else if (res.contactId && activeContactId.startsWith('temp-')) {
+          setSelectedContact({ ...activeContact, id: res.contactId, last_message: trimmedReply, last_timestamp: new Date().toISOString() });
+        }
+        await refreshMessages(sentContactId, { forceScroll: true });
       }
 
       scrollMessagesToBottom('smooth');
