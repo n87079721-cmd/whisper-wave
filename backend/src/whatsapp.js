@@ -947,7 +947,10 @@ export function autoReconnectAll(db) {
       .filter((user) => hasSavedSession(user.id));
 
     usersWithSessions.forEach((user, index) => {
-      const delayMs = index * 12000;
+      // Stagger reconnects so multiple Chromium instances don't fight for
+      // CPU/disk on boot, but keep it short — 12s/user meant the 3rd user
+      // sat on "Reconnect now" for 30+ seconds after every restart.
+      const delayMs = index * 4000;
       console.log(`🔄 Queued auto-reconnect for ${user.username} (${user.id}) in ${Math.round(delayMs / 1000)}s`);
       setTimeout(() => {
         const inst = getInstance(user.id);
