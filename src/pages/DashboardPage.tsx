@@ -73,13 +73,9 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
       }
       const result = await api.pairPhone(phoneNumber.trim());
       const nextCode = String(result?.code || '').trim();
-      if (nextCode) {
-        setPairingCode(nextCode);
-        toast.success('Pairing code generated!');
-      } else {
-        await refresh();
-        toast.success('Pairing request sent — waiting for code...');
-      }
+      if (!nextCode) throw new Error('No pairing code was generated. Try again in a few seconds.');
+      setPairingCode(nextCode);
+      toast.success('Pairing code generated!');
     } catch (err: any) {
       const message = err?.message || 'Phone pairing failed';
       if (message.includes('temporarily unavailable')) {
