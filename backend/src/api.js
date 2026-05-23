@@ -471,6 +471,7 @@ export function createApiRouter(db) {
       }
     }
 
+    try { db.prepare('UPDATE contacts SET has_chat = 1, is_hidden = 0 WHERE id = ? AND user_id = ?').run(contactRow.id, userId); } catch {}
     return { contactRow, targetJid };
   }
 
