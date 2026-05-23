@@ -524,6 +524,11 @@ export function createApiRouter(db) {
     const wa = getWA(req);
     const state = wa.getState();
     send('status', { status: state.status });
+    if (state.qr) {
+      QRCode.toDataURL(state.qr, { width: 256, margin: 1 }).then(qrUrl => {
+        send('qr', { qr: qrUrl });
+      }).catch(() => {});
+    }
 
     const unsub = onWhatsAppEvent(req.userId, (event, data) => {
       if (event === 'qr') {
@@ -1097,6 +1102,7 @@ RULES:
           status = excluded.status
       `).run(msgId, req.userId, contactRow.id, targetJid, message, new Date().toISOString(), replyToId, replyToContent, replyToSender);
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
+      wa.getInstance?.().eventListeners?.forEach?.(listener => listener('message', { contactId: contactRow.id, msgId }));
 
       // Build memory from outbound text too (so info you share manually gets captured).
       try {
