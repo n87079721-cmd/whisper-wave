@@ -2121,7 +2121,45 @@ export async function recoverSingleChat(userId, db, contactId) {
 
   try {
     const chat = await inst.client.getChatById(chatId);
-    const messages = await chat.fetchMessages({ limit: 100 });
+
+    // whatsapp-web.js' fetchMessages occasionally throws
+    // "Cannot read properties of undefined (reading 'waitForChatLoading')"
+    // when the WA Web Store hasn't fully hydrated this chat yet (common on
+    // brand-new chats, LID-only contacts, or right after pairing). Nudge the
+    // store, then retry a couple of times before giving up.
+    async function fetchWithRetry() {
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await chat.fetchMessages({ limit: 100 });
+        } catch (err) {
+          lastErr = err;
+          const msg = String(err?.message || '');
+          if (!/waitForChatLoading|undefined/.test(msg)) throw err;
+          // Try to coax the Store into loading the chat
+          try { await inst.client.pupPage?.evaluate?.((id) => {
+            // eslint-disable-next-line no-undef
+            return window.Store?.Chat?.find?.(id);
+          }, chatId); } catch {}
+          await new Promise(r => setTimeout(r, 800));
+        }
+      }
+      throw lastErr;
+    }
+
+    let messages = [];
+    try {
+      messages = await fetchWithRetry();
+    } catch (err) {
+      const msg = String(err?.message || '');
+      if (/waitForChatLoading|undefined/.test(msg)) {
+        // Treat as "no history available yet" instead of a hard error so the
+        // UI doesn't surface a scary stack trace for empty/new chats.
+        emit(userId, 'history_sync', { chats: 1, messages: 0 });
+        return { success: true, message: 'No history available for this chat yet.' };
+      }
+      throw err;
+    }
 
     let count = 0;
     for (const msg of messages) {
@@ -2166,7 +2204,11 @@ export async function recoverSingleChat(userId, db, contactId) {
     emit(userId, 'history_sync', { chats: 1, messages: count });
     return { success: true, message: `Recovered ${count} messages for this chat.` };
   } catch (err) {
-    return { success: false, message: `Failed to recover chat: ${err?.message}` };
+    const raw = String(err?.message || err);
+    const friendly = /waitForChatLoading|undefined/.test(raw)
+      ? 'No history available for this chat yet. Try again in a few seconds.'
+      : raw;
+    return { success: false, message: `Failed to recover chat: ${friendly}` };
   }
 }
 
