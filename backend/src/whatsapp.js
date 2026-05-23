@@ -1977,6 +1977,9 @@ async function syncChats(userId, db, { force = false } = {}) {
 
           // Fetch recent messages for this chat
           try {
+            if ((force || existingCount === 0) && typeof inst.client.syncHistory === 'function') {
+              try { await inst.client.syncHistory(chat.id._serialized); } catch {}
+            }
             const messages = await chat.fetchMessages({ limit: MSG_LIMIT_PER_CHAT });
             for (const msg of messages) {
               try {
