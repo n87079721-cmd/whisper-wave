@@ -687,6 +687,22 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
   if (cleaned.length < 8) throw new Error('Invalid phone number');
   inst.pendingPairingPhone = cleaned;
 
+  // Wait for the WA Web page to actually reach the QR screen before asking
+  // for a pairing code. requestPairingCode() requires window.AuthStore to be
+  // loaded — calling it too early throws an empty/garbage error and the user
+  // sees "no code generated".
+  {
+    const deadline = Date.now() + 25_000;
+    while (inst.connectionStatus !== 'qr_waiting' && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 500));
+      if (!inst.client) throw new Error('WhatsApp client not initialised');
+      if (inst.connectionStatus === 'connected') throw new Error('Already connected');
+    }
+    if (inst.connectionStatus !== 'qr_waiting') {
+      throw new Error('WhatsApp is still starting up. Wait a few seconds and try again.');
+    }
+  }
+
   // Ensure the browser-side onCodeReceivedEvent function exists.
   // When the client was initialized in QR mode (no pairWithPhoneNumber option),
   // this function is never exposed, causing requestPairingCode() to crash.
