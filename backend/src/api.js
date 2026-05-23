@@ -1009,7 +1009,8 @@ RULES:
       const inst = wa.getInstance();
       const chat = await inst.client.getChatById(chatId);
       const waMessages = await chat.fetchMessages({ limit: 50 });
-      const waMsg = waMessages.find(m => (m.id?._serialized || m.id?.id) === req.params.messageId);
+      const waId = rawMessageId(req.userId, req.params.messageId);
+      const waMsg = waMessages.find(m => (m.id?._serialized || m.id?.id) === waId);
       if (!waMsg) return res.status(404).json({ error: 'WhatsApp message not found in recent history' });
 
       await waMsg.react(emoji);
