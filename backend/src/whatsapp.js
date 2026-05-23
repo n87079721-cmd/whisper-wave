@@ -1966,7 +1966,7 @@ async function syncChats(userId, db, { force = false } = {}) {
               try {
                 if (!msg.body && !msg.hasMedia) continue;
 
-                const msgId = msg.id?._serialized || msg.id?.id || uuid();
+                const msgId = scopeMessageId(userId, msg.id?._serialized || msg.id?.id || uuid());
 
                 // Skip if message already exists in DB
                 const exists = db.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(msgId, userId);
@@ -2104,7 +2104,7 @@ export async function recoverSingleChat(userId, db, contactId) {
       try {
         if (!msg.body && !msg.hasMedia) continue;
         const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
-        const msgId = msg.id?._serialized || msg.id?.id || uuid();
+        const msgId = scopeMessageId(userId, msg.id?._serialized || msg.id?.id || uuid());
 
         let mediaPath = null;
         let resolvedMediaName = mediaName;
@@ -4448,7 +4448,7 @@ export function startConversationStarterLoop(userId, db) {
           if (inst.connectionStatus !== 'connected') break;
 
           const sent = await sendTextMessage(userId, contact.jid, starter);
-          const msgId = sent?.id?._serialized || uuid();
+          const msgId = scopeMessageId(userId, sent?.id?._serialized || uuid());
 
           db.prepare(`
             INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
