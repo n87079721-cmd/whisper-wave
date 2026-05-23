@@ -248,8 +248,9 @@ export function createApiRouter(db) {
     }
   }
 
-  function getSentMessageId(sendResult) {
-    return sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id || uuid();
+  function getSentMessageId(sendResult, userId) {
+    const rawId = String(sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id || uuid());
+    return rawId.includes(':') ? rawId : `${userId}:${rawId}`;
   }
 
   function detectOutgoingMessageType(mimeType, forceDocument = false) {
@@ -1053,7 +1054,7 @@ RULES:
 
       let sendResult;
       sendResult = await wa.sendTextMessage(targetJid, message, { quotedMessageId });
-      const msgId = getSentMessageId(sendResult);
+      const msgId = getSentMessageId(sendResult, req.userId);
 
       // Get quoted message info for DB
       let replyToId = null, replyToContent = null, replyToSender = null;
@@ -1153,7 +1154,7 @@ RULES:
         }
       }
 
-      const msgId = getSentMessageId(sendResult);
+      const msgId = getSentMessageId(sendResult, req.userId);
       db.prepare(`
         INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
         VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, 'sent', ?, ?, ?)
@@ -1201,7 +1202,7 @@ RULES:
         isViewOnce: !!isViewOnce,
       });
 
-      const msgId = getSentMessageId(sendResult);
+      const msgId = getSentMessageId(sendResult, req.userId);
       const savedMedia = persistOutgoingMedia(msgId, normalizedBase64, mimeType, fileName);
 
       db.prepare(`
@@ -1305,7 +1306,7 @@ RULES:
       const audioBuffer = await generateVoiceNote(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
 
       const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
-      const msgId = getSentMessageId(sendResult);
+      const msgId = getSentMessageId(sendResult, req.userId);
       const savedVoice = persistOutgoingVoiceNote(msgId, audioBuffer);
 
       db.prepare(`
@@ -1354,7 +1355,7 @@ RULES:
       const audioBuffer = normalizeRecordedVoiceAudio(rawAudioBuffer, mimeType || 'audio/webm');
 
       const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
-      const msgId = getSentMessageId(sendResult);
+      const msgId = getSentMessageId(sendResult, req.userId);
 
       // Don't persist to disk - use wa: reference
       const mediaRef = `wa:${msgId}`;
@@ -1980,7 +1981,7 @@ RULES:
         sendResult = await wa.sendTextMessage(senderJid, message);
       }
 
-      const msgId = getSentMessageId(sendResult);
+      const msgId = getSentMessageId(sendResult, req.userId);
 
       // Save as a regular message so it appears in the chat
       const { contactRow } = resolveOutgoingTarget(req.userId, { jid: senderJid });
