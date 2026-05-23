@@ -563,6 +563,18 @@ function rawMessageId(userId, id) {
   return raw.startsWith(`${userId}:`) ? raw.slice(`${userId}:`.length) : raw;
 }
 
+function resolveStoredMessageId(db, userId, id) {
+  const raw = rawMessageId(userId, id) || uuid();
+  try {
+    const rawRow = db?.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(raw, userId);
+    if (rawRow?.id) return rawRow.id;
+    const scoped = scopeMessageId(userId, raw);
+    const scopedRow = db?.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(scoped, userId);
+    if (scopedRow?.id) return scopedRow.id;
+  } catch {}
+  return scopeMessageId(userId, raw);
+}
+
 // ── Exports ──────────────────────────────────────────────
 
 export function cancelAllPendingReplies(userId) {
