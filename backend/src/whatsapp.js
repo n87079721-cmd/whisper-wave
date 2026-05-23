@@ -1902,17 +1902,6 @@ async function syncChats(userId, db, { force = false } = {}) {
 
   try {
     const chats = await inst.client.getChats();
-    const allContacts = await inst.client.getContacts().catch(() => []);
-    const existingChatIds = new Set(chats.map(chat => toJid(chat?.id?._serialized || '')).filter(Boolean));
-    const contactOnlyChats = allContacts
-      .filter(c => c?.id?._serialized)
-      .filter(c => !c.isMe && !c.isUser && !c.isWAContact ? false : true)
-      .filter(c => {
-        const jid = toJid(c.id._serialized);
-        return jid && jid !== 'status@broadcast' && !existingChatIds.has(jid);
-      })
-      .map(c => ({ id: c.id, name: c.name || c.pushname || c.shortName || null, timestamp: 0, isGroup: c.isGroup || toJid(c.id._serialized).endsWith('@g.us'), archived: false, unreadCount: 0, __contactOnly: true }));
-    if (contactOnlyChats.length) chats.push(...contactOnlyChats);
     console.log(`📇 [${userId}] Found ${chats.length} chats`);
     updateSyncState(userId, db, {
       phase: 'importing',
