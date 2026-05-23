@@ -1937,9 +1937,9 @@ async function syncChats(userId, db, { force = false } = {}) {
           const isGroup = chat.isGroup;
           const candidate = getNameCandidate({ name: chat.name, pushName: chat.name });
 
-          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup, chat.__contactOnly ? null : new Date(((chat.timestamp || Date.now() / 1000) * 1000)).toISOString());
+          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup, new Date(((chat.timestamp || Date.now() / 1000) * 1000)).toISOString());
           if (!contactId) continue;
-          try { db.prepare('UPDATE contacts SET has_chat = ? WHERE id = ? AND user_id = ?').run(chat.__contactOnly ? 0 : 1, contactId, userId); } catch {}
+          try { db.prepare('UPDATE contacts SET has_chat = 1 WHERE id = ? AND user_id = ?').run(contactId, userId); } catch {}
           contactChanges++;
 
           // Sync archive status
