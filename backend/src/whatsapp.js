@@ -1597,12 +1597,13 @@ async function startConnection(userId, db, options = {}) {
           scheduleReconnect(userId, db, generation);
         }
       });
-    const timeoutPromise = new Promise((resolve, reject) =>
-      setTimeout(() => {
+    const timeoutPromise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
         if (inst.connectionStatus === 'qr_waiting' || inst.connectionStatus === 'connected') return resolve('waiting');
         reject(new Error('initialize() timed out before QR/auth'));
-      }, INIT_TIMEOUT_MS)
-    );
+      }, INIT_TIMEOUT_MS);
+      timer.unref?.();
+    });
     await Promise.race([initPromise, timeoutPromise]);
   } catch (err) {
     console.error(`startConnection error [${userId}]:`, err?.message || err);
