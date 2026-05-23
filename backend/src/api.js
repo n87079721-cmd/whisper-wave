@@ -463,9 +463,11 @@ export function createApiRouter(db) {
         const newId = uuid();
         const phone = normalizedPhone || (targetJid.endsWith('@lid') ? null : '+' + targetJid.replace(/@.*$/, ''));
         db.prepare(`
-          INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, 0)
+          INSERT INTO contacts (id, user_id, jid, name, phone, is_group, has_chat) VALUES (?, ?, ?, ?, ?, 0, 1)
         `).run(newId, userId, targetJid, phone || 'WhatsApp contact', phone);
         contactRow = { id: newId, jid: targetJid, phone };
+      } else {
+        try { db.prepare('UPDATE contacts SET has_chat = 1, is_hidden = 0 WHERE id = ? AND user_id = ?').run(contactRow.id, userId); } catch {}
       }
     }
 
