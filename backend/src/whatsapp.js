@@ -3837,11 +3837,18 @@ async function sendMediaMessage(userId, jid, payload) {
 }
 
 async function sendVoiceNote(userId, jid, audioBuffer) {
+  const voiceBuffer = Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer || []);
+  if (voiceBuffer.length < 200) {
+    throw new Error('Voice note audio is empty or corrupted');
+  }
+  const base64Audio = voiceBuffer.toString('base64');
+
   try {
     const result = await sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
-      const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
-      if (chat) return await chat.sendMessage(media, { sendAudioAsVoice: true });
-      return await client.sendMessage(target, media, { sendAudioAsVoice: true });
+      const media = new MessageMedia('audio/ogg; codecs=opus', base64Audio, 'voice.ogg');
+      const options = { sendAudioAsVoice: true, waitUntilMsgSent: true };
+      if (chat) return await chat.sendMessage(media, options);
+      return await client.sendMessage(target, media, options);
     });
     console.log(`🎤 [${userId}] Voice note sent to ${jid}`);
     return result;
@@ -3849,9 +3856,10 @@ async function sendVoiceNote(userId, jid, audioBuffer) {
     console.warn(`⚠️ [${userId}] PTT send failed, retrying as audio: ${pttErr?.message}`);
     try {
       const result = await sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
-        const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
-        if (chat) return await chat.sendMessage(media);
-        return await client.sendMessage(target, media);
+        const media = new MessageMedia('audio/ogg; codecs=opus', base64Audio, 'voice.ogg');
+        const options = { waitUntilMsgSent: true };
+        if (chat) return await chat.sendMessage(media, options);
+        return await client.sendMessage(target, media, options);
       });
       console.log(`🎤 [${userId}] Voice note sent as audio to ${jid}`);
       return result;
