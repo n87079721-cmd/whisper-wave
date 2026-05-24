@@ -1275,11 +1275,21 @@ async function startConnection(userId, db, options = {}) {
       try {
         if (generation !== inst.connectionGeneration) return;
 
-        const chat = await msg.getChat();
-        const contact = await msg.getContact();
+        let chat = null;
+        let contact = null;
+        try {
+          chat = await msg.getChat();
+        } catch (chatErr) {
+          console.warn(`⚠️ [${userId}] Could not load chat for live message ${msg.id?._serialized || msg.id?.id || 'unknown'}: ${chatErr?.message || chatErr}`);
+        }
+        try {
+          contact = await msg.getContact();
+        } catch (contactErr) {
+          console.warn(`⚠️ [${userId}] Could not load contact for live message ${msg.id?._serialized || msg.id?.id || 'unknown'}: ${contactErr?.message || contactErr}`);
+        }
         const jid = toJid(msg.from);
         const isFromMe = msg.fromMe;
-        const isGroup = chat.isGroup;
+        const isGroup = !!chat?.isGroup || jid.endsWith('@g.us') || toJid(msg.to).endsWith('@g.us');
 
         // Skip status broadcasts
         if (jid === 'status@broadcast' || msg.isStatus) {
