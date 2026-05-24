@@ -240,14 +240,14 @@ export function createApiRouter(db) {
       return {
         mediaPath: filename,
         mediaName: 'voice-note.ogg',
-        mediaMime: 'audio/ogg; codecs=opus',
+        mediaMime: 'audio/ogg',
       };
     } catch (err) {
       console.log('⚠️ Failed to cache outgoing VN, using wa: ref:', err?.message);
       return {
         mediaPath: `wa:${messageId}`,
         mediaName: 'voice-note.ogg',
-        mediaMime: 'audio/ogg; codecs=opus',
+        mediaMime: 'audio/ogg',
       };
     }
   }
@@ -347,13 +347,16 @@ export function createApiRouter(db) {
         '-y',
         '-i', inputPath,
         '-vn',
+        '-map', '0:a:0',
+        '-map_metadata', '-1',
         '-c:a', 'libopus',
-        '-b:a', '64k',
+        '-b:a', '48k',
         '-ar', '48000',
         '-ac', '1',
         '-application', 'voip',
         '-vbr', 'constrained',
-        '-frame_duration', '60',
+        '-frame_duration', '20',
+        '-compression_level', '10',
         outputPath,
       ], { stdio: 'ignore' });
 
@@ -1390,7 +1393,7 @@ RULES:
           media_path = COALESCE(excluded.media_path, messages.media_path),
           media_name = COALESCE(excluded.media_name, messages.media_name),
           media_mime = COALESCE(excluded.media_mime, messages.media_mime)
-      `).run(msgId, req.userId, contactRow.id, targetJid, '🎤 Voice note', new Date().toISOString(), mediaRef, 'voice-note.ogg', 'audio/ogg; codecs=opus');
+      `).run(msgId, req.userId, contactRow.id, targetJid, '🎤 Voice note', new Date().toISOString(), mediaRef, 'voice-note.ogg', 'audio/ogg');
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(req.userId);
 
       res.json({ success: true, messageId: msgId, contactId: contactRow.id });

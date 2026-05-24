@@ -949,9 +949,8 @@ function scheduleRecoverySync(userId, db, delayMs = 90000) {
     }
 
     const needsRecovery =
-      inst.syncState.totalDbContacts === 0 ||
-      inst.syncState.totalDbMessages < 25 ||
-      ['waiting_history', 'partial', 'recovering'].includes(inst.syncState.phase);
+      !inst.syncState.lastHistorySyncAt ||
+      ['waiting_history', 'recovering'].includes(inst.syncState.phase);
 
     if (!needsRecovery) return;
 
@@ -1687,7 +1686,7 @@ function getMessagePayload(msg) {
     msgType = 'voice';
     content = msg.body || '🎤 Voice message';
     duration = msg.duration || null;
-    mimetype = msg.mimetype || 'audio/ogg; codecs=opus';
+    mimetype = msg.mimetype || 'audio/ogg';
     mediaName = mediaName || 'voice-note.ogg';
   } else if (rawType === 'sticker') {
     msgType = 'sticker';
@@ -1953,6 +1952,7 @@ async function syncChats(userId, db, { force = false } = {}) {
     let contactChanges = 0;
     let messageCount = 0;
     let skippedChats = 0;
+    let failedChats = 0;
 
     // Sort chats by most recent activity first
     const sortedChats = chats.sort((a, b) => {
@@ -2058,9 +2058,12 @@ async function syncChats(userId, db, { force = false } = {}) {
               } catch {}
             }
           } catch (err) {
+            failedChats++;
             console.log(`📜 [${userId}] Failed to fetch messages for ${jid}: ${err?.message}`);
           }
-        } catch {}
+        } catch {
+          failedChats++;
+        }
       }
 
       // Emit progress after each batch
@@ -2076,11 +2079,11 @@ async function syncChats(userId, db, { force = false } = {}) {
       }
     }
 
-    console.log(`📇 [${userId}] Synced ${contactChanges} chats, ${messageCount} messages (${skippedChats} skipped - already synced)`);
+    console.log(`📇 [${userId}] Synced ${contactChanges} chats, ${messageCount} messages (${skippedChats} skipped - already synced, ${failedChats} failed)`);
     const totalMessages = db.prepare('SELECT COUNT(*) as c FROM messages WHERE user_id = ?').get(userId)?.c || 0;
-    const finalPhase = (contactChanges > 0 || inst.syncState.totalDbContacts > 0) && (totalMessages > 0 || skippedChats > 0)
-      ? 'ready'
-      : 'partial';
+    const finalPhase = failedChats > 0 && contactChanges === 0 && totalMessages === 0
+      ? 'partial'
+      : 'ready';
     updateSyncState(userId, db, {
       phase: finalPhase,
       historyContacts: contactChanges,
@@ -2117,12 +2120,12 @@ async function recoverSync(userId, db, { force = false } = {}) {
   await syncChats(userId, db, { force });
 
   if (inst.connectionStatus === 'connected' && !inst.contactSyncInProgress) {
-    syncContacts(userId, db, { skipChatSync: true }).catch(err => {
+    await syncContacts(userId, db, { skipChatSync: true }).catch(err => {
       console.error(`Recovery contact sync error [${userId}]:`, err?.message || err);
     });
   }
 
-  const phase = (inst.syncState.totalDbMessages > 10 && inst.syncState.totalDbContacts > 0) ? 'ready' : 'partial';
+  const phase = inst.syncState.phase === 'partial' ? 'partial' : 'ready';
   updateSyncState(userId, db, { phase });
   console.log(`🔄 [${userId}] Recovery sync complete — phase: ${phase}`);
   emit(userId, 'sync_state', inst.syncState);
@@ -2757,9 +2760,9 @@ function persistVoiceNoteBuffer(messageId, audioBuffer) {
     const safeId = String(messageId).replace(/[^a-zA-Z0-9_\-\.]/g, '_');
     const filename = `${safeId}.ogg`;
     fs.writeFileSync(path.join(mediaDir, filename), audioBuffer);
-    return { mediaPath: filename, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg; codecs=opus' };
+    return { mediaPath: filename, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg' };
   } catch {
-    return { mediaPath: `wa:${messageId}`, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg; codecs=opus' };
+    return { mediaPath: `wa:${messageId}`, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg' };
   }
 }
 
@@ -3833,11 +3836,18 @@ async function sendMediaMessage(userId, jid, payload) {
 }
 
 async function sendVoiceNote(userId, jid, audioBuffer) {
+  const voiceBuffer = Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer || []);
+  if (voiceBuffer.length < 200) {
+    throw new Error('Voice note audio is empty or corrupted');
+  }
+  const base64Audio = voiceBuffer.toString('base64');
+
   try {
     const result = await sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
-      const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
-      if (chat) return await chat.sendMessage(media, { sendAudioAsVoice: true });
-      return await client.sendMessage(target, media, { sendAudioAsVoice: true });
+      const media = new MessageMedia('audio/ogg', base64Audio, null, voiceBuffer.length);
+      const options = { sendAudioAsVoice: true, waitUntilMsgSent: true };
+      if (chat) return await chat.sendMessage(media, options);
+      return await client.sendMessage(target, media, options);
     });
     console.log(`🎤 [${userId}] Voice note sent to ${jid}`);
     return result;
@@ -3845,9 +3855,10 @@ async function sendVoiceNote(userId, jid, audioBuffer) {
     console.warn(`⚠️ [${userId}] PTT send failed, retrying as audio: ${pttErr?.message}`);
     try {
       const result = await sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
-        const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
-        if (chat) return await chat.sendMessage(media);
-        return await client.sendMessage(target, media);
+        const media = new MessageMedia('audio/ogg', base64Audio, null, voiceBuffer.length);
+        const options = { waitUntilMsgSent: true };
+        if (chat) return await chat.sendMessage(media, options);
+        return await client.sendMessage(target, media, options);
       });
       console.log(`🎤 [${userId}] Voice note sent as audio to ${jid}`);
       return result;
