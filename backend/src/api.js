@@ -130,6 +130,14 @@ export function createApiRouter(db) {
     return getOrInitWhatsApp(req.userId, db);
   }
 
+  function emitLocalMessage(userId, contactId, msgId) {
+    try {
+      getOrInitWhatsApp(userId, db).getInstance?.().eventListeners?.forEach?.(listener => {
+        try { listener('message', { contactId, msgId }); } catch {}
+      });
+    } catch {}
+  }
+
   function normalizePhoneDigits(value) {
     return String(value || '').replace(/[^0-9]/g, '');
   }
@@ -1105,7 +1113,7 @@ RULES:
           status = excluded.status
       `).run(msgId, req.userId, contactRow.id, targetJid, message, new Date().toISOString(), replyToId, replyToContent, replyToSender);
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
-      wa.getInstance?.().eventListeners?.forEach?.(listener => listener('message', { contactId: contactRow.id, msgId }));
+      emitLocalMessage(req.userId, contactRow.id, msgId);
 
       // Build memory from outbound text too (so info you share manually gets captured).
       try {
