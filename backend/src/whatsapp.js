@@ -1953,6 +1953,7 @@ async function syncChats(userId, db, { force = false } = {}) {
     let contactChanges = 0;
     let messageCount = 0;
     let skippedChats = 0;
+    let failedChats = 0;
 
     // Sort chats by most recent activity first
     const sortedChats = chats.sort((a, b) => {
@@ -2058,9 +2059,12 @@ async function syncChats(userId, db, { force = false } = {}) {
               } catch {}
             }
           } catch (err) {
+            failedChats++;
             console.log(`📜 [${userId}] Failed to fetch messages for ${jid}: ${err?.message}`);
           }
-        } catch {}
+        } catch {
+          failedChats++;
+        }
       }
 
       // Emit progress after each batch
@@ -2076,11 +2080,11 @@ async function syncChats(userId, db, { force = false } = {}) {
       }
     }
 
-    console.log(`📇 [${userId}] Synced ${contactChanges} chats, ${messageCount} messages (${skippedChats} skipped - already synced)`);
+    console.log(`📇 [${userId}] Synced ${contactChanges} chats, ${messageCount} messages (${skippedChats} skipped - already synced, ${failedChats} failed)`);
     const totalMessages = db.prepare('SELECT COUNT(*) as c FROM messages WHERE user_id = ?').get(userId)?.c || 0;
-    const finalPhase = (contactChanges > 0 || inst.syncState.totalDbContacts > 0) && (totalMessages > 0 || skippedChats > 0)
-      ? 'ready'
-      : 'partial';
+    const finalPhase = failedChats > 0 && contactChanges === 0 && totalMessages === 0
+      ? 'partial'
+      : 'ready';
     updateSyncState(userId, db, {
       phase: finalPhase,
       historyContacts: contactChanges,
