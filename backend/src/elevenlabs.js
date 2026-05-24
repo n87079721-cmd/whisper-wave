@@ -100,7 +100,7 @@ function mixAudioWithBackground(ffmpeg, voicePath, bgPath, outputPath, outputFor
   const vol = Math.max(0, Math.min(1, bgVolume));
   if (outputFormat === 'ogg') {
     execSync(
-      `${ffmpeg} -y -i "${voicePath}" -stream_loop -1 -i "${bgPath}" -filter_complex "[1:a]volume=${vol}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[out]" -map "[out]" -c:a libopus -b:a 48k -ar 48000 -ac 1 -application voip -vbr constrained -frame_duration 20 -compression_level 10 "${outputPath}"`,
+      `${ffmpeg} -y -i "${voicePath}" -stream_loop -1 -i "${bgPath}" -filter_complex "[1:a]volume=${vol}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[out]" -map "[out]" -map_metadata -1 -c:a libopus -b:a 48k -ar 48000 -ac 1 -application voip -vbr constrained -frame_duration 20 -compression_level 10 "${outputPath}"`,
       { stdio: 'pipe', timeout: 30000 }
     );
   } else {
@@ -241,7 +241,7 @@ export async function generateVoiceNote(apiKey, text, voiceId, modelId, backgrou
       // No background — convert to WhatsApp-safe OGG Opus
       // Use voip application mode + constrained VBR for maximum WhatsApp compatibility
       execSync(
-        `${ffmpeg} -y -i "${mp3Path}" -vn -map 0:a:0 -c:a libopus -b:a 48k -ar 48000 -ac 1 -application voip -vbr constrained -frame_duration 20 -compression_level 10 "${oggPath}"`,
+        `${ffmpeg} -y -i "${mp3Path}" -vn -map 0:a:0 -map_metadata -1 -c:a libopus -b:a 48k -ar 48000 -ac 1 -application voip -vbr constrained -frame_duration 20 -compression_level 10 "${oggPath}"`,
         { stdio: 'pipe', timeout: 30_000 }
       );
       const oggBuffer = fs.readFileSync(oggPath);
