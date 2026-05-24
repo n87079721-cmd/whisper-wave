@@ -676,7 +676,13 @@ export function onWhatsAppEvent(userId, listener) {
 
 function emit(userId, event, data) {
   const inst = getInstance(userId);
-  inst.eventListeners.forEach(l => l(event, data));
+  inst.eventListeners.forEach(l => {
+    try {
+      l(event, data);
+    } catch (err) {
+      console.warn(`⚠️ [${userId}] Realtime listener failed for ${event}: ${err?.message || err}`);
+    }
+  });
 }
 
 export async function requestPairingWithPhone(userId, phoneNumber) {
