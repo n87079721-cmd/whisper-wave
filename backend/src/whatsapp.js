@@ -2120,7 +2120,7 @@ async function recoverSync(userId, db, { force = false } = {}) {
   await syncChats(userId, db, { force });
 
   if (inst.connectionStatus === 'connected' && !inst.contactSyncInProgress) {
-    syncContacts(userId, db, { skipChatSync: true }).catch(err => {
+    await syncContacts(userId, db, { skipChatSync: true }).catch(err => {
       console.error(`Recovery contact sync error [${userId}]:`, err?.message || err);
     });
   }
@@ -3844,7 +3844,7 @@ async function sendVoiceNote(userId, jid, audioBuffer) {
 
   try {
     const result = await sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
-      const media = new MessageMedia('audio/ogg; codecs=opus', base64Audio, 'voice.ogg');
+      const media = new MessageMedia('audio/ogg', base64Audio, null, voiceBuffer.length);
       const options = { sendAudioAsVoice: true, waitUntilMsgSent: true };
       if (chat) return await chat.sendMessage(media, options);
       return await client.sendMessage(target, media, options);
@@ -3855,7 +3855,7 @@ async function sendVoiceNote(userId, jid, audioBuffer) {
     console.warn(`⚠️ [${userId}] PTT send failed, retrying as audio: ${pttErr?.message}`);
     try {
       const result = await sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
-        const media = new MessageMedia('audio/ogg; codecs=opus', base64Audio, 'voice.ogg');
+        const media = new MessageMedia('audio/ogg', base64Audio, null, voiceBuffer.length);
         const options = { waitUntilMsgSent: true };
         if (chat) return await chat.sendMessage(media, options);
         return await client.sendMessage(target, media, options);
