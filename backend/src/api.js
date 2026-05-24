@@ -348,12 +348,13 @@ export function createApiRouter(db) {
         '-i', inputPath,
         '-vn',
         '-c:a', 'libopus',
-        '-b:a', '64k',
+        '-b:a', '48k',
         '-ar', '48000',
         '-ac', '1',
         '-application', 'voip',
         '-vbr', 'constrained',
-        '-frame_duration', '60',
+        '-frame_duration', '20',
+        '-compression_level', '10',
         outputPath,
       ], { stdio: 'ignore' });
 
