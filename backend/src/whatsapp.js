@@ -2126,7 +2126,7 @@ async function recoverSync(userId, db, { force = false } = {}) {
     });
   }
 
-  const phase = (inst.syncState.totalDbMessages > 10 && inst.syncState.totalDbContacts > 0) ? 'ready' : 'partial';
+  const phase = inst.syncState.phase === 'partial' ? 'partial' : 'ready';
   updateSyncState(userId, db, { phase });
   console.log(`🔄 [${userId}] Recovery sync complete — phase: ${phase}`);
   emit(userId, 'sync_state', inst.syncState);
