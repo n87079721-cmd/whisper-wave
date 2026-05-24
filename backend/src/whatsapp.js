@@ -949,9 +949,8 @@ function scheduleRecoverySync(userId, db, delayMs = 90000) {
     }
 
     const needsRecovery =
-      inst.syncState.totalDbContacts === 0 ||
-      inst.syncState.totalDbMessages < 25 ||
-      ['waiting_history', 'partial', 'recovering'].includes(inst.syncState.phase);
+      !inst.syncState.lastHistorySyncAt ||
+      ['waiting_history', 'recovering'].includes(inst.syncState.phase);
 
     if (!needsRecovery) return;
 
@@ -1687,7 +1686,7 @@ function getMessagePayload(msg) {
     msgType = 'voice';
     content = msg.body || '🎤 Voice message';
     duration = msg.duration || null;
-    mimetype = msg.mimetype || 'audio/ogg; codecs=opus';
+    mimetype = msg.mimetype || 'audio/ogg';
     mediaName = mediaName || 'voice-note.ogg';
   } else if (rawType === 'sticker') {
     msgType = 'sticker';
@@ -2761,9 +2760,9 @@ function persistVoiceNoteBuffer(messageId, audioBuffer) {
     const safeId = String(messageId).replace(/[^a-zA-Z0-9_\-\.]/g, '_');
     const filename = `${safeId}.ogg`;
     fs.writeFileSync(path.join(mediaDir, filename), audioBuffer);
-    return { mediaPath: filename, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg; codecs=opus' };
+    return { mediaPath: filename, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg' };
   } catch {
-    return { mediaPath: `wa:${messageId}`, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg; codecs=opus' };
+    return { mediaPath: `wa:${messageId}`, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg' };
   }
 }
 
