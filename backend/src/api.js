@@ -132,7 +132,6 @@ export function createApiRouter(db) {
 
   function emitLocalMessage(userId, contactId, msgId) {
     try {
-      onWhatsAppEvent(userId, () => {})();
       getOrInitWhatsApp(userId, db).getInstance?.().eventListeners?.forEach?.(listener => {
         try { listener('message', { contactId, msgId }); } catch {}
       });
