@@ -1078,6 +1078,17 @@ async function startConnection(userId, db, options = {}) {
       }),
       takeoverOnConflict: true,
       takeoverTimeoutMs: 0,
+      // Pin a known-working WhatsApp Web build. WA Web ships near-daily
+      // internal refactors that break wwebjs' Store injector — most commonly
+      // surfacing as "Cannot read properties of undefined (reading
+      // 'waitForChatLoading')" right after pairing. Loading a cached HTML
+      // from the wwebjs-community CDN sidesteps the moving target so message
+      // ingestion works on brand-new and existing sessions alike.
+      webVersionCache: {
+        type: 'remote',
+        remotePath:
+          'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1023223821.html',
+      },
       puppeteer: {
         headless: true,
         args: [
