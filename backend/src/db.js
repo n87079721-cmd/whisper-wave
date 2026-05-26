@@ -29,21 +29,6 @@ export function initDatabase() {
   return db;
 }
 
-// ── App-wide key/value store (auth secret, etc.) ──
-// Stored in the same DB so it survives container restarts and code deploys
-// for as long as the user data does. Wiping this would also wipe users, so
-// the secret is exactly as durable as the accounts it signs tokens for.
-export function getAppMeta(db, key) {
-  db.exec(`CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT)`);
-  const row = db.prepare('SELECT value FROM app_meta WHERE key = ?').get(key);
-  return row?.value || null;
-}
-
-export function setAppMeta(db, key, value) {
-  db.exec(`CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT)`);
-  db.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
-}
-
 function ensureUsersTable(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -228,18 +213,6 @@ function ensureCurrentTables(db) {
     if (!cols.has('reply_language')) {
       db.exec("ALTER TABLE contacts ADD COLUMN reply_language TEXT DEFAULT NULL");
     }
-    if (!cols.has('relationship_graph')) {
-      db.exec("ALTER TABLE contacts ADD COLUMN relationship_graph TEXT");
-    }
-    if (!cols.has('mood_state')) {
-      db.exec("ALTER TABLE contacts ADD COLUMN mood_state TEXT");
-    }
-    if (!cols.has('is_hidden')) {
-      db.exec("ALTER TABLE contacts ADD COLUMN is_hidden INTEGER DEFAULT 0");
-    }
-    if (!cols.has('has_chat')) {
-      db.exec("ALTER TABLE contacts ADD COLUMN has_chat INTEGER DEFAULT 0");
-    }
   } catch {}
 
   try {
@@ -296,16 +269,11 @@ function ensureIndexes(db) {
 }
 
 function needsLegacyMigration(db) {
-  // Brand-new DBs report "missing columns" on tables that don't exist yet.
-  // Don't treat that as legacy. Only migrate when at least one of these
-  // tables already exists AND is missing the user_id column.
-  const tables = ['contacts', 'messages', 'config', 'stats'];
-  if (!tables.some((t) => tableExists(db, t))) return false;
   return (
-    (tableExists(db, 'contacts') && !hasColumn(db, 'contacts', 'user_id')) ||
-    (tableExists(db, 'messages') && !hasColumn(db, 'messages', 'user_id')) ||
-    (tableExists(db, 'config')   && !hasColumn(db, 'config',   'user_id')) ||
-    (tableExists(db, 'stats')    && !hasColumn(db, 'stats',    'user_id'))
+    !hasColumn(db, 'contacts', 'user_id') ||
+    !hasColumn(db, 'messages', 'user_id') ||
+    !hasColumn(db, 'config', 'user_id') ||
+    !hasColumn(db, 'stats', 'user_id')
   );
 }
 

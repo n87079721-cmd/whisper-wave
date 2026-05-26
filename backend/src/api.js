@@ -130,14 +130,6 @@ export function createApiRouter(db) {
     return getOrInitWhatsApp(req.userId, db);
   }
 
-  function emitLocalMessage(userId, contactId, msgId) {
-    try {
-      getOrInitWhatsApp(userId, db).getInstance?.().eventListeners?.forEach?.(listener => {
-        try { listener('message', { contactId, msgId }); } catch {}
-      });
-    } catch {}
-  }
-
   function normalizePhoneDigits(value) {
     return String(value || '').replace(/[^0-9]/g, '');
   }
@@ -163,10 +155,6 @@ export function createApiRouter(db) {
     }
 
     return raw;
-  }
-
-  function fromJid(jid) {
-    return String(jid || '').replace(/@s\.whatsapp\.net$/, '@c.us');
   }
 
   function detectMimeTypeFromFilename(filename) {
@@ -248,26 +236,20 @@ export function createApiRouter(db) {
       return {
         mediaPath: filename,
         mediaName: 'voice-note.ogg',
-        mediaMime: 'audio/ogg',
+        mediaMime: 'audio/ogg; codecs=opus',
       };
     } catch (err) {
       console.log('⚠️ Failed to cache outgoing VN, using wa: ref:', err?.message);
       return {
         mediaPath: `wa:${messageId}`,
         mediaName: 'voice-note.ogg',
-        mediaMime: 'audio/ogg',
+        mediaMime: 'audio/ogg; codecs=opus',
       };
     }
   }
 
-  function getSentMessageId(sendResult, userId) {
-    const rawId = String(sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id || uuid());
-    return rawId.startsWith(`${userId}:`) ? rawId : `${userId}:${rawId}`;
-  }
-
-  function rawMessageId(userId, id) {
-    const raw = String(id || '');
-    return raw.startsWith(`${userId}:`) ? raw.slice(`${userId}:`.length) : raw;
+  function getSentMessageId(sendResult) {
+    return sendResult?.id?._serialized || sendResult?.id?.id || sendResult?.key?.id || uuid();
   }
 
   function detectOutgoingMessageType(mimeType, forceDocument = false) {
@@ -355,16 +337,13 @@ export function createApiRouter(db) {
         '-y',
         '-i', inputPath,
         '-vn',
-        '-map', '0:a:0',
-        '-map_metadata', '-1',
         '-c:a', 'libopus',
-        '-b:a', '48k',
+        '-b:a', '64k',
         '-ar', '48000',
         '-ac', '1',
         '-application', 'voip',
         '-vbr', 'constrained',
-        '-frame_duration', '20',
-        '-compression_level', '10',
+        '-frame_duration', '60',
         outputPath,
       ], { stdio: 'ignore' });
 
@@ -478,15 +457,12 @@ export function createApiRouter(db) {
         const newId = uuid();
         const phone = normalizedPhone || (targetJid.endsWith('@lid') ? null : '+' + targetJid.replace(/@.*$/, ''));
         db.prepare(`
-          INSERT INTO contacts (id, user_id, jid, name, phone, is_group, has_chat) VALUES (?, ?, ?, ?, ?, 0, 1)
+          INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, 0)
         `).run(newId, userId, targetJid, phone || 'WhatsApp contact', phone);
         contactRow = { id: newId, jid: targetJid, phone };
-      } else {
-        try { db.prepare('UPDATE contacts SET has_chat = 1, is_hidden = 0 WHERE id = ? AND user_id = ?').run(contactRow.id, userId); } catch {}
       }
     }
 
-    try { db.prepare('UPDATE contacts SET has_chat = 1, is_hidden = 0 WHERE id = ? AND user_id = ?').run(contactRow.id, userId); } catch {}
     return { contactRow, targetJid };
   }
 
@@ -535,11 +511,6 @@ export function createApiRouter(db) {
     const wa = getWA(req);
     const state = wa.getState();
     send('status', { status: state.status });
-    if (state.qr) {
-      QRCode.toDataURL(state.qr, { width: 256, margin: 1 }).then(qrUrl => {
-        send('qr', { qr: qrUrl });
-      }).catch(() => {});
-    }
 
     const unsub = onWhatsAppEvent(req.userId, (event, data) => {
       if (event === 'qr') {
@@ -572,27 +543,16 @@ export function createApiRouter(db) {
         send('message_ack', data);
       } else if (event === 'message_reaction') {
         send('message_reaction', data);
-      } else if (event === 'ai_typing') {
-        send('ai_typing', data);
       }
     });
 
-    let cleanedUp = false;
     const cleanup = () => {
-      if (cleanedUp) return;
-      cleanedUp = true;
       clearInterval(heartbeat);
-      try { unsub(); } catch {}
+      unsub();
     };
 
     req.on('close', cleanup);
     req.on('end', cleanup);
-    // Without an 'error' listener a stalled SSE connection (network drop,
-    // proxy timeout) would leak the heartbeat interval + event listener
-    // forever. Treat any socket error as a close.
-    req.on('error', cleanup);
-    res.on('error', cleanup);
-    res.on('close', cleanup);
   });
 
   // ── ElevenLabs ───────────────────────────────────────────
@@ -757,33 +717,6 @@ export function createApiRouter(db) {
       res.status(500).json({ error: err.message });
     }
   });
-
-  // Relationship graph + mood — viewable and resettable
-  router.get('/contacts/:id/relationship', (req, res) => {
-    try {
-      const row = db.prepare('SELECT relationship_graph, mood_state FROM contacts WHERE id = ? AND user_id = ?')
-        .get(req.params.id, req.userId);
-      if (!row) return res.status(404).json({ error: 'Contact not found' });
-      let graph = null;
-      let mood = null;
-      try { if (row.relationship_graph) graph = JSON.parse(row.relationship_graph); } catch {}
-      try { if (row.mood_state) mood = JSON.parse(row.mood_state); } catch { mood = row.mood_state; }
-      res.json({ relationship_graph: graph, mood_state: mood });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  router.delete('/contacts/:id/relationship', (req, res) => {
-    try {
-      db.prepare('UPDATE contacts SET relationship_graph = NULL, mood_state = NULL WHERE id = ? AND user_id = ?')
-        .run(req.params.id, req.userId);
-      res.json({ success: true });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
 
   router.put('/contacts/:id/directive', (req, res) => {
     try {
@@ -953,10 +886,9 @@ RULES:
       SELECT c.*, rm.content as last_message, rm.type as last_type, rm.timestamp as last_timestamp,
              COALESCE(c.is_archived, 0) as is_archived, COALESCE(c.unread_count, 0) as unread_count
       FROM contacts c
-      LEFT JOIN ranked_messages rm ON rm.contact_id = c.id AND rm.rn = 1
-      WHERE c.user_id = ? AND c.is_group = 0 AND COALESCE(c.is_hidden, 0) = 0
-        AND (COALESCE(c.has_chat, 1) = 1 OR rm.id IS NOT NULL)
-      ORDER BY COALESCE(rm.timestamp, c.updated_at) DESC
+      INNER JOIN ranked_messages rm ON rm.contact_id = c.id AND rm.rn = 1
+      WHERE c.user_id = ? AND c.is_group = 0
+      ORDER BY rm.timestamp DESC
     `).all(req.userId, req.userId);
     res.json(conversations);
   });
@@ -1033,8 +965,7 @@ RULES:
       const inst = wa.getInstance();
       const chat = await inst.client.getChatById(chatId);
       const waMessages = await chat.fetchMessages({ limit: 50 });
-      const waId = rawMessageId(req.userId, req.params.messageId);
-      const waMsg = waMessages.find(m => (m.id?._serialized || m.id?.id) === waId);
+      const waMsg = waMessages.find(m => (m.id?._serialized || m.id?.id) === req.params.messageId);
       if (!waMsg) return res.status(404).json({ error: 'WhatsApp message not found in recent history' });
 
       await waMsg.react(emoji);
@@ -1084,7 +1015,7 @@ RULES:
 
       let sendResult;
       sendResult = await wa.sendTextMessage(targetJid, message, { quotedMessageId });
-      const msgId = getSentMessageId(sendResult, req.userId);
+      const msgId = getSentMessageId(sendResult);
 
       // Get quoted message info for DB
       let replyToId = null, replyToContent = null, replyToSender = null;
@@ -1113,7 +1044,6 @@ RULES:
           status = excluded.status
       `).run(msgId, req.userId, contactRow.id, targetJid, message, new Date().toISOString(), replyToId, replyToContent, replyToSender);
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'message_sent')`).run(req.userId);
-      emitLocalMessage(req.userId, contactRow.id, msgId);
 
       // Build memory from outbound text too (so info you share manually gets captured).
       try {
@@ -1185,7 +1115,7 @@ RULES:
         }
       }
 
-      const msgId = getSentMessageId(sendResult, req.userId);
+      const msgId = getSentMessageId(sendResult);
       db.prepare(`
         INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, media_path, media_name, media_mime)
         VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, 'sent', ?, ?, ?)
@@ -1233,7 +1163,7 @@ RULES:
         isViewOnce: !!isViewOnce,
       });
 
-      const msgId = getSentMessageId(sendResult, req.userId);
+      const msgId = getSentMessageId(sendResult);
       const savedMedia = persistOutgoingMedia(msgId, normalizedBase64, mimeType, fileName);
 
       db.prepare(`
@@ -1337,7 +1267,7 @@ RULES:
       const audioBuffer = await generateVoiceNote(apiKey, speakable, voiceId || 'JBFqnCBsd6RMkjVDRZzb', modelId || null, backgroundSound || null, volume);
 
       const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
-      const msgId = getSentMessageId(sendResult, req.userId);
+      const msgId = getSentMessageId(sendResult);
       const savedVoice = persistOutgoingVoiceNote(msgId, audioBuffer);
 
       db.prepare(`
@@ -1386,7 +1316,7 @@ RULES:
       const audioBuffer = normalizeRecordedVoiceAudio(rawAudioBuffer, mimeType || 'audio/webm');
 
       const sendResult = await wa.sendVoiceNote(targetJid, audioBuffer);
-      const msgId = getSentMessageId(sendResult, req.userId);
+      const msgId = getSentMessageId(sendResult);
 
       // Don't persist to disk - use wa: reference
       const mediaRef = `wa:${msgId}`;
@@ -1401,7 +1331,7 @@ RULES:
           media_path = COALESCE(excluded.media_path, messages.media_path),
           media_name = COALESCE(excluded.media_name, messages.media_name),
           media_mime = COALESCE(excluded.media_mime, messages.media_mime)
-      `).run(msgId, req.userId, contactRow.id, targetJid, '🎤 Voice note', new Date().toISOString(), mediaRef, 'voice-note.ogg', 'audio/ogg');
+      `).run(msgId, req.userId, contactRow.id, targetJid, '🎤 Voice note', new Date().toISOString(), mediaRef, 'voice-note.ogg', 'audio/ogg; codecs=opus');
       db.prepare(`INSERT INTO stats (user_id, event) VALUES (?, 'voice_sent')`).run(req.userId);
 
       res.json({ success: true, messageId: msgId, contactId: contactRow.id });
@@ -1548,28 +1478,16 @@ RULES:
   // Stream a custom or preset sound for preview playback (with Range support)
   router.get('/sounds/:soundId/stream', (req, res) => {
     try {
-      // Strict whitelist: only allow soundIds that are either a preset (no
-      // owner check) or a custom sound owned by this user. Strip any path
-      // characters defensively.
-      const safeId = path.basename(String(req.params.soundId || ''));
-      if (!/^[a-zA-Z0-9._-]+$/.test(safeId)) {
-        return res.status(400).json({ error: 'Invalid sound id' });
-      }
-
-      let soundFile = null;
-      const owned = db.prepare(
-        'SELECT filename FROM custom_sounds WHERE sound_id = ? AND user_id = ?'
-      ).get(safeId, req.userId);
-      if (owned?.filename) {
-        const candidate = path.join(soundsDir, path.basename(owned.filename));
-        if (fs.existsSync(candidate)) soundFile = candidate;
-      }
-      if (!soundFile) {
-        const presetPath = path.join(soundsDir, `preset-${safeId}.mp3`);
-        if (fs.existsSync(presetPath)) soundFile = presetPath;
-      }
-      if (!soundFile) {
-        return res.status(404).json({ error: 'Sound file not found' });
+      let soundFile = path.join(soundsDir, `${req.params.soundId}.mp3`);
+      // Also check for preset sounds generated by elevenlabs
+      if (!fs.existsSync(soundFile)) {
+        // Try preset sound path
+        const presetPath = path.join(soundsDir, `preset-${req.params.soundId}.mp3`);
+        if (fs.existsSync(presetPath)) {
+          soundFile = presetPath;
+        } else {
+          return res.status(404).json({ error: 'Sound file not found' });
+        }
       }
 
       const stat = fs.statSync(soundFile);
@@ -1608,29 +1526,18 @@ RULES:
   router.post('/sounds/:id/trim', async (req, res) => {
     try {
       const { start, end } = req.body;
-      const startNum = Number(start);
-      const endNum = Number(end);
-      if (
-        !Number.isFinite(startNum) || !Number.isFinite(endNum) ||
-        startNum < 0 || endNum <= startNum || endNum > 24 * 60 * 60
-      ) {
+      if (start == null || end == null || start >= end) {
         return res.status(400).json({ error: 'Invalid start/end times' });
       }
       const sound = db.prepare('SELECT * FROM custom_sounds WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
       if (!sound) return res.status(404).json({ error: 'Sound not found' });
 
-      const inputPath = path.join(soundsDir, path.basename(sound.filename));
+      const inputPath = path.join(soundsDir, sound.filename);
       if (!fs.existsSync(inputPath)) return res.status(404).json({ error: 'Sound file missing' });
 
-      const tempOutput = path.join(soundsDir, `trim-temp-${path.basename(sound.sound_id)}.mp3`);
+      const tempOutput = path.join(soundsDir, `trim-temp-${sound.sound_id}.mp3`);
       try {
-        // execFileSync avoids any shell interpolation of start/end
-        execFileSync(
-          'ffmpeg',
-          ['-y', '-i', inputPath, '-ss', String(startNum), '-to', String(endNum),
-           '-c:a', 'libmp3lame', '-b:a', '128k', tempOutput],
-          { stdio: 'pipe' }
-        );
+        execSync(`ffmpeg -y -i "${inputPath}" -ss ${start} -to ${end} -c:a libmp3lame -b:a 128k "${tempOutput}"`, { stdio: 'pipe' });
       } catch (ffErr) {
         return res.status(500).json({ error: 'Trim failed' });
       }
@@ -1639,13 +1546,9 @@ RULES:
       fs.renameSync(tempOutput, inputPath);
 
       // Update duration
-      let duration = Math.round(endNum - startNum);
+      let duration = Math.round(end - start);
       try {
-        const probe = execFileSync(
-          'ffprobe',
-          ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', inputPath],
-          { stdio: 'pipe' }
-        ).toString().trim();
+        const probe = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${inputPath}"`, { stdio: 'pipe' }).toString().trim();
         duration = Math.round(parseFloat(probe) || duration);
       } catch {}
 
@@ -1795,9 +1698,7 @@ RULES:
   // ── Voice media playback ───────────────────────────────
   router.get('/voice-media/:filename', (req, res) => {
     try {
-      const safeName = path.basename(String(req.params.filename || ''));
-      if (!safeName || safeName.startsWith('.')) return res.status(400).json({ error: 'Invalid filename' });
-      const filePath = path.join(__dirname, '..', 'data', 'voice-media', safeName);
+      const filePath = path.join(__dirname, '..', 'data', 'voice-media', req.params.filename);
       if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Voice note not found' });
       const ext = path.extname(filePath).toLowerCase();
       const type = ext === '.mp3'
@@ -1820,9 +1721,6 @@ RULES:
   router.get('/message-media/:filename', async (req, res) => {
     try {
       const safeFilename = path.basename(req.params.filename);
-      if (!safeFilename || safeFilename.startsWith('.')) {
-        return res.status(400).json({ error: 'Invalid filename' });
-      }
 
       // Check if this is an on-demand WhatsApp media reference (wa:messageId format)
       const mediaRef = safeFilename.startsWith('wa:') ? safeFilename : null;
@@ -1836,13 +1734,6 @@ RULES:
         ORDER BY timestamp DESC
         LIMIT 1
       `).get(req.userId, safeFilename);
-
-      // Strict ownership: if no DB row owns this filename and it's not a
-      // wa: on-demand reference, deny. Prevents IDOR via the legacy
-      // filesystem fallback (which previously served any file by name).
-      if (!mediaRow && !safeFilename.startsWith('wa:')) {
-        return res.status(404).json({ error: 'Media not found' });
-      }
 
       // If media_path starts with wa: or we have a wa: reference, stream from WhatsApp
       const resolvedMediaPath = mediaRow?.media_path || safeFilename;
@@ -2012,7 +1903,7 @@ RULES:
         sendResult = await wa.sendTextMessage(senderJid, message);
       }
 
-      const msgId = getSentMessageId(sendResult, req.userId);
+      const msgId = getSentMessageId(sendResult);
 
       // Save as a regular message so it appears in the chat
       const { contactRow } = resolveOutgoingTarget(req.userId, { jid: senderJid });
@@ -2050,14 +1941,7 @@ RULES:
 
   router.get('/status-media/:filename', (req, res) => {
     try {
-      const safeName = path.basename(String(req.params.filename || ''));
-      if (!safeName || safeName.startsWith('.')) return res.status(400).json({ error: 'Invalid filename' });
-      // Ownership check: only serve status media that belongs to a status this user has saved
-      const owns = db.prepare(
-        'SELECT 1 FROM statuses WHERE user_id = ? AND media_path = ? LIMIT 1'
-      ).get(req.userId, safeName);
-      if (!owns) return res.status(404).json({ error: 'Not found' });
-      const filePath = path.join(__dirname, '..', 'data', 'status-media', safeName);
+      const filePath = path.join(__dirname, '..', 'data', 'status-media', req.params.filename);
       if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Not found' });
       const ext = path.extname(filePath).toLowerCase();
       const mimeMap = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.mp4': 'video/mp4', '.webp': 'image/webp' };
@@ -2141,40 +2025,6 @@ RULES:
         await wa.clearSession();
       } catch {}
 
-      // Gather media file paths owned by this user BEFORE deleting their rows
-      // so we can unlink the orphans that would otherwise sit in shared
-      // directories (and would be readable to any logged-in user via the
-      // /message-media, /status-media, /sounds routes if their ownership
-      // checks ever regressed).
-      const dataRoot = path.join(__dirname, '..', 'data');
-      const orphanFiles = [];
-      try {
-        const msgMedia = db.prepare(
-          "SELECT media_path FROM messages WHERE user_id = ? AND media_path IS NOT NULL AND media_path NOT LIKE 'wa:%'"
-        ).all(targetId);
-        for (const r of msgMedia) {
-          const name = path.basename(String(r.media_path));
-          if (name) {
-            orphanFiles.push(path.join(dataRoot, 'message-media', name));
-            orphanFiles.push(path.join(dataRoot, 'voice-media', name));
-          }
-        }
-        const stMedia = db.prepare(
-          'SELECT media_path FROM statuses WHERE user_id = ? AND media_path IS NOT NULL'
-        ).all(targetId);
-        for (const r of stMedia) {
-          const name = path.basename(String(r.media_path));
-          if (name) orphanFiles.push(path.join(dataRoot, 'status-media', name));
-        }
-        const snd = db.prepare(
-          'SELECT filename FROM custom_sounds WHERE user_id = ?'
-        ).all(targetId);
-        for (const r of snd) {
-          const name = path.basename(String(r.filename));
-          if (name) orphanFiles.push(path.join(soundsDir, name));
-        }
-      } catch {}
-
       // Delete all user data in a transaction for atomicity
       const deleteUser = db.transaction(() => {
         db.prepare('DELETE FROM custom_sounds WHERE user_id = ?').run(targetId);
@@ -2189,19 +2039,19 @@ RULES:
       });
       deleteUser();
 
-      // Unlink orphan media (best-effort)
-      for (const f of orphanFiles) {
-        try { fs.unlinkSync(f); } catch {}
-      }
-
       // Clean up auth directories
-      const authDir = path.join(dataRoot, 'auth', targetId);
-      if (fs.existsSync(authDir)) {
-        fs.rmSync(authDir, { recursive: true, force: true });
+      const path = await import('path');
+      const fs = await import('fs');
+      const { fileURLToPath } = await import('url');
+      const dataDir = path.default.join(path.default.dirname(fileURLToPath(import.meta.url)), '..', 'data');
+
+      const authDir = path.default.join(dataDir, 'auth', targetId);
+      if (fs.default.existsSync(authDir)) {
+        fs.default.rmSync(authDir, { recursive: true, force: true });
       }
-      const wwDir = path.join(dataRoot, 'wwebjs_auth', `session-${targetId}`);
-      if (fs.existsSync(wwDir)) {
-        fs.rmSync(wwDir, { recursive: true, force: true });
+      const wwDir = path.default.join(dataDir, 'wwebjs_auth', `session-${targetId}`);
+      if (fs.default.existsSync(wwDir)) {
+        fs.default.rmSync(wwDir, { recursive: true, force: true });
       }
 
       res.json({ success: true });

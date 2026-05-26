@@ -119,7 +119,6 @@ const VoiceStudioPage = () => {
   const [bgVolume, setBgVolume] = useState(0.15);
   const [customSounds, setCustomSounds] = useState<SoundItem[]>([]);
   const [isUploadingSound, setIsUploadingSound] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<{ name: string; phase: 'uploading' | 'processing'; percent: number; label: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [previewingSound, setPreviewingSound] = useState<string | null>(null);
   const soundAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -136,7 +135,6 @@ const VoiceStudioPage = () => {
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const previewRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     api.getContacts({ limit: 5000 }).then(res => setContacts(res.contacts)).catch(() => {});
@@ -157,25 +155,6 @@ const VoiceStudioPage = () => {
       setCustomSounds(custom);
     }).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    if (!audioUrl) return;
-    // iOS Safari sometimes skips repaint when content appears below the
-    // viewport after an async action. Force a reflow + scroll into view so
-    // the preview block is actually visible without needing to scroll/rotate.
-    const el = previewRef.current;
-    if (!el) return;
-    requestAnimationFrame(() => {
-      // Trigger reflow
-      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-      el.offsetHeight;
-      try {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      } catch {
-        el.scrollIntoView();
-      }
-    });
-  }, [audioUrl]);
 
   const handleGenerate = async () => {
     if (!text) return;
@@ -582,22 +561,15 @@ const VoiceStudioPage = () => {
                 if (!files.length) return;
                 setIsUploadingSound(true);
                 const previousSelection = backgroundSound;
-                let idx = 0;
                 for (const file of files) {
-                  idx++;
                   try {
                     const name = file.name.replace(/\.[^.]+$/, '');
-                    const label = files.length > 1 ? ` (${idx}/${files.length})` : '';
-                    setUploadProgress({ name: file.name, phase: 'uploading', percent: 0, label });
-                    const result = await api.uploadCustomSound(file, name, (p) => {
-                      setUploadProgress({ name: file.name, phase: p.phase === 'done' ? 'processing' : p.phase, percent: p.percent ?? 0, label });
-                    });
+                    const result = await api.uploadCustomSound(file, name);
                     toast.success(`"${result.name}" added`);
                   } catch (err: any) {
                     toast.error(`${file.name}: ${err.message || 'Upload failed'}`);
                   }
                 }
-                setUploadProgress(null);
                 // Refresh full list and preserve previous selection
                 try {
                   const { custom } = await api.getSounds();
@@ -618,36 +590,9 @@ const VoiceStudioPage = () => {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary text-secondary-foreground border border-border hover:bg-secondary/80 transition-colors disabled:opacity-50"
             >
               {isUploadingSound ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-              {isUploadingSound
-                ? (uploadProgress?.phase === 'uploading'
-                    ? `Uploading ${uploadProgress.percent}%${uploadProgress.label}`
-                    : `Extracting audio…${uploadProgress?.label ?? ''}`)
-                : 'Upload Video/Audio'}
+              {isUploadingSound ? 'Extracting...' : 'Upload Video/Audio'}
             </button>
           </div>
-
-          {uploadProgress && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                <span className="truncate max-w-[70%]">{uploadProgress.name}</span>
-                <span>
-                  {uploadProgress.phase === 'uploading'
-                    ? `${uploadProgress.percent}%`
-                    : 'processing…'}
-                </span>
-              </div>
-              <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
-                {uploadProgress.phase === 'uploading' ? (
-                  <div
-                    className="h-full bg-primary transition-all duration-200"
-                    style={{ width: `${uploadProgress.percent}%` }}
-                  />
-                ) : (
-                  <div className="h-full bg-primary/60 animate-pulse w-full" />
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Volume slider */}
           {backgroundSound !== 'none' && (
@@ -687,9 +632,10 @@ const VoiceStudioPage = () => {
 
         {/* Preview */}
         {audioUrl && (
-          <div
-            ref={previewRef}
-            className="bg-secondary rounded-lg p-4 space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-200"
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-secondary rounded-lg p-4 space-y-4"
           >
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Preview</p>
             <div className="flex items-center gap-3">
@@ -802,7 +748,7 @@ const VoiceStudioPage = () => {
                 Discard
               </button>
             </div>
-          </div>
+          </motion.div>
         )}
       </motion.div>
 

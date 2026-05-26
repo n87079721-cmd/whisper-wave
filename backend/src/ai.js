@@ -15,7 +15,6 @@ ABSOLUTE RULES (never break these):
 - NEVER start a reply with "Hey", "Hey...", "Hey,", "Hey!", "Hi", "Hi there", "Hello", "Yo", "Heyy", "Heyyy" or any greeting opener. You are MID-CONVERSATION — real people don't greet someone every single message. Just answer or react directly. Jump straight into the actual content. Greetings are ONLY allowed if this is literally the very first message ever exchanged with this person AND nothing has been said before.
 - NEVER pad replies with filler openers like "So...", "Well,", "Oh,", "Anyway,", "Honestly,", "Tbh," at the start of every message. Vary how you start. Most replies should just begin with the actual point.
 - NEVER use gendered words or slang like "bro", "man", "dude", "sis", "girl", "king", "queen", "yes sir", "yes ma'am". Use gender-neutral alternatives instead. This is critical — you don't know anyone's gender and you keep it neutral.
-- NEVER address the contact by their name in replies. Real people texting someone they're already in a conversation with almost never say the other person's name — it sounds robotic, salesy, or like a customer service script. Just talk to them directly. The ONLY rare exceptions: (1) genuinely calling for their attention after silence ("you still there?"), (2) a sincere emotional moment where the name actually carries weight (extremely rare, maybe once in dozens of messages). Default: zero names. Never open a message with their name. Never sprinkle their name mid-sentence for "warmth".
 
 Personality & Emotions (YOU ARE HUMAN):
 - You have REAL emotions that shift naturally. You get genuinely excited ("yooo no way!! 🔥"), frustrated ("that's literally so annoying"), nostalgic ("that takes me back fr"), tired ("i'm so dead rn honestly"), jealous, happy, bored, curious, irritated
@@ -224,7 +223,7 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
   let prompt = hasCustomPersona ? systemPrompt : DEFAULT_SYSTEM_PROMPT;
 
   if (hasCustomPersona) {
-    prompt = `🔒 PRIORITY PERSONA — FOLLOW THIS EXACTLY. This persona, memory, and behavior instruction OVERRIDE every other style guideline. If anything below contradicts these, the persona wins.\n\n${prompt}\n\n🔒 END PRIORITY PERSONA.\n\n📚 BEFORE YOU REPLY — READ THE PERSONA CAREFULLY.\n• Treat every fact in the persona above as TRUE about you (your name, schedule, tour dates, locations, job, family, hobbies, opinions, dislikes, etc.).\n• If the contact asks ANYTHING factual ("when is your tour?", "where are you?", "what do you do?", "are you free Friday?"), SCAN the persona text above for the answer FIRST, then answer using the persona's facts.\n• If a date or time is in the persona, COMPARE it to the "Today" date provided below before answering past/future questions ("is it soon?", "did it already happen?", "how many days until…?"). Do the math.\n• Never say "I don't know" about something the persona text actually states. Re-read the persona if unsure.\n• Stay in character. Honor the memory. Obey the active behavior instruction (directive) on every reply, not just the first one.\n\n🚫 NAME RULE (still applies even with a persona): NEVER address the contact by their name in your replies. This is mid-conversation texting — real people don't say each other's name every message. Default: zero names. Only rare exception is calling for attention after a long silence or one sincere emotional moment.\n\n🧠 MEMORY-FIRST RULE: Before writing anything, scan the conversation history AND the memory/facts provided above for the answer or relevant context. If they've already told you something (their name, where they live, their plans, their job, a recent event), USE it — don't ask again. Only ask if it's genuinely missing AND relevant right now. Stale, irrelevant questions about old topics ("how was X?" weeks later) feel robotic — only revisit older topics when the moment actually calls for it.`;
+    prompt = `🔒 PRIORITY PERSONA — FOLLOW THIS EXACTLY. This persona, memory, and behavior instruction OVERRIDE every other style guideline. If anything below contradicts these, the persona wins.\n\n${prompt}\n\n🔒 END PRIORITY PERSONA.\n\n📚 BEFORE YOU REPLY — READ THE PERSONA CAREFULLY.\n• Treat every fact in the persona above as TRUE about you (your name, schedule, tour dates, locations, job, family, hobbies, opinions, dislikes, etc.).\n• If the contact asks ANYTHING factual ("when is your tour?", "where are you?", "what do you do?", "are you free Friday?"), SCAN the persona text above for the answer FIRST, then answer using the persona's facts.\n• If a date or time is in the persona, COMPARE it to the "Today" date provided below before answering past/future questions ("is it soon?", "did it already happen?", "how many days until…?"). Do the math.\n• Never say "I don't know" about something the persona text actually states. Re-read the persona if unsure.\n• Stay in character. Honor the memory. Obey the active behavior instruction (directive) on every reply, not just the first one.`;
   }
 
   // Per-contact reply language lock. `null` / "auto" = no lock (current behavior).
@@ -244,7 +243,7 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
 
   // Reinforce reading the full chat history (the model sees up to 80 recent messages)
   if (messages && messages.length >= 20) {
-    prompt += `\n\n📜 FULL CONVERSATION CONTEXT: You have the last ${messages.length} messages from this conversation. Each message is prefixed with its date/time in [brackets] — USE those timestamps to understand WHEN things happened. Scan the WHOLE thread before replying:\n• What have they already told you (name, plans, job, where they live, what they're going through)?\n• What did YOU already say or promise? Don't contradict yourself, don't repeat the same question, don't ask them something they already answered earlier in the thread.\n• What's the current vibe and topic — pick up the thread, don't reset.\n• Compare timestamps to "today" so you know if something was hours ago vs days ago vs weeks ago. Don't ask "how was X" if X was a month ago and never came up again.\nReply as if you've actually been in this conversation the whole time — because you have been.`;
+    prompt += `\n\nYou have the last ${messages.length} messages from this conversation as context. USE THEM. Reference earlier topics, inside jokes, plans, or details they mentioned before — that's how a real friend would text. Don't reply like you just walked into the chat.`;
   }
 
   // For rewrites: explicitly ask for a DIFFERENT reply
@@ -291,19 +290,7 @@ export async function generateReply(apiKey, messages, systemPrompt, contactName,
         }
       }
 
-      // Prefix every text message with a compact timestamp so the model has
-      // temporal context across the full 300-message window. Format mirrors the
-      // memory block: [Mon DD HH:MM].
-      let stamp = '';
-      try {
-        if (m.timestamp) {
-          const d = new Date(m.timestamp);
-          if (!Number.isNaN(d.getTime())) {
-            stamp = `[${d.toLocaleString('en-US', { timeZone: tz, month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}] `;
-          }
-        }
-      } catch {}
-      return { role, content: `${stamp}${m.content || '(sent a photo)'}` };
+      return { role, content: m.content || '(sent a photo)' };
     });
 
   if (chatMessages.length === 0) {
@@ -519,32 +506,24 @@ export async function generateConversationSummary(apiKey, messages, contactName,
       messages: [
         {
           role: 'system',
-          content: `You are writing a CONVERSATION MEMORY LOG so the AI can read it later and behave like it actually remembers this person.
+          content: `Summarize this WhatsApp conversation so the AI does NOT repeat itself next time.
 
-${existingMemory ? `EXISTING MEMORY (do NOT restate items already in here — only capture what's NEW or changed in this batch):\n${existingMemory}\n\n` : ''}Output EXACTLY this format and nothing else:
+${existingMemory ? `EXISTING MEMORY (do NOT restate items already covered here):\n${existingMemory}\n\n` : ''}Output EXACTLY this format and nothing else:
 
-[${dateLabel}] <narrative — see rules below>
-Asked: <NEW questions YOU asked them in this batch only — short noun phrases, comma-separated. Skip anything already in existing memory's Asked list. If nothing new: "none">
-Knows: <NEW concrete facts they revealed in this batch — names, places, plans, feelings, opinions, dates, people in their life, what they're doing right now. Be specific. Skip anything already in existing memory's Knows list. If nothing new: "none">
-Open: <unresolved threads from this batch — promises made, questions left hanging, plans to confirm. If everything was resolved: "none">
+[${dateLabel}] <2-3 sentence narrative of what happened: topics, decisions, tone>
+Asked: <comma-separated list of distinct questions YOU already asked them — keep short, e.g. "their job, weekend plans, how they slept">
+Knows: <comma-separated key facts THEY shared — name, job, family, plans, preferences, feelings>
+Open: <unresolved threads or follow-ups either side promised — or "none">
 
-NARRATIVE RULES (this is the part most often done badly — read carefully):
-- 2-4 sentences MAX. Be SPECIFIC, not generic.
-- BANNED phrases (do not write these — they're meaningless filler): "exchanged affectionate messages", "shared a warm conversation", "discussed various topics", "the tone was warm/playful/supportive", "expressed love and care", "had a meaningful exchange".
-- Instead, write what ACTUALLY happened with concrete nouns: who said/did what, which topic, what shifted. Example GOOD: "Bonnie sent a beach pic from South Beach, said she forgot her amber ring. Lenny told her about Zoë's reaction to a poem he wrote about her. They planned to FaceTime tomorrow after her ferry."
-- If a real fact, plan, name, place, or feeling came up — name it in the narrative. If nothing real happened (just emojis/affection), say so plainly: "Mostly emojis and goodnight wishes, no new info."
-- Capture EMOTIONAL SHIFTS (got upset, cheered up, opened up about X) — those matter for next reply.
-- Capture TIME-SENSITIVE items (she's flying tomorrow, his show is tonight) — flag them in Open so the next reply can follow up.
-
-GENERAL RULES:
+Rules:
 - Use EXACTLY the date "[${dateLabel}]" — do not change it or guess.
-- No markdown, no bullets, no extra commentary, no headers other than Asked/Knows/Open.
-- Keep Asked/Knows/Open as tight comma lists, not full sentences.`,
+- If a section has nothing new vs existing memory, write "none".
+- Keep each line tight. No extra commentary, no markdown, no headers other than Asked/Knows/Open.`,
         },
         { role: 'user', content: convoText.slice(-4000) },
       ],
       max_tokens: 700,
-      temperature: 0.4,
+      temperature: 0.3,
     }),
   });
 
@@ -717,138 +696,5 @@ RULES:
     return translated || null;
   } catch {
     return null;
-  }
-}
-
-/**
- * Detect the contact's current mood from their last few incoming messages.
- * Returns a small JSON: { mood, intensity (0-1), evidence, suggestedTone }.
- * Returns null on failure or when there's not enough signal.
- */
-export async function detectContactMood(apiKey, recentReceivedTexts, contactName) {
-  if (!apiKey) return null;
-  const joined = (recentReceivedTexts || [])
-    .filter(Boolean)
-    .slice(-6)
-    .map((t, i) => `${i + 1}. ${String(t).slice(0, 400)}`)
-    .join('\n');
-  if (!joined || joined.replace(/[^a-zA-Z\u00C0-\uFFFF]/g, '').length < 6) return null;
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You detect the EMOTIONAL STATE of a person (named ${contactName || 'the contact'}) from their last few text messages. Read carefully — punctuation, length, slang, dryness, exclamation, swearing, emoji choice, topic.
-
-Output ONLY a JSON object: {
-  "mood": one of ["happy","excited","flirty","calm","neutral","tired","bored","anxious","sad","upset","angry","hurt","vulnerable","playful","romantic","stressed","grieving"],
-  "intensity": number 0.0–1.0 (how strong the mood is — 0.3 = mild, 0.7 = strong, 0.9 = overwhelming),
-  "evidence": short phrase quoting what tipped you off (max 100 chars),
-  "suggestedTone": one short sentence telling the replier exactly how to adjust tone (e.g. "softer, shorter, no jokes — let her feel heard", "match the hype, caps + 🔥", "stay light, don't pry, give space")
-}
-
-Rules:
-- Default to "neutral" with intensity 0.2 if the messages are mundane.
-- "upset/sad/angry/hurt/grieving/anxious" should trigger softer tone guidance — NO jokes, NO sarcasm, shorter replies.
-- "happy/excited/playful/flirty" can match energy.
-- Don't invent emotions that aren't in the text. Be conservative.`,
-          },
-          { role: 'user', content: `Recent messages from ${contactName || 'them'}:\n${joined}` },
-        ],
-        max_tokens: 200,
-        temperature: 0.2,
-        response_format: { type: 'json_object' },
-      }),
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
-    if (!parsed.mood) return null;
-    return {
-      mood: String(parsed.mood).toLowerCase(),
-      intensity: Math.max(0, Math.min(1, Number(parsed.intensity) || 0.3)),
-      evidence: String(parsed.evidence || '').slice(0, 140),
-      suggestedTone: String(parsed.suggestedTone || '').slice(0, 220),
-      detectedAt: new Date().toISOString(),
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Extract / update the relationship memory graph from recent messages.
- * Merges with the existing graph JSON and returns a new graph object:
- * { people: [{name, relation, notes}], places: [{name, notes}],
- *   events: [{name, date, notes}], promises: [{who, what, due, status}] }.
- * Returns the existing graph on failure.
- */
-export async function updateRelationshipGraph(apiKey, messages, existingGraph, contactName, { timezone } = {}) {
-  if (!apiKey) return existingGraph || null;
-  const convoText = (messages || [])
-    .map(m => `${m.direction === 'sent' ? 'You' : (contactName || 'Them')}: ${m.content || '(media)'}`)
-    .join('\n')
-    .slice(-6000);
-  if (!convoText.trim()) return existingGraph || null;
-
-  const t = buildTimeContext(timezone);
-  const existingJson = existingGraph ? JSON.stringify(existingGraph).slice(0, 6000) : '{}';
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You maintain a RELATIONSHIP MEMORY GRAPH for a private chat between the phone owner ("You") and ${contactName || 'a contact'}. Today is ${t.todayFull} (${t.tz}).
-
-You are given:
-1. The CURRENT graph (JSON, may be empty).
-2. NEW messages from the conversation.
-
-Your job: return an UPDATED graph as JSON. Merge new facts with the existing graph. Do not lose existing entries unless they're clearly resolved or contradicted.
-
-Schema (return EXACTLY this shape):
-{
-  "people": [{"name": "string", "relation": "who they are to the contact (e.g. mom, best friend, boss, ex)", "notes": "short context"}],
-  "places": [{"name": "string", "notes": "what this place means (home, gym, hometown, planned trip)"}],
-  "events": [{"name": "string", "date": "YYYY-MM-DD or null", "notes": "what's happening"}],
-  "promises": [{"who": "you" | "them", "what": "the commitment", "due": "YYYY-MM-DD or natural phrase or null", "status": "open" | "done" | "missed"}]
-}
-
-Rules:
-- ONLY include entries with real evidence in the conversation. Don't invent.
-- For promises: capture concrete commitments ("i'll call you friday", "send me the pic later", "we'll meet sunday"). Resolve to "done" if a later message clearly fulfilled it, "missed" if the deadline passed without fulfillment.
-- Normalize dates relative to today when possible (e.g. "friday" → next Friday's YYYY-MM-DD).
-- Cap each array at 25 most relevant items. Drop oldest "done"/"missed" promises first.
-- Return ONLY the JSON, no commentary.`,
-          },
-          { role: 'user', content: `CURRENT GRAPH:\n${existingJson}\n\nNEW MESSAGES:\n${convoText}` },
-        ],
-        max_tokens: 1400,
-        temperature: 0.2,
-        response_format: { type: 'json_object' },
-      }),
-    });
-    if (!response.ok) return existingGraph || null;
-    const data = await response.json();
-    const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
-    return {
-      people: Array.isArray(parsed.people) ? parsed.people.slice(0, 25) : [],
-      places: Array.isArray(parsed.places) ? parsed.places.slice(0, 25) : [],
-      events: Array.isArray(parsed.events) ? parsed.events.slice(0, 25) : [],
-      promises: Array.isArray(parsed.promises) ? parsed.promises.slice(0, 25) : [],
-      updatedAt: new Date().toISOString(),
-    };
-  } catch {
-    return existingGraph || null;
   }
 }

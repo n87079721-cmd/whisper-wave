@@ -27,12 +27,8 @@ const botInstances = new Map();
 //   sensitiveAlerts: Map<token, { jid, contactName }>, // token -> sensitive alert context for "🤖 AI reply" button
 // }
 
-import { randomBytes } from 'crypto';
 function makeToken() {
-  // Cryptographically random 12-char token (~72 bits). Telegram callback_data
-  // is limited to 64 bytes total, so keep this short. Unguessable so an
-  // attacker who somehow sees a chat ID can't forge button taps.
-  return randomBytes(9).toString('base64url');
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
 
 function parseChatIds(raw) {
@@ -64,7 +60,6 @@ function getBotState(userId) {
       polling: false, offset: 0,
       awaitingCustom: new Map(),
       lastReplies: new Map(),
-      lastCustomInstructions: new Map(),
       previews: new Map(),
       activeTokenByJid: new Map(),
       vnInFlight: new Set(),
@@ -75,7 +70,6 @@ function getBotState(userId) {
   const inst = botInstances.get(userId);
   if (!inst.lastReplies) inst.lastReplies = new Map();
   if (!inst.awaitingCustom) inst.awaitingCustom = new Map();
-  if (!inst.lastCustomInstructions) inst.lastCustomInstructions = new Map();
   if (!inst.previews) inst.previews = new Map();
   if (!inst.activeTokenByJid) inst.activeTokenByJid = new Map();
   if (!inst.vnInFlight) inst.vnInFlight = new Set();
@@ -92,27 +86,6 @@ export function getLastPreviewedReply(userId, jid) {
   const state = botInstances.get(userId);
   if (!state?.lastReplies) return null;
   return state.lastReplies.get(jid) || null;
-}
-
-/**
- * Per-jid "custom mode" memory. Once the user sent a custom instruction for a
- * reply, we remember it so that subsequent 🔄 Rewrite taps keep applying that
- * same intent (instead of falling back to a vanilla rewrite that ignores
- * everything the user just typed). Cleared on Cancel and on a fresh incoming
- * conversation that produces a non-custom preview.
- */
-export function getLastCustomInstructions(userId, jid) {
-  const state = botInstances.get(userId);
-  if (!state?.lastCustomInstructions) return null;
-  return state.lastCustomInstructions.get(jid) || null;
-}
-export function setLastCustomInstructions(userId, jid, instructions) {
-  const state = getBotState(userId);
-  if (instructions) state.lastCustomInstructions.set(jid, String(instructions));
-}
-export function clearLastCustomInstructions(userId, jid) {
-  const state = botInstances.get(userId);
-  if (state?.lastCustomInstructions) state.lastCustomInstructions.delete(jid);
 }
 
 /**

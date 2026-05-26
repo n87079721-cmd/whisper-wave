@@ -57,25 +57,16 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
     setPairingCode(null);
     setPairingError(null);
     try {
-      // requestPairingCode only works once the WA Web page has loaded the
-      // AuthStore (i.e. it has reached qr_waiting). Kick off a connect if
-      // we're disconnected, then poll status until we're ready — up to 30s.
-      if (status === 'disconnected' || status === 'reconnecting') {
-        try { await api.reconnect(); } catch {}
-      }
-      const deadline = Date.now() + 30_000;
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const s = await api.getStatus().catch(() => null);
-        if (s?.status === 'qr_waiting' || s?.status === 'connected') break;
-        if (Date.now() > deadline) break;
-        await new Promise(r => setTimeout(r, 1500));
-      }
+      if (status === 'disconnected') { await api.reconnect(); await new Promise(r => setTimeout(r, 2000)); }
       const result = await api.pairPhone(phoneNumber.trim());
       const nextCode = String(result?.code || '').trim();
-      if (!nextCode) throw new Error('No pairing code was generated. Try again in a few seconds.');
-      setPairingCode(nextCode);
-      toast.success('Pairing code generated!');
+      if (nextCode) {
+        setPairingCode(nextCode);
+        toast.success('Pairing code generated!');
+      } else {
+        await refresh();
+        toast.success('Pairing request sent — waiting for code...');
+      }
     } catch (err: any) {
       const message = err?.message || 'Phone pairing failed';
       if (message.includes('temporarily unavailable')) {

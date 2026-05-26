@@ -6,8 +6,8 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuid } from 'uuid';
 import { execSync } from 'child_process';
-import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory, detectAndTranslate, translateToLanguage, buildTimeContext, detectContactMood, updateRelationshipGraph } from './ai.js';
-import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, getLastCustomInstructions, setLastCustomInstructions, clearLastCustomInstructions, claimPreviewByToken, consumeSensitiveAlert, sendVoiceNoteTranscript, sendForeignLanguageAlert } from './telegram.js';
+import { generateReply, shouldReact, shouldAlsoReplyAfterReaction, detectSensitiveTopic, generateConversationStarter, generateConversationSummary, compactMemory, detectAndTranslate, translateToLanguage, buildTimeContext } from './ai.js';
+import { sendReplyPreview, sendSensitiveAlert, isTelegramConfigured, getLastPreviewedReply, claimPreviewByToken, consumeSensitiveAlert, sendVoiceNoteTranscript, sendForeignLanguageAlert } from './telegram.js';
 import { transcribeAudio, generateVoiceNote } from './elevenlabs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -18,30 +18,6 @@ const STATUS_MEDIA_DIR = path.join(DATA_DIR, 'status-media');
 
 // Per-user instance store
 const userInstances = new Map(); // userId -> instance object
-
-// Module-level shared DB handle. Set on the first call into initWhatsApp /
-// getOrInitWhatsApp / autoReconnectAll so helpers that don't receive a `db`
-// argument (e.g. sendToResolvedTarget) can still query.
-let sharedDb = null;
-function rememberDb(db) {
-  if (db && !sharedDb) sharedDb = db;
-}
-
-// Run the PRAGMA + ALTER TABLE migration once per process per DB handle.
-const _messageColsEnsured = new WeakSet();
-function ensureMessageColumns(db) {
-  if (!db || _messageColsEnsured.has(db)) return;
-  try {
-    const cols = db.prepare("PRAGMA table_info(messages)").all().map(c => c.name);
-    if (!cols.includes('is_edited'))        db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
-    if (!cols.includes('is_starred'))       db.exec("ALTER TABLE messages ADD COLUMN is_starred INTEGER DEFAULT 0");
-    if (!cols.includes('is_view_once'))     db.exec("ALTER TABLE messages ADD COLUMN is_view_once INTEGER DEFAULT 0");
-    if (!cols.includes('reply_to_id'))      db.exec("ALTER TABLE messages ADD COLUMN reply_to_id TEXT");
-    if (!cols.includes('reply_to_content')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_content TEXT");
-    if (!cols.includes('reply_to_sender'))  db.exec("ALTER TABLE messages ADD COLUMN reply_to_sender TEXT");
-    _messageColsEnsured.add(db);
-  } catch {}
-}
 
 function getUserAuthDir(userId) {
   return path.join(DATA_DIR, 'auth', userId);
@@ -217,15 +193,10 @@ function getReconnectStaleThresholdMs(userId, db) {
 }
 
 function getBackgroundContactSyncDelayMs(userId, db) {
-  // Contact-book sync is what upgrades phone-number labels to real names
-  // (pushname/verifiedName/saved). Delaying it by 10–45s left the chat list
-  // showing raw numbers until the user manually hit Recover Chats. Kick it
-  // off almost immediately — getContacts() is cheap and runs in parallel
-  // with the chat history import.
   const scale = getAccountScale(userId, db);
-  if (scale === 'huge') return 3000;
-  if (scale === 'large') return 2000;
-  return 1000;
+  if (scale === 'huge') return 45000;
+  if (scale === 'large') return 20000;
+  return 10000;
 }
 
 function getRecoverySyncDelayMs(userId, db) {
@@ -314,49 +285,34 @@ async function sendToResolvedTarget(userId, jid, executor) {
     throw new Error('WhatsApp not connected');
   }
 
-  const targets = new Set(await resolveSendTargets(inst.client, jid));
+  const targets = await resolveSendTargets(inst.client, jid);
 
   // If jid is @lid, also try the phone number from contacts DB
   if (jid.endsWith('@lid')) {
     try {
-      const db = sharedDb;
-      const contact = db?.prepare('SELECT phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
+      const { db } = await import('./db.js');
+      const contact = db.prepare('SELECT phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
       if (contact?.phone) {
         const digits = contact.phone.replace(/[^0-9]/g, '');
         if (digits.length >= 7) {
-          targets.add(`${digits}@c.us`);
+          targets.push(`${digits}@c.us`);
           try {
             const numberId = await inst.client.getNumberId(digits);
             const serialized = numberId?._serialized || numberId?.id?._serialized || (typeof numberId === 'string' ? numberId : null);
-            if (serialized) targets.add(serialized);
+            if (serialized) targets.push(serialized);
           } catch {}
         }
       }
     } catch {}
   }
 
-  const targetList = Array.from(targets).filter(Boolean);
-
-  if (targetList.length === 0) {
+  if (targets.length === 0) {
     throw new Error('No valid WhatsApp target found');
   }
 
   let lastError = null;
 
-  for (const target of targetList) {
-    try {
-      if (typeof inst.client.getNumberId === 'function' && /@c\.us$/.test(target)) {
-        const digits = phoneFromJid(toJid(target)).replace(/[^0-9]/g, '');
-        const numberId = digits ? await inst.client.getNumberId(digits) : null;
-        if (!numberId) {
-          lastError = new Error('WhatsApp number is not registered');
-          continue;
-        }
-      }
-    } catch (err) {
-      lastError = err;
-    }
-
+  for (const target of targets) {
     try {
       const chat = await inst.client.getChatById(target);
       return await executor({ client: inst.client, target, chat });
@@ -495,10 +451,15 @@ function getDefaultMediaName(msgType, extension) {
 }
 
 function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce, isEdited, replyToId, replyToContent, replyToSender }) {
-  // Ensure columns exist — cache the result so we don't run PRAGMA + 5x
-  // conditional ALTER TABLEs on every single incoming message.
-  ensureMessageColumns(db);
-  const scopedId = scopeMessageId(userId, id);
+  // Ensure columns exist
+  try {
+    const cols = db.prepare("PRAGMA table_info(messages)").all().map(c => c.name);
+    if (!cols.includes('is_edited')) db.exec("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0");
+    if (!cols.includes('is_starred')) db.exec("ALTER TABLE messages ADD COLUMN is_starred INTEGER DEFAULT 0");
+    if (!cols.includes('reply_to_id')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_id TEXT");
+    if (!cols.includes('reply_to_content')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_content TEXT");
+    if (!cols.includes('reply_to_sender')) db.exec("ALTER TABLE messages ADD COLUMN reply_to_sender TEXT");
+  } catch {}
 
   db.prepare(`
     INSERT INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status, duration, media_path, media_name, media_mime, is_view_once, is_edited, reply_to_id, reply_to_content, reply_to_sender)
@@ -526,7 +487,7 @@ function upsertMessageRecord(db, { id, userId, contactId, jid, content, type, di
       reply_to_id = COALESCE(excluded.reply_to_id, messages.reply_to_id),
       reply_to_content = COALESCE(excluded.reply_to_content, messages.reply_to_content),
       reply_to_sender = COALESCE(excluded.reply_to_sender, messages.reply_to_sender)
-  `).run(scopedId, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0, isEdited ? 1 : 0, replyToId || null, replyToContent || null, replyToSender || null);
+  `).run(id, userId, contactId, jid, content, type, direction, timestamp, status, duration, mediaPath, mediaName, mediaMime, isViewOnce ? 1 : 0, isEdited ? 1 : 0, replyToId || null, replyToContent || null, replyToSender || null);
 }
 
 async function editMessage(userId, db, messageId, newContent) {
@@ -542,7 +503,7 @@ async function editMessage(userId, db, messageId, newContent) {
 
   // Try to edit via whatsapp-web.js
   try {
-    const msg = await inst.client.getMessageById(rawMessageId(userId, messageId));
+    const msg = await inst.client.getMessageById(messageId);
     if (!msg) throw new Error('Message not found in WhatsApp');
     await msg.edit(newContent);
   } catch (err) {
@@ -557,28 +518,6 @@ async function editMessage(userId, db, messageId, newContent) {
 
 function isUuidLike(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
-}
-
-function scopeMessageId(userId, id) {
-  const raw = String(id || uuid());
-  return raw.startsWith(`${userId}:`) ? raw : `${userId}:${raw}`;
-}
-
-function rawMessageId(userId, id) {
-  const raw = String(id || '');
-  return raw.startsWith(`${userId}:`) ? raw.slice(`${userId}:`.length) : raw;
-}
-
-function resolveStoredMessageId(db, userId, id) {
-  const raw = rawMessageId(userId, id) || uuid();
-  try {
-    const rawRow = db?.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(raw, userId);
-    if (rawRow?.id) return rawRow.id;
-    const scoped = scopeMessageId(userId, raw);
-    const scopedRow = db?.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(scoped, userId);
-    if (scopedRow?.id) return scopedRow.id;
-  } catch {}
-  return scopeMessageId(userId, raw);
 }
 
 // ── Exports ──────────────────────────────────────────────
@@ -676,13 +615,7 @@ export function onWhatsAppEvent(userId, listener) {
 
 function emit(userId, event, data) {
   const inst = getInstance(userId);
-  inst.eventListeners.forEach(l => {
-    try {
-      l(event, data);
-    } catch (err) {
-      console.warn(`⚠️ [${userId}] Realtime listener failed for ${event}: ${err?.message || err}`);
-    }
-  });
+  inst.eventListeners.forEach(l => l(event, data));
 }
 
 export async function requestPairingWithPhone(userId, phoneNumber) {
@@ -692,22 +625,6 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
   const cleaned = phoneNumber.replace(/[^0-9]/g, '');
   if (cleaned.length < 8) throw new Error('Invalid phone number');
   inst.pendingPairingPhone = cleaned;
-
-  // Wait for the WA Web page to actually reach the QR screen before asking
-  // for a pairing code. requestPairingCode() requires window.AuthStore to be
-  // loaded — calling it too early throws an empty/garbage error and the user
-  // sees "no code generated".
-  {
-    const deadline = Date.now() + 25_000;
-    while (inst.connectionStatus !== 'qr_waiting' && Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 500));
-      if (!inst.client) throw new Error('WhatsApp client not initialised');
-      if (inst.connectionStatus === 'connected') throw new Error('Already connected');
-    }
-    if (inst.connectionStatus !== 'qr_waiting') {
-      throw new Error('WhatsApp is still starting up. Wait a few seconds and try again.');
-    }
-  }
 
   // Ensure the browser-side onCodeReceivedEvent function exists.
   // When the client was initialized in QR mode (no pairWithPhoneNumber option),
@@ -719,7 +636,6 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
         if (typeof window.onCodeReceivedEvent !== 'function') {
           window.onCodeReceivedEvent = (code) => {
             window._pairingCode = code;
-            return code;
           };
         }
       });
@@ -729,13 +645,7 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
   }
 
   try {
-    let code = await inst.client.requestPairingCode(cleaned);
-    if (!code && inst.client?.pupPage) {
-      code = await inst.client.pupPage.evaluate(() => window._pairingCode || null).catch(() => null);
-    }
-    if (!code) {
-      throw new Error('WhatsApp did not return a pairing code. Wait a few seconds and try again.');
-    }
+    const code = await inst.client.requestPairingCode(cleaned);
     inst.pairingCode = code;
     emit(userId, 'pairing_code', { code });
     return code;
@@ -754,7 +664,6 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
 }
 
 export function initWhatsApp(userId, db) {
-  rememberDb(db);
   startConnection(userId, db);
   return {
     getState: () => getWhatsAppState(userId),
@@ -766,14 +675,13 @@ export function initWhatsApp(userId, db) {
     disconnect: () => softDisconnect(userId),
     clearSession: () => clearSession(userId, db),
     getSocket: () => getInstance(userId).client,
-    getMessageById: (msgId) => getInstance(userId).client?.getMessageById(rawMessageId(userId, msgId)),
+    getMessageById: (msgId) => getInstance(userId).client?.getMessageById(msgId),
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
     triggerSync: (opts) => recoverSync(userId, db, opts || { force: true }),
   };
 }
 
 export function getOrInitWhatsApp(userId, db) {
-  rememberDb(db);
   const inst = getInstance(userId);
 
   const savedSessionExists = hasSavedSession(userId);
@@ -798,7 +706,7 @@ export function getOrInitWhatsApp(userId, db) {
     disconnect: () => softDisconnect(userId),
     clearSession: () => clearSession(userId, db),
     getSocket: () => inst.client,
-    getMessageById: (msgId) => inst.client?.getMessageById(rawMessageId(userId, msgId)),
+    getMessageById: (msgId) => inst.client?.getMessageById(msgId),
     requestPairingCode: (phone) => requestPairingWithPhone(userId, phone),
     triggerSync: (opts) => recoverSync(userId, db, opts || { force: true }),
     getInstance: () => inst,
@@ -955,8 +863,9 @@ function scheduleRecoverySync(userId, db, delayMs = 90000) {
     }
 
     const needsRecovery =
-      !inst.syncState.lastHistorySyncAt ||
-      ['waiting_history', 'recovering'].includes(inst.syncState.phase);
+      inst.syncState.totalDbContacts === 0 ||
+      inst.syncState.totalDbMessages < 25 ||
+      ['waiting_history', 'partial', 'recovering'].includes(inst.syncState.phase);
 
     if (!needsRecovery) return;
 
@@ -969,16 +878,12 @@ function scheduleRecoverySync(userId, db, delayMs = 90000) {
 // ── Auto-reconnect all users on server start ─────────────
 
 export function autoReconnectAll(db) {
-  rememberDb(db);
   try {
     const usersWithSessions = db.prepare('SELECT id, username FROM users').all()
       .filter((user) => hasSavedSession(user.id));
 
     usersWithSessions.forEach((user, index) => {
-      // Stagger reconnects so multiple Chromium instances don't fight for
-      // CPU/disk on boot, but keep it short — 12s/user meant the 3rd user
-      // sat on "Reconnect now" for 30+ seconds after every restart.
-      const delayMs = index * 4000;
+      const delayMs = index * 12000;
       console.log(`🔄 Queued auto-reconnect for ${user.username} (${user.id}) in ${Math.round(delayMs / 1000)}s`);
       setTimeout(() => {
         const inst = getInstance(user.id);
@@ -1071,6 +976,9 @@ async function startConnection(userId, db, options = {}) {
   }
 
   try {
+    const authDir = getUserAuthDir(userId);
+    if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
+
     const client = new Client({
       authStrategy: new LocalAuth({
         clientId: userId,
@@ -1078,22 +986,6 @@ async function startConnection(userId, db, options = {}) {
       }),
       takeoverOnConflict: true,
       takeoverTimeoutMs: 0,
-      // Pin the WhatsApp Web build that whatsapp-web.js loads inside Puppeteer.
-      // WhatsApp Web ships near-daily refactors that break wwebjs' Store
-      // injector ("Cannot read properties of undefined (reading
-      // 'waitForChatLoading')") so chats freeze and sends silently fail.
-      // We pull a known-existing HTML from the wppconnect wa-version CDN.
-      // Override with WA_WEB_VERSION env var (any filename from
-      // github.com/wppconnect-team/wa-version/tree/main/html, without .html).
-      // If the remote fetch fails, wwebjs silently falls back to live WA Web —
-      // which is what causes this bug — so we ALSO verify the URL is reachable
-      // at startup and log loudly if it isn't.
-      webVersionCache: {
-        type: 'remote',
-        remotePath: `https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/${
-          process.env.WA_WEB_VERSION || '2.3000.1040125391-alpha'
-        }.html`,
-      },
       puppeteer: {
         headless: true,
         args: [
@@ -1297,21 +1189,11 @@ async function startConnection(userId, db, options = {}) {
       try {
         if (generation !== inst.connectionGeneration) return;
 
-        let chat = null;
-        let contact = null;
-        try {
-          chat = await msg.getChat();
-        } catch (chatErr) {
-          console.warn(`⚠️ [${userId}] Could not load chat for live message ${msg.id?._serialized || msg.id?.id || 'unknown'}: ${chatErr?.message || chatErr}`);
-        }
-        try {
-          contact = await msg.getContact();
-        } catch (contactErr) {
-          console.warn(`⚠️ [${userId}] Could not load contact for live message ${msg.id?._serialized || msg.id?.id || 'unknown'}: ${contactErr?.message || contactErr}`);
-        }
+        const chat = await msg.getChat();
+        const contact = await msg.getContact();
         const jid = toJid(msg.from);
         const isFromMe = msg.fromMe;
-        const isGroup = !!chat?.isGroup || jid.endsWith('@g.us') || toJid(msg.to).endsWith('@g.us');
+        const isGroup = chat.isGroup;
 
         // Skip status broadcasts
         if (jid === 'status@broadcast' || msg.isStatus) {
@@ -1351,19 +1233,11 @@ async function startConnection(userId, db, options = {}) {
 
         const contactId = getOrCreateContact(db, userId, resolvedJid, phone, candidate, isGroup);
         if (!contactId) return;
-        try { db.prepare('UPDATE contacts SET has_chat = 1 WHERE id = ? AND user_id = ?').run(contactId, userId); } catch {}
-
-        // If this contact was previously hidden via "Delete conversation", a fresh live
-        // message means the user is back in touch — un-hide so it reappears in the chat list.
-        try {
-          db.prepare('UPDATE contacts SET is_hidden = 0 WHERE id = ? AND user_id = ? AND COALESCE(is_hidden, 0) = 1')
-            .run(contactId, userId);
-        } catch {}
 
         // Determine message type and content
         const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
         const direction = isFromMe ? 'sent' : 'received';
-        const msgId = resolveStoredMessageId(db, userId, msg.id?._serialized || msg.id?.id || uuid());
+        const msgId = msg.id?._serialized || msg.id?.id || uuid();
         const isViewOnce = !!(msg.isViewOnce || msg._data?.isViewOnce);
 
         let mediaPath = null;
@@ -1478,8 +1352,6 @@ async function startConnection(userId, db, options = {}) {
               const sumKeyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
               if (sumKeyRow?.value) {
                 triggerConversationSummary(userId, db, contactId, resolvedJid, contactName || phone, sumKeyRow.value).catch(() => {});
-                // Update real-time mood snapshot for this contact (cheap, ~1 call).
-                triggerMoodDetection(userId, db, contactId, contactName || phone, sumKeyRow.value).catch(() => {});
               }
             } catch {}
 
@@ -1562,7 +1434,7 @@ async function startConnection(userId, db, options = {}) {
     // ── Message edit events ──
     client.on('message_edit', async (msg, newBody, prevBody) => {
       try {
-        const msgId = resolveStoredMessageId(db, userId, msg.id?._serialized || msg.id?.id);
+        const msgId = msg.id?._serialized || msg.id?.id;
         if (!msgId) return;
         const existing = db.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(msgId, userId);
         if (existing) {
@@ -1580,7 +1452,7 @@ async function startConnection(userId, db, options = {}) {
       try {
         if (generation !== inst.connectionGeneration) return;
         if (!msg.fromMe) return; // Only track acks for messages we sent
-        const msgId = resolveStoredMessageId(db, userId, msg.id?._serialized || msg.id?.id);
+        const msgId = msg.id?._serialized || msg.id?.id;
         if (!msgId) return;
 
         // ACK levels: -1=error, 0=pending, 1=sent, 2=delivered, 3=read, 4=played
@@ -1600,7 +1472,7 @@ async function startConnection(userId, db, options = {}) {
     client.on('message_reaction', async (reaction) => {
       try {
         if (generation !== inst.connectionGeneration) return;
-        const msgId = resolveStoredMessageId(db, userId, reaction.msgId?._serialized || reaction.msgId?.id);
+        const msgId = reaction.msgId?._serialized || reaction.msgId?.id;
         if (!msgId) return;
         const senderJid = toJid(reaction.senderId || reaction.id?.participant || '');
         const emoji = reaction.reaction || '';
@@ -1653,30 +1525,15 @@ async function startConnection(userId, db, options = {}) {
       }
     });
 
-    // Initialize client. For fresh accounts, initialize() can stay pending while
-    // the QR is waiting to be scanned, so never kill a live QR after 60 seconds.
-    const INIT_TIMEOUT_MS = 60_000;
+    // Initialize client with a timeout to prevent infinite hangs
+    const INIT_TIMEOUT_MS = 60_000; // 60s — if no QR/auth by then, something is stuck
+    let initTimedOut = false;
     const initPromise = client.initialize();
-    initPromise
-      .then(() => console.log(`🔄 [${userId}] WhatsApp client initialized successfully`))
-      .catch((err) => {
-        if (generation !== inst.connectionGeneration || inst.client !== client) return;
-        console.error(`initialize error [${userId}]:`, err?.message || err);
-        inst.lastDisconnectReason = String(err?.message || err || 'initialize_error');
-        if (inst.connectionStatus !== 'qr_waiting' && inst.connectionStatus !== 'connected') {
-          inst.connectionStatus = 'reconnecting';
-          emit(userId, 'status', { status: 'reconnecting' });
-          scheduleReconnect(userId, db, generation);
-        }
-      });
-    const timeoutPromise = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (inst.connectionStatus === 'qr_waiting' || inst.connectionStatus === 'connected') return resolve('waiting');
-        reject(new Error('initialize() timed out before QR/auth'));
-      }, INIT_TIMEOUT_MS);
-      timer.unref?.();
-    });
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => { initTimedOut = true; reject(new Error('initialize() timed out after 60s')); }, INIT_TIMEOUT_MS)
+    );
     await Promise.race([initPromise, timeoutPromise]);
+    console.log(`🔄 [${userId}] WhatsApp client initialized successfully`);
   } catch (err) {
     console.error(`startConnection error [${userId}]:`, err?.message || err);
     clearConnectionWatchdog(userId);
@@ -1718,7 +1575,7 @@ function getMessagePayload(msg) {
     msgType = 'voice';
     content = msg.body || '🎤 Voice message';
     duration = msg.duration || null;
-    mimetype = msg.mimetype || 'audio/ogg';
+    mimetype = msg.mimetype || 'audio/ogg; codecs=opus';
     mediaName = mediaName || 'voice-note.ogg';
   } else if (rawType === 'sticker') {
     msgType = 'sticker';
@@ -1828,7 +1685,7 @@ export async function streamMediaForMessage(userId, messageId) {
   }
 
   try {
-    const msg = await inst.client.getMessageById(rawMessageId(userId, messageId));
+    const msg = await inst.client.getMessageById(messageId);
     if (!msg) throw new Error('Message not found in WhatsApp');
     if (!msg.hasMedia) throw new Error('Message has no media');
 
@@ -1984,7 +1841,6 @@ async function syncChats(userId, db, { force = false } = {}) {
     let contactChanges = 0;
     let messageCount = 0;
     let skippedChats = 0;
-    let failedChats = 0;
 
     // Sort chats by most recent activity first
     const sortedChats = chats.sort((a, b) => {
@@ -2010,9 +1866,8 @@ async function syncChats(userId, db, { force = false } = {}) {
           const isGroup = chat.isGroup;
           const candidate = getNameCandidate({ name: chat.name, pushName: chat.name });
 
-          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup, new Date(((chat.timestamp || Date.now() / 1000) * 1000)).toISOString());
+          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
           if (!contactId) continue;
-          try { db.prepare('UPDATE contacts SET has_chat = 1 WHERE id = ? AND user_id = ?').run(contactId, userId); } catch {}
           contactChanges++;
 
           // Sync archive status
@@ -2040,15 +1895,12 @@ async function syncChats(userId, db, { force = false } = {}) {
 
           // Fetch recent messages for this chat
           try {
-            if ((force || existingCount === 0) && typeof inst.client.syncHistory === 'function') {
-              try { await inst.client.syncHistory(chat.id._serialized); } catch {}
-            }
             const messages = await chat.fetchMessages({ limit: MSG_LIMIT_PER_CHAT });
             for (const msg of messages) {
               try {
                 if (!msg.body && !msg.hasMedia) continue;
 
-                const msgId = scopeMessageId(userId, msg.id?._serialized || msg.id?.id || uuid());
+                const msgId = msg.id?._serialized || msg.id?.id || uuid();
 
                 // Skip if message already exists in DB
                 const exists = db.prepare('SELECT id FROM messages WHERE id = ? AND user_id = ?').get(msgId, userId);
@@ -2090,12 +1942,9 @@ async function syncChats(userId, db, { force = false } = {}) {
               } catch {}
             }
           } catch (err) {
-            failedChats++;
             console.log(`📜 [${userId}] Failed to fetch messages for ${jid}: ${err?.message}`);
           }
-        } catch {
-          failedChats++;
-        }
+        } catch {}
       }
 
       // Emit progress after each batch
@@ -2111,11 +1960,11 @@ async function syncChats(userId, db, { force = false } = {}) {
       }
     }
 
-    console.log(`📇 [${userId}] Synced ${contactChanges} chats, ${messageCount} messages (${skippedChats} skipped - already synced, ${failedChats} failed)`);
+    console.log(`📇 [${userId}] Synced ${contactChanges} chats, ${messageCount} messages (${skippedChats} skipped - already synced)`);
     const totalMessages = db.prepare('SELECT COUNT(*) as c FROM messages WHERE user_id = ?').get(userId)?.c || 0;
-    const finalPhase = failedChats > 0 && contactChanges === 0 && totalMessages === 0
-      ? 'partial'
-      : 'ready';
+    const finalPhase = (contactChanges > 0 || inst.syncState.totalDbContacts > 0) && (totalMessages > 0 || skippedChats > 0)
+      ? 'ready'
+      : 'partial';
     updateSyncState(userId, db, {
       phase: finalPhase,
       historyContacts: contactChanges,
@@ -2152,12 +2001,12 @@ async function recoverSync(userId, db, { force = false } = {}) {
   await syncChats(userId, db, { force });
 
   if (inst.connectionStatus === 'connected' && !inst.contactSyncInProgress) {
-    await syncContacts(userId, db, { skipChatSync: true }).catch(err => {
+    syncContacts(userId, db, { skipChatSync: true }).catch(err => {
       console.error(`Recovery contact sync error [${userId}]:`, err?.message || err);
     });
   }
 
-  const phase = inst.syncState.phase === 'partial' ? 'partial' : 'ready';
+  const phase = (inst.syncState.totalDbMessages > 10 && inst.syncState.totalDbContacts > 0) ? 'ready' : 'partial';
   updateSyncState(userId, db, { phase });
   console.log(`🔄 [${userId}] Recovery sync complete — phase: ${phase}`);
   emit(userId, 'sync_state', inst.syncState);
@@ -2174,60 +2023,19 @@ export async function recoverSingleChat(userId, db, contactId) {
   const contact = db.prepare('SELECT jid FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
   if (!contact) throw new Error('Contact not found');
 
-  // Explicit user recovery → un-hide the chat (they want it back).
-  try { db.prepare('UPDATE contacts SET is_hidden = 0 WHERE id = ? AND user_id = ?').run(contactId, userId); } catch {}
-
   const chatId = fromJid(contact.jid);
   console.log(`📜 [${userId}] On-demand history request for ${contact.jid}`);
 
   try {
     const chat = await inst.client.getChatById(chatId);
-
-    // whatsapp-web.js' fetchMessages occasionally throws
-    // "Cannot read properties of undefined (reading 'waitForChatLoading')"
-    // when the WA Web Store hasn't fully hydrated this chat yet (common on
-    // brand-new chats, LID-only contacts, or right after pairing). Nudge the
-    // store, then retry a couple of times before giving up.
-    async function fetchWithRetry() {
-      let lastErr = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          return await chat.fetchMessages({ limit: 100 });
-        } catch (err) {
-          lastErr = err;
-          const msg = String(err?.message || '');
-          if (!/waitForChatLoading|undefined/.test(msg)) throw err;
-          // Try to coax the Store into loading the chat
-          try { await inst.client.pupPage?.evaluate?.((id) => {
-            // eslint-disable-next-line no-undef
-            return window.Store?.Chat?.find?.(id);
-          }, chatId); } catch {}
-          await new Promise(r => setTimeout(r, 800));
-        }
-      }
-      throw lastErr;
-    }
-
-    let messages = [];
-    try {
-      messages = await fetchWithRetry();
-    } catch (err) {
-      const msg = String(err?.message || '');
-      if (/waitForChatLoading|undefined/.test(msg)) {
-        // Treat as "no history available yet" instead of a hard error so the
-        // UI doesn't surface a scary stack trace for empty/new chats.
-        emit(userId, 'history_sync', { chats: 1, messages: 0 });
-        return { success: true, message: 'No history available for this chat yet.' };
-      }
-      throw err;
-    }
+    const messages = await chat.fetchMessages({ limit: 100 });
 
     let count = 0;
     for (const msg of messages) {
       try {
         if (!msg.body && !msg.hasMedia) continue;
         const { msgType, content, duration, mimetype, mediaName } = getMessagePayload(msg);
-        const msgId = scopeMessageId(userId, msg.id?._serialized || msg.id?.id || uuid());
+        const msgId = msg.id?._serialized || msg.id?.id || uuid();
 
         let mediaPath = null;
         let resolvedMediaName = mediaName;
@@ -2265,11 +2073,7 @@ export async function recoverSingleChat(userId, db, contactId) {
     emit(userId, 'history_sync', { chats: 1, messages: count });
     return { success: true, message: `Recovered ${count} messages for this chat.` };
   } catch (err) {
-    const raw = String(err?.message || err);
-    const friendly = /waitForChatLoading|undefined/.test(raw)
-      ? 'No history available for this chat yet. Try again in a few seconds.'
-      : raw;
-    return { success: false, message: `Failed to recover chat: ${friendly}` };
+    return { success: false, message: `Failed to recover chat: ${err?.message}` };
   }
 }
 
@@ -2308,10 +2112,8 @@ function buildContactSystemPrompt(db, userId, contactId) {
   let systemPrompt = '';
   let memory = '';
   let directive = '';
-  let moodState = null;
-  let graph = null;
   try {
-    const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires, memory_enabled, mood_state, relationship_graph FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
+    const contactRow = db.prepare("SELECT prompt_id, memory, active_directive, directive_expires, memory_enabled FROM contacts WHERE id = ? AND user_id = ?").get(contactId, userId);
     if (contactRow?.prompt_id) {
       const promptRow = db.prepare("SELECT content FROM prompts WHERE id = ? AND user_id = ?").get(contactRow.prompt_id, userId);
       systemPrompt = promptRow?.content || '';
@@ -2324,12 +2126,6 @@ function buildContactSystemPrompt(db, userId, contactId) {
     if (contactRow?.active_directive) {
       const notExpired = !contactRow.directive_expires || new Date() < new Date(contactRow.directive_expires);
       if (notExpired) directive = contactRow.active_directive;
-    }
-    if (contactRow?.mood_state && memoryEnabled !== 0) {
-      try { moodState = JSON.parse(contactRow.mood_state); } catch {}
-    }
-    if (contactRow?.relationship_graph && memoryEnabled !== 0) {
-      try { graph = JSON.parse(contactRow.relationship_graph); } catch {}
     }
   } catch {}
   if (!systemPrompt) {
@@ -2348,73 +2144,8 @@ function buildContactSystemPrompt(db, userId, contactId) {
   if (directive) {
     systemPrompt = `🎯 ACTIVE BEHAVIOR DIRECTIVE (must be followed on EVERY reply, no exceptions):\n${directive}\n\n────────\n\n${systemPrompt}\n\n────────\n\n🎯 REMINDER — ACTIVE DIRECTIVE STILL APPLIES: ${directive}`;
   }
-
-  // ── MOOD-AWARE TONE GUARD ──
-  if (moodState && moodState.mood) {
-    const detectedAgoMs = moodState.detectedAt ? (Date.now() - new Date(moodState.detectedAt).getTime()) : Infinity;
-    // Mood snapshots stay fresh for 30 minutes — after that, fall back to neutral
-    if (detectedAgoMs < 30 * 60 * 1000) {
-      const mood = moodState.mood;
-      const intensity = moodState.intensity || 0.3;
-      const tone = moodState.suggestedTone || '';
-      const heavyMoods = new Set(['upset','sad','angry','hurt','grieving','anxious','stressed','vulnerable','tired']);
-      const stricter = heavyMoods.has(mood) && intensity >= 0.4;
-      systemPrompt += `\n\n🎭 CONTACT MOOD RIGHT NOW: ${mood} (intensity ${intensity.toFixed(2)})${moodState.evidence ? ` — evidence: "${moodState.evidence}"` : ''}.\nTONE FOR THIS REPLY: ${tone || (stricter ? 'softer, shorter, no jokes. Let them feel heard.' : 'match their energy naturally.')}`;
-      if (stricter) {
-        systemPrompt += `\n• Do NOT joke, tease, or be sarcastic. Do NOT pivot to small talk or random questions.\n• Keep this reply SHORT (1-2 sentences). Lead with acknowledgement of how they feel.\n• If they're venting, don't immediately try to fix it. Sit with them first.`;
-      }
-    }
-  }
-
-  // ── RELATIONSHIP GRAPH (people, places, events, promises) ──
-  if (graph) {
-    const today = new Date();
-    const fmtDate = (d) => {
-      try { return new Date(d).toISOString().slice(0, 10); } catch { return null; }
-    };
-    const todayISO = fmtDate(today);
-    const openPromises = (graph.promises || []).filter(p => p && p.status !== 'done' && p.status !== 'missed');
-    const overdue = openPromises.filter(p => p.due && fmtDate(p.due) && fmtDate(p.due) < todayISO);
-    const dueSoon = openPromises.filter(p => p.due && fmtDate(p.due) && fmtDate(p.due) >= todayISO && fmtDate(p.due) <= fmtDate(new Date(today.getTime() + 7 * 86400000)));
-    const upcomingEvents = (graph.events || []).filter(e => e.date && fmtDate(e.date) && fmtDate(e.date) >= todayISO).slice(0, 5);
-    const keyPeople = (graph.people || []).slice(0, 10).map(p => `${p.name}${p.relation ? ` (${p.relation})` : ''}${p.notes ? ` — ${p.notes}` : ''}`);
-    const keyPlaces = (graph.places || []).slice(0, 8).map(p => `${p.name}${p.notes ? ` — ${p.notes}` : ''}`);
-
-    const blocks = [];
-    if (keyPeople.length) blocks.push(`PEOPLE IN THEIR LIFE:\n  - ${keyPeople.join('\n  - ')}`);
-    if (keyPlaces.length) blocks.push(`PLACES THAT MATTER:\n  - ${keyPlaces.join('\n  - ')}`);
-    if (upcomingEvents.length) blocks.push(`UPCOMING EVENTS:\n  - ${upcomingEvents.map(e => `${e.name}${e.date ? ` (${fmtDate(e.date)})` : ''}${e.notes ? ` — ${e.notes}` : ''}`).join('\n  - ')}`);
-    if (overdue.length) blocks.push(`⚠️ OVERDUE PROMISES (gently close the loop if it fits):\n  - ${overdue.map(p => `${p.who === 'you' ? 'YOU promised' : 'THEY promised'}: ${p.what}${p.due ? ` (was due ${fmtDate(p.due) || p.due})` : ''}`).join('\n  - ')}`);
-    if (dueSoon.length) blocks.push(`📌 PROMISES COMING UP (don't force, but if the topic fits, acknowledge):\n  - ${dueSoon.map(p => `${p.who === 'you' ? 'YOU' : 'THEY'} → ${p.what}${p.due ? ` (due ${fmtDate(p.due) || p.due})` : ''}`).join('\n  - ')}`);
-
-    if (blocks.length) {
-      systemPrompt += `\n\n🕸️ RELATIONSHIP GRAPH — use this to sound like you actually remember their life. Reference people by name when relevant. Surface a promise only when the conversation gives you a natural opening (don't force it).\n\n${blocks.join('\n\n')}`;
-    }
-  }
-
   if (memory) {
-    systemPrompt += `\n\n🧠 MEMORY OF PAST CONVERSATIONS — READ THIS BEFORE YOU WRITE A SINGLE WORD.
-
-MANDATORY PRE-REPLY CHECK (do this silently every time, even on a short reply):
-1. Scan the "Knows" list — does the contact's latest message reference anything you already KNOW? (a name, a plan, a feeling, a place, a person, a date). If yes, USE that fact — don't re-ask, don't act surprised, don't restart context.
-2. Scan the "Asked" list — have you already asked a question of this shape before? If yes, DO NOT ask it again. Pick a different angle or just react.
-3. Scan the "Open" threads — is there an unresolved promise or follow-up you owe them (or they owe you)? If the moment fits, close the loop ("did you end up…", "you said you'd send…"). Don't force it if it doesn't fit.
-4. Scan the most recent dated narrative — what was the LAST vibe and topic? Continue from there, don't reset.
-5. Check dates in memory against today's date above — if a trip/birthday/event has now passed or is today, react accordingly ("how was hawaii", "happy birthday today!!"), don't ask future-tense about a past event.
-
-⏳ MEMORY FRESHNESS — VERY IMPORTANT (this stops random old-memory pulls):
-• Every narrative block is dated like [Mon DD, YYYY HH:MM]. COMPARE that date to today's date above and treat memory in three tiers:
-   – RECENT (≤ 3 days old): fully active context. Reference freely, follow up on open threads, continue the vibe.
-   – MID (4–21 days old): only bring up if the contact's CURRENT message clearly relates to it (same topic, same person, same plan, same feeling). Otherwise leave it alone.
-   – OLD (> 21 days old): treat as background only. Do NOT randomly resurface old events, old questions, old plans, old moods unless the contact themselves brings it up first. No "how did that trip from last month go" out of nowhere. No re-asking things asked weeks ago.
-• "Asked (all-time)" and "Knows (all-time)" are a NEGATIVE LIST first — their main job is to stop you re-asking or re-learning. Don't pull a random item from them into a reply just because it's there. Only reference an item when the current message gives you a natural reason to.
-• If a dated event in memory has clearly passed (trip ended, show happened, birthday was last week), only mention it if the contact mentions it or it's been ≤ 3 days. Otherwise let it rest.
-• When in doubt about whether something is still relevant: stay in the present moment of THIS message instead of pulling old context.
-
-If the latest incoming message asks you something factual that's in memory, ANSWER from memory (any age is fine for facts they're asking about). If it references a person/event in memory, acknowledge them by name. Never say "who?" or "what?" about something already in the Knows list.
-
-MEMORY:
-${memory}`;
+    systemPrompt += `\n\nMEMORY OF PAST CONVERSATIONS — DO NOT REPEAT QUESTIONS ALREADY ASKED OR ASK FOR INFO ALREADY KNOWN. Build on what's here, don't restart. If they already told you their job/plans/feelings, reference them naturally instead of asking again.\n${memory}`;
   }
   return systemPrompt;
 }
@@ -2792,9 +2523,9 @@ function persistVoiceNoteBuffer(messageId, audioBuffer) {
     const safeId = String(messageId).replace(/[^a-zA-Z0-9_\-\.]/g, '_');
     const filename = `${safeId}.ogg`;
     fs.writeFileSync(path.join(mediaDir, filename), audioBuffer);
-    return { mediaPath: filename, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg' };
+    return { mediaPath: filename, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg; codecs=opus' };
   } catch {
-    return { mediaPath: `wa:${messageId}`, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg' };
+    return { mediaPath: `wa:${messageId}`, mediaName: 'voice-note.ogg', mediaMime: 'audio/ogg; codecs=opus' };
   }
 }
 
@@ -3127,11 +2858,6 @@ async function handleAutoReply(userId, db, contactId, jid, phone, contactName, o
 async function executeAutoReply(userId, db, { contactId, jid, phone, contactName, latestOriginalMsg, latestResolvedContent, latestMessageId, forceReply = false }) {
   const inst = getInstance(userId);
 
-  // A brand-new natural reply cycle begins here (triggered by an incoming
-  // message, not by a Rewrite/Custom tap). Drop any leftover custom-mode
-  // intent from a previous reply so it doesn't bleed into this new turn.
-  try { clearLastCustomInstructions(userId, jid); } catch {}
-
   const keyRow = db.prepare("SELECT value FROM config WHERE user_id = ? AND key = 'openai_api_key'").get(userId);
   if (!keyRow?.value) {
     debugLog(db, userId, 'skip_no_api_key', { contact: contactName || phone });
@@ -3251,9 +2977,9 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   }
 
   const messages = db.prepare(`
-    SELECT content, direction, type, media_path, timestamp FROM messages
+    SELECT content, direction, type, media_path FROM messages 
     WHERE contact_id = ? AND user_id = ? AND type IN ('text', 'image', 'voice') AND (content IS NOT NULL OR (type = 'image' AND media_path IS NOT NULL))
-    ORDER BY timestamp DESC LIMIT 300
+    ORDER BY timestamp DESC LIMIT 80
   `).all(contactId, userId).reverse();
 
   if (messages.length === 0) {
@@ -3535,14 +3261,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const directiveTail = activeDirective
     ? `\n\n════════════\n🎯 FINAL OVERRIDE — ACTIVE DIRECTIVE WINS:\n"${activeDirective}"\n\nThis directive OVERRIDES every guideline above (depth engine, question rhythm, casual texting rules). If anything above contradicts this directive, IGNORE the contradicting guideline and follow the directive instead. Apply it on THIS reply, every reply, until removed.\n════════════`
     : '';
-  // Hard rules go AFTER the directive so they survive any "directive wins" override.
-  // The question cooldown and human-texting style are non-negotiable.
-  let hardTail = '';
-  if (overQuestionBudget) {
-    hardTail += `\n\n════════════\n⛔ NON-NEGOTIABLE — QUESTION COOLDOWN:\nThis reply MUST contain ZERO question marks. No "?". No rhetorical questions. End on a statement, a reaction, or a small share. This overrides EVERYTHING above including any directive. Let them lead next.\n════════════`;
-  }
-  hardTail += `\n\n════════════\n📱 NON-NEGOTIABLE — HUMAN TEXTING STYLE:\n• lowercase by default. no capitalized sentence starts unless it's a proper noun.\n• no em dashes (—), no en dashes (–), no semicolons. use commas, periods, or just line breaks.\n• contractions always: "i'm", "don't", "you're", "it's" — never "I am", "do not".\n• no formal words: "indeed", "perhaps", "however", "moreover", "additionally", "regarding", "shall", "furthermore" → BANNED.\n• no AI tells: "I'm here for you", "I understand", "that's a great point", "absolutely", "certainly", "of course!", "feel free to", "let me know if".\n• keep it short. 1-2 sentences usually. fragments are fine. one-word replies are fine.\n• no stage directions, no asterisks, no [brackets], no (parens around feelings).\n• it's a phone text, not an email. type how a tired 20-something texts a friend.\n════════════`;
-  const promptForGen = `${basePrompt}${guardrails}${directiveTail}${hardTail}`;
+  const promptForGen = `${basePrompt}${guardrails}${directiveTail}`;
 
   if (guardrails) {
     debugLog(db, userId, 'reply_guardrails_injected', {
@@ -3564,29 +3283,6 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
 
   let replyText = await generateReply(keyRow.value, messages, promptForGen, contactName || phone, { unrepliedCount, timezone: tz, replyLanguage });
   replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
-
-  // Enforce question cooldown at the post-processing layer. If the model still
-  // slipped in a question while cooldown is active, regenerate ONCE with an
-  // even harder rule. If it still fails, surgically strip questions.
-  if (overQuestionBudget && /\?/.test(replyText)) {
-    debugLog(db, userId, 'cooldown_violated_regenerating', { contact: contactName || phone, originalReply: replyText.slice(0, 80) });
-    const noQPrompt = `${basePrompt}\n\n⛔ ABSOLUTE RULE: Your reply CANNOT contain a question mark "?". Not one. End on a statement or reaction. If you're tempted to ask, share something about yourself instead.${hardTail}`;
-    try {
-      const retry = await generateReply(keyRow.value, messages, noQPrompt, contactName || phone, { unrepliedCount, timezone: tz, replyLanguage });
-      const cleaned = stripStageDirections(String(retry || '').replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
-      if (cleaned && !/\?/.test(cleaned)) replyText = cleaned;
-    } catch {}
-    // Final safety net: strip any remaining "?" and the question sentence around it.
-    if (/\?/.test(replyText)) {
-      replyText = replyText
-        .split(/(?<=[.!\n])\s+/)
-        .filter((s) => !/\?/.test(s))
-        .join(' ')
-        .trim();
-      if (!replyText) replyText = 'mhm';
-      debugLog(db, userId, 'cooldown_stripped_questions', { contact: contactName || phone, finalReply: replyText.slice(0, 80) });
-    }
-  }
 
   if (isReplyTooSimilar(replyText, recentOutgoing)) {
     debugLog(db, userId, 'reply_too_similar_regenerating', { contact: contactName || phone, originalReply: replyText.slice(0, 60) });
@@ -3648,7 +3344,6 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
         const chat = await inst.client.getChatById(chatId);
         await chat.sendStateTyping();
       } catch {}
-      emit(userId, 'ai_typing', { contactId, typing: true });
 
       pendingReply.typingTimer = setTimeout(async () => {
         if (pendingReply.aborted) return;
@@ -3757,7 +3452,6 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
           }
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
-          emit(userId, 'ai_typing', { contactId, typing: false });
           emit(userId, 'message', { contactId, msgId: replyId });
           // Send reaction after reply with a natural delay
           if (pendingReaction) {
@@ -3772,7 +3466,6 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
           debugLog(db, userId, 'auto_reply_failed', { contact: contactName || phone, error: err?.message || String(err), replyPreview: replyText.slice(0, 80) });
           inst.pendingAutoReplies.delete(jid);
           await clearTypingState(userId, jid);
-          emit(userId, 'ai_typing', { contactId, typing: false });
           // Queue for retry when connection restores
           if (inst.failedReplyQueue.length < 20) {
             inst.failedReplyQueue.push({ jid, contactId, contactName, phone, replyText, latestMessageId, queuedAt: Date.now() });
@@ -3839,15 +3532,15 @@ async function sendTextMessage(userId, jid, text, options = {}) {
   return sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
     if (quotedMessageId && typeof client.getMessageById === 'function') {
       try {
-        const quotedMessage = await client.getMessageById(rawMessageId(userId, quotedMessageId));
+        const quotedMessage = await client.getMessageById(quotedMessageId);
         if (quotedMessage) {
           return await quotedMessage.reply(text);
         }
       } catch {}
     }
 
-    if (chat) return await chat.sendMessage(text, { linkPreview: false });
-    return await client.sendMessage(target, text, { linkPreview: false });
+    if (chat) return await chat.sendMessage(text);
+    return await client.sendMessage(target, text);
   });
 }
 
@@ -3868,18 +3561,11 @@ async function sendMediaMessage(userId, jid, payload) {
 }
 
 async function sendVoiceNote(userId, jid, audioBuffer) {
-  const voiceBuffer = Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer || []);
-  if (voiceBuffer.length < 200) {
-    throw new Error('Voice note audio is empty or corrupted');
-  }
-  const base64Audio = voiceBuffer.toString('base64');
-
   try {
     const result = await sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
-      const media = new MessageMedia('audio/ogg', base64Audio, null, voiceBuffer.length);
-      const options = { sendAudioAsVoice: true, waitUntilMsgSent: true };
-      if (chat) return await chat.sendMessage(media, options);
-      return await client.sendMessage(target, media, options);
+      const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
+      if (chat) return await chat.sendMessage(media, { sendAudioAsVoice: true });
+      return await client.sendMessage(target, media, { sendAudioAsVoice: true });
     });
     console.log(`🎤 [${userId}] Voice note sent to ${jid}`);
     return result;
@@ -3887,10 +3573,9 @@ async function sendVoiceNote(userId, jid, audioBuffer) {
     console.warn(`⚠️ [${userId}] PTT send failed, retrying as audio: ${pttErr?.message}`);
     try {
       const result = await sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
-        const media = new MessageMedia('audio/ogg', base64Audio, null, voiceBuffer.length);
-        const options = { waitUntilMsgSent: true };
-        if (chat) return await chat.sendMessage(media, options);
-        return await client.sendMessage(target, media, options);
+        const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
+        if (chat) return await chat.sendMessage(media);
+        return await client.sendMessage(target, media);
       });
       console.log(`🎤 [${userId}] Voice note sent as audio to ${jid}`);
       return result;
@@ -3925,11 +3610,6 @@ async function softDisconnect(userId) {
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
   inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid, { rescue: true }));
-  // Drop per-jid caches so a paused/disconnected user doesn't keep memory
-  // pinned for the previous session. They'll repopulate on reconnect.
-  try { inst.contactCache?.clear?.(); } catch {}
-  try { inst.recentAiSends?.clear?.(); } catch {}
-  try { inst.manualReplyMutes?.clear?.(); } catch {}
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
   if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
@@ -3974,9 +3654,6 @@ async function clearSession(userId, db) {
   inst.messageBatchBuffers.forEach(entry => clearTimeout(entry.timer));
   inst.messageBatchBuffers.clear();
   inst.pendingAutoReplies.forEach((_, pendingJid) => clearPendingAutoReply(userId, pendingJid)); // no rescue on full logout
-  try { inst.contactCache?.clear?.(); } catch {}
-  try { inst.recentAiSends?.clear?.(); } catch {}
-  try { inst.manualReplyMutes?.clear?.(); } catch {}
   if (inst.reconnectTimer) { clearTimeout(inst.reconnectTimer); inst.reconnectTimer = null; }
   if (inst.syncGraceTimer) { clearTimeout(inst.syncGraceTimer); inst.syncGraceTimer = null; }
   if (inst.archiveSyncTimer) { clearInterval(inst.archiveSyncTimer); inst.archiveSyncTimer = null; }
@@ -4018,10 +3695,6 @@ async function clearSession(userId, db) {
           avatar_url = NULL
       WHERE user_id = ?
     `).run(userId);
-    // Tell connected clients to refresh their conversation list so stale unread
-    // badges disappear immediately instead of waiting for the next manual refresh.
-    try { emit(userId, 'status', { status: 'disconnected', reason: 'logout' }); } catch {}
-    try { emit(userId, 'message', { contactsRefresh: true }); } catch {}
   } catch (err) {
     console.error('Failed to clear DB tables:', err?.message || err);
   }
@@ -4059,16 +3732,6 @@ async function clearSession(userId, db) {
 export async function shutdownAllWhatsAppClients() {
   const instances = Array.from(userInstances.entries());
 
-  // Stop module-level background loops first so they don't trigger work
-  // against a tearing-down socket.
-  try {
-    const { stopTelegramPolling } = await import('./telegram.js');
-    for (const [userId] of instances) {
-      try { stopTelegramPolling(userId); } catch {}
-      try { stopConversationStarterLoop(userId); } catch {}
-    }
-  } catch {}
-
   for (const [userId, inst] of instances) {
     stopHeartbeat(userId);
     clearConnectionWatchdog(userId);
@@ -4083,9 +3746,6 @@ export async function shutdownAllWhatsAppClients() {
       const clientRef = inst.client;
       inst.client = null;
       try { await clientRef.destroy(); } catch {}
-      // Best-effort: ensure the puppeteer browser is closed so we don't
-      // leak Chromium processes after shutdown.
-      try { await clientRef?.pupBrowser?.close?.(); } catch {}
     }
   }
 }
@@ -4246,7 +3906,7 @@ export async function deleteMessageForEveryone(userId, db, messageId) {
       let waMsg = null;
       if (typeof inst.client.getMessageById === 'function') {
         try {
-          waMsg = await inst.client.getMessageById(rawMessageId(userId, messageId));
+          waMsg = await inst.client.getMessageById(messageId);
         } catch {}
       }
 
@@ -4254,8 +3914,7 @@ export async function deleteMessageForEveryone(userId, db, messageId) {
         const chatId = fromJid(msg.jid);
         const chat = await inst.client.getChatById(chatId);
         const messages = await chat.fetchMessages({ limit: 200 });
-        const waMessageId = rawMessageId(userId, messageId);
-        waMsg = messages.find(m => (m.id?._serialized === waMessageId || m.id?.id === waMessageId));
+        waMsg = messages.find(m => (m.id?._serialized === messageId || m.id?.id === messageId));
       }
 
       if (waMsg) {
@@ -4283,24 +3942,15 @@ export async function deleteConversation(userId, db, contactId) {
     try {
       const chatId = fromJid(contact.jid);
       const chat = await inst.client.getChatById(chatId);
-      // Try full delete first; fall back to clearMessages if delete isn't supported for this chat type
-      try {
-        await chat.delete();
-        console.log(`🗑️ [${userId}] Deleted chat ${contact.jid} on WhatsApp`);
-      } catch (delErr) {
-        try { await chat.clearMessages(); } catch {}
-        console.log(`🗑️ [${userId}] Cleared chat ${contact.jid} on WhatsApp (delete fallback: ${delErr?.message})`);
-      }
+      await chat.clearMessages();
+      console.log(`🗑️ [${userId}] Cleared chat ${contact.jid} on WhatsApp`);
     } catch (err) {
       console.log(`🗑️ [${userId}] WhatsApp chat clear failed: ${err?.message}`);
     }
   }
 
   const deleted = db.prepare('DELETE FROM messages WHERE contact_id = ? AND user_id = ?').run(contactId, userId);
-  // Soft-delete: keep the row but hide it, so history-sync upserts don't resurrect the chat.
-  // A new incoming live message will clear is_hidden (see message handler).
-  db.prepare("UPDATE contacts SET is_hidden = 1, unread_count = 0, last_summary_at = NULL WHERE id = ? AND user_id = ?")
-    .run(contactId, userId);
+  db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(contactId, userId);
   return { success: true, deletedMessages: deleted.changes };
 }
 
@@ -4456,75 +4106,10 @@ export async function triggerConversationSummary(userId, db, contactId, jid, con
       .run(newMemory, contactId, userId);
 
     debugLog(db, userId, 'conversation_summarized', { contact: contactName, summaryPreview: summary.slice(0, 100) });
-
-    // ── Update relationship graph in parallel (fire-and-forget; doesn't block summary completion) ──
-    try {
-      const existingGraphRaw = db.prepare('SELECT relationship_graph FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId)?.relationship_graph;
-      let existingGraph = null;
-      if (existingGraphRaw) { try { existingGraph = JSON.parse(existingGraphRaw); } catch {} }
-      updateRelationshipGraph(apiKey, messages, existingGraph, contactName, { timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York') })
-        .then(updated => {
-          if (!updated) return;
-          db.prepare("UPDATE contacts SET relationship_graph = ? WHERE id = ? AND user_id = ?")
-            .run(JSON.stringify(updated), contactId, userId);
-          debugLog(db, userId, 'relationship_graph_updated', {
-            contact: contactName,
-            people: (updated.people || []).length,
-            promises: (updated.promises || []).length,
-            events: (updated.events || []).length,
-          });
-        })
-        .catch((err) => {
-          console.error(`[${userId}] Relationship graph update failed:`, err?.message || err);
-          try { debugLog(db, userId, 'relationship_graph_failed', { contact: contactName, error: err?.message || String(err) }); } catch {}
-        });
-    } catch {}
-
     return { ran: true, summary, memory: newMemory };
   } catch (err) {
     console.error(`[${userId}] Conversation summary failed:`, err?.message);
     return { ran: false, reason: 'error', error: err?.message };
-  }
-}
-
-// ── Mood Detection (per-contact, refreshed on incoming messages, debounced) ──
-
-const moodDetectionCooldowns = new Map(); // key: `${userId}:${contactId}` → lastRunMs
-const MOOD_COOLDOWN_MS = 90 * 1000; // re-detect at most every 90s per contact
-
-export async function triggerMoodDetection(userId, db, contactId, contactName, apiKey) {
-  if (!apiKey) return;
-  const key = `${userId}:${contactId}`;
-  const last = moodDetectionCooldowns.get(key) || 0;
-  if (Date.now() - last < MOOD_COOLDOWN_MS) return;
-  moodDetectionCooldowns.set(key, Date.now());
-
-  try {
-    // Respect per-contact memory toggle (mood is part of memory-driven behavior).
-    const row = db.prepare('SELECT memory_enabled FROM contacts WHERE id = ? AND user_id = ?').get(contactId, userId);
-    const memoryEnabled = row?.memory_enabled === undefined || row?.memory_enabled === null ? 1 : row.memory_enabled;
-    if (memoryEnabled === 0) return;
-
-    const recent = db.prepare(`
-      SELECT content FROM messages
-      WHERE contact_id = ? AND user_id = ? AND direction = 'received'
-        AND content IS NOT NULL AND content != ''
-      ORDER BY timestamp DESC LIMIT 6
-    `).all(contactId, userId).reverse().map(r => r.content);
-
-    if (recent.length < 1) return;
-    const mood = await detectContactMood(apiKey, recent, contactName);
-    if (!mood) return;
-    db.prepare("UPDATE contacts SET mood_state = ? WHERE id = ? AND user_id = ?")
-      .run(JSON.stringify(mood), contactId, userId);
-    debugLog(db, userId, 'mood_detected', {
-      contact: contactName,
-      mood: mood.mood,
-      intensity: mood.intensity,
-      evidence: mood.evidence,
-    });
-  } catch (err) {
-    console.error(`[${userId}] Mood detection failed:`, err?.message);
   }
 }
 
@@ -4583,7 +4168,7 @@ export function startConversationStarterLoop(userId, db) {
           if (inst.connectionStatus !== 'connected') break;
 
           const sent = await sendTextMessage(userId, contact.jid, starter);
-          const msgId = scopeMessageId(userId, sent?.id?._serialized || uuid());
+          const msgId = sent?.id?._serialized || uuid();
 
           db.prepare(`
             INSERT OR IGNORE INTO messages (id, user_id, contact_id, jid, content, type, direction, timestamp, status)
@@ -4729,8 +4314,6 @@ export function getTelegramCallbackHandlers(userId, db) {
 
     onCancel: (jid) => {
       clearPendingAutoReply(userId, jid);
-      // User cancelled — drop any custom-mode intent so the next reply starts clean.
-      clearLastCustomInstructions(userId, jid);
       const contact = db.prepare('SELECT name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
       debugLog(db, userId, 'telegram_cancel', { jid, contact: contact?.name || contact?.phone || jid });
     },
@@ -4760,27 +4343,11 @@ export function getTelegramCallbackHandlers(userId, db) {
       const systemPrompt = buildContactSystemPrompt(db, userId, contact.id);
       const contactName = contact.name || contact.phone || 'Unknown';
       const { generateReply } = await import('./ai.js');
-
-      // If the user previously sent custom instructions for this jid's current
-      // reply session, keep applying them on subsequent rewrites so the rewrite
-      // is a *variation of the custom draft*, not a fresh reply that ignores
-      // what the user just asked for. Cleared on Cancel or a new conversation
-      // turn.
-      const pendingCustom = getLastCustomInstructions(userId, jid);
-      const previousReply = getLastPreviewedReply(userId, jid);
-      const baseOpts = {
+      let replyText = await generateReply(keyRow.value, messages, systemPrompt, contactName, {
+        mode: 'rewrite',
         timezone: getConfigValue(db, userId, 'ai_timezone', 'America/New_York'),
         replyLanguage: getContactReplyLanguage(db, userId, contact.id),
-      };
-      let replyText = await generateReply(
-        keyRow.value,
-        messages,
-        systemPrompt,
-        contactName,
-        pendingCustom
-          ? { ...baseOpts, mode: 'custom', customInstructions: pendingCustom, previousReply }
-          : { ...baseOpts, mode: 'rewrite' }
-      );
+      });
       replyText = stripStageDirections(replyText.replace(/—/g, ', ').replace(/–/g, ', ').replace(/\s{2,}/g, ' ').trim());
 
       // Re-schedule with telegram preview
@@ -4788,10 +4355,6 @@ export function getTelegramCallbackHandlers(userId, db) {
     },
     onCustom: async (jid, instructions) => {
       clearPendingAutoReply(userId, jid);
-      // Remember this custom intent for the jid's current reply session, so
-      // a subsequent 🔄 Rewrite keeps honoring it instead of reverting to a
-      // vanilla rewrite.
-      setLastCustomInstructions(userId, jid, instructions);
       // Manual reply mute would block the AI from speaking. The user explicitly
       // asked for a custom reply via Telegram, so clear the mute for this jid.
       try { getInstance(userId).manualReplyMutes.delete(jid); } catch {}
@@ -5161,7 +4724,6 @@ function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactNa
         const chat = await inst.client.getChatById(chatId);
         await chat.sendStateTyping();
       } catch {}
-      emit(userId, 'ai_typing', { contactId, typing: true });
 
       pendingReply.typingTimer = setTimeout(async () => {
         if (pendingReply.aborted) return;
@@ -5179,13 +4741,11 @@ function executeAutoReplyWithText(userId, db, { contactId, jid, phone, contactNa
           debugLog(db, userId, 'telegram_custom_reply_sent', { contact: contactName || phone, replyPreview: replyText.slice(0, 80) });
           inst.autoReplyCooldowns.set(jid, Date.now());
           inst.pendingAutoReplies.delete(jid);
-          emit(userId, 'ai_typing', { contactId, typing: false });
           emit(userId, 'message', { contactId, msgId: replyId });
         } catch (err) {
           console.error('Telegram custom reply failed:', err?.message);
           inst.pendingAutoReplies.delete(jid);
           await clearTypingState(userId, jid);
-          emit(userId, 'ai_typing', { contactId, typing: false });
         }
       }, typingDuration);
     } catch (err) {

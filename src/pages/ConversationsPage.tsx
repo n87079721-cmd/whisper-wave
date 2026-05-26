@@ -1,13 +1,10 @@
-import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
-import { Search, Send, Loader2, Volume2, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film, Eye, EyeOff, Pencil, Check, CheckCheck, PhoneMissed, Star, Reply, User, Copy, Forward, BookOpen, Brain, BotOff, Pin, PinOff } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Search, Send, Loader2, Volume2, ArrowLeft, Plus, X, MessageSquare, ChevronDown, ChevronUp, Trash2, Archive, ArchiveRestore, FileText, Download, Image as ImageIcon, Film, Eye, EyeOff, Pencil, Check, CheckCheck, PhoneMissed, Star, Reply, User, Copy, Forward, BookOpen, Brain, BotOff } from 'lucide-react';
 import { api, type Contact, type Message, type Voice, type Prompt } from '@/lib/api';
 import { toast } from 'sonner';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { cleanContactPhone, getContactDisplayMeta, getContactDisplayName, getContactInitials } from '@/lib/contactDisplay';
 import { LANGUAGES } from '@/lib/languages';
-import SyncBanner from '@/components/SyncBanner';
-import { useWhatsAppStatus } from '@/hooks/useWhatsAppStatus';
-import RelationshipInsight from '@/components/RelationshipInsight';
 
 interface ConversationsPageProps {
   initialContact?: Contact | null;
@@ -16,8 +13,6 @@ interface ConversationsPageProps {
 }
 
 const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPageProps) => {
-  const { status: waStatus, syncState } = useWhatsAppStatus();
-  const isWAConnected = waStatus === 'connected';
   const [conversations, setConversations] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -101,37 +96,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   const [savingLanguage, setSavingLanguage] = useState(false);
   selectedContactRef.current = selectedContact;
 
-  // AI typing indicator: set of contactIds currently being typed to
-  const [aiTypingContactIds, setAiTypingContactIds] = useState<Set<string>>(new Set());
-  // Unread divider: id of the first unread message when chat was opened
-  const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
-  const initialUnreadCountRef = useRef(0);
-  const chatOpenedAtRef = useRef<number>(0);
-  // Pinned messages per chat (localStorage-backed)
-  const [pinnedMsgIds, setPinnedMsgIds] = useState<Set<string>>(new Set());
-  // Map of contactId -> count of pinned messages (read from localStorage for sidebar badge)
-  const [pinnedCountsByContact, setPinnedCountsByContact] = useState<Record<string, number>>({});
-  const [sendProgress, setSendProgress] = useState<{ phase: 'uploading' | 'processing'; percent: number } | null>(null);
-
-  // Initial scan of all pinned:* localStorage entries to populate sidebar pin badges
-  useEffect(() => {
-    try {
-      const counts: Record<string, number> = {};
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (!key || !key.startsWith('pinned:')) continue;
-        try {
-          const arr = JSON.parse(localStorage.getItem(key) || '[]');
-          if (Array.isArray(arr) && arr.length > 0) counts[key.slice('pinned:'.length)] = arr.length;
-        } catch {}
-      }
-      setPinnedCountsByContact(counts);
-    } catch {}
-  }, []);
-  // Swipe-to-archive on chat list
-  const [swipeOffsetByContact, setSwipeOffsetByContact] = useState<Record<string, number>>({});
-  const chatSwipeRef = useRef<{ contactId: string; startX: number; startY: number; axis: 'h' | 'v' | null } | null>(null);
-
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const viewport = messagesViewportRef.current;
     if (!viewport) return;
@@ -165,18 +129,16 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
   }, [scrollMessagesToBottom]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (!selectedContact || loadingOlder || !hasMoreMessages || messages.length === 0) return false;
+    if (!selectedContact || loadingOlder || !hasMoreMessages || messages.length === 0) return;
     setLoadingOlder(true);
     const viewport = messagesViewportRef.current;
     const prevScrollHeight = viewport?.scrollHeight || 0;
-    let loaded = false;
     try {
       const oldest = messages[0]?.timestamp;
       const result = await api.getMessages(selectedContact.id, { limit: 50, before: oldest });
       if (result.messages.length > 0) {
         setMessages(prev => [...result.messages, ...prev]);
         setHasMoreMessages(result.hasMore);
-        loaded = true;
         // Maintain scroll position
         window.requestAnimationFrame(() => {
           if (viewport) {
@@ -188,7 +150,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       }
     } catch {}
     setLoadingOlder(false);
-    return loaded;
   }, [selectedContact, loadingOlder, hasMoreMessages, messages]);
 
   const refreshAllContacts = useCallback(async (search?: string) => {
@@ -320,17 +281,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
           }
         } catch {}
       });
-      es.addEventListener('ai_typing', (event: Event) => {
-        try {
-          const data = event instanceof MessageEvent ? JSON.parse(event.data) : null;
-          if (!data?.contactId) return;
-          setAiTypingContactIds(prev => {
-            const next = new Set(prev);
-            if (data.typing) next.add(data.contactId); else next.delete(data.contactId);
-            return next;
-          });
-        } catch {}
-      });
       es.onerror = () => {};
     } catch {}
 
@@ -361,16 +311,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     // Hide message viewport until first paint + scroll settles to prevent jumpy load
     setChatReady(false);
     setMessages([]);
-    // Capture initial unread count BEFORE we mark-as-read, so we can place the divider
-    initialUnreadCountRef.current = selectedContact.unread_count ?? 0;
-    setFirstUnreadId(null);
-    chatOpenedAtRef.current = Date.now();
-    // Load pinned messages for this contact from localStorage
-    try {
-      const raw = localStorage.getItem(`pinned:${selectedContact.id}`);
-      const arr = raw ? JSON.parse(raw) : [];
-      setPinnedMsgIds(new Set(Array.isArray(arr) ? arr : []));
-    } catch { setPinnedMsgIds(new Set()); }
     if (chatReadyTimerRef.current) { window.clearTimeout(chatReadyTimerRef.current); chatReadyTimerRef.current = null; }
     setReplyText(replyDraftsRef.current[selectedContact.id] ?? '');
     // voice preview removed
@@ -437,88 +377,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     }
   }, [selectedContact?.id]);
 
-  // Compute first-unread message id once messages load, using captured count.
-  useEffect(() => {
-    if (!selectedContact?.id) return;
-    if (messages.length === 0) return;
-    // Initial placement: use the unread count captured on chat open.
-    if (!firstUnreadId) {
-      const n = initialUnreadCountRef.current;
-      if (n && n > 0) {
-        let count = 0;
-        let firstUnseen: string | null = null;
-        for (let i = messages.length - 1; i >= 0; i--) {
-          const m = messages[i];
-          if (m.direction !== 'received') continue;
-          firstUnseen = m.id;
-          count++;
-          if (count >= n) break;
-        }
-        if (firstUnseen) { setFirstUnreadId(firstUnseen); return; }
-      }
-      // Live placement: if a received message arrived AFTER chat opened while
-      // user is scrolled up (not auto-scrolling), mark the first such message.
-      if (!shouldAutoScrollRef.current && chatOpenedAtRef.current > 0) {
-        const openedAt = chatOpenedAtRef.current;
-        for (const m of messages) {
-          if (m.direction !== 'received') continue;
-          const ts = new Date(m.timestamp).getTime();
-          if (ts > openedAt) { setFirstUnreadId(m.id); return; }
-        }
-      }
-    }
-  }, [messages, selectedContact?.id, firstUnreadId]);
-
-  // Clear divider once the user is back at the bottom (mark as seen).
-  useEffect(() => {
-    if (!firstUnreadId) return;
-    if (!showScrollDown) {
-      const t = window.setTimeout(() => setFirstUnreadId(null), 1500);
-      return () => window.clearTimeout(t);
-    }
-  }, [firstUnreadId, showScrollDown]);
-
-  // Pinned helpers
-  const togglePinMessage = useCallback((msgId: string) => {
-    if (!selectedContact?.id) return;
-    setPinnedMsgIds(prev => {
-      const next = new Set(prev);
-      if (next.has(msgId)) next.delete(msgId); else next.add(msgId);
-      try { localStorage.setItem(`pinned:${selectedContact.id}`, JSON.stringify(Array.from(next))); } catch {}
-      setPinnedCountsByContact(curr => ({ ...curr, [selectedContact.id]: next.size }));
-      return next;
-    });
-  }, [selectedContact?.id]);
-
-  const highlightAndScroll = useCallback((wrapper: HTMLElement) => {
-    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    const bubble = wrapper.querySelector(':scope > div') as HTMLElement | null;
-    const target = bubble || wrapper;
-    target.style.transition = 'box-shadow 0.3s ease';
-    target.style.boxShadow = '0 0 0 2px hsl(211 100% 50%)';
-    target.style.borderRadius = '1rem';
-    setTimeout(() => {
-      target.style.boxShadow = '';
-      setTimeout(() => { target.style.transition = ''; target.style.borderRadius = ''; }, 300);
-    }, 2000);
-  }, []);
-
-  const jumpToMessage = useCallback(async (targetId: string) => {
-    const findEl = () => messagesViewportRef.current?.querySelector(`[data-msg-id="${CSS.escape(targetId)}"]`) as HTMLElement | null;
-    let wrapper = findEl();
-    if (wrapper) { highlightAndScroll(wrapper); return; }
-    // Not rendered yet — page in older messages until we find it (max 5 pages)
-    for (let i = 0; i < 5; i++) {
-      const more = await loadOlderMessages();
-      if (!more) break;
-      // Wait a frame for React to render new messages into the DOM
-      await new Promise<void>(r => requestAnimationFrame(() => r()));
-      wrapper = findEl();
-      if (wrapper) { highlightAndScroll(wrapper); return; }
-    }
-    toast.message('Message not found in history');
-  }, [highlightAndScroll, loadOlderMessages]);
-
   const normalizePhoneDigits = (value: string) => value.replace(/\D/g, '');
   const formatPhoneDraft = (value: string) => {
     const trimmed = value.trim();
@@ -543,14 +401,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     try {
       const d = new Date(ts);
       const now = new Date();
-      const tz = aiTimezone || undefined;
-      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
-      const dKey = fmt.format(d);
-      const nowKey = fmt.format(now);
-      if (dKey === nowKey) return 'Today';
-      const y = new Date(now.getTime() - 86400000);
-      if (fmt.format(y) === dKey) return 'Yesterday';
-      return d.toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: tz });
+      const diff = now.getTime() - d.getTime();
+      if (diff < 86400000 && d.getDate() === now.getDate()) return 'Today';
+      if (diff < 172800000) return 'Yesterday';
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
     } catch { return ''; }
   };
 
@@ -646,18 +500,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
     if (!trimmedReply && !pendingAttachment) return;
 
     setSending(true);
-    setSendProgress(pendingAttachment ? { phase: 'uploading', percent: 0 } : null);
     try {
       const isTemp = activeContactId.startsWith('temp-');
-      const onProgress = (p: { phase: 'uploading' | 'processing' | 'done'; percent?: number }) => {
-        if (p.phase === 'done') setSendProgress(null);
-        else setSendProgress({ phase: p.phase, percent: p.percent ?? 0 });
-      };
 
       const res = pendingAttachment
         ? isTemp
-          ? await api.sendMediaToPhone(activeContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce, onProgress)
-          : await api.sendMedia(activeContactId, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce, onProgress)
+          ? await api.sendMediaToPhone(activeContact.phone || '', pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
+          : await api.sendMedia(activeContactId, pendingAttachment.file, trimmedReply, pendingAttachment.viewOnce)
         : isTemp
           ? await api.sendTextToPhone(activeContact.phone || '', trimmedReply, quotedMessage?.id)
           : await api.sendText(activeContactId, trimmedReply, quotedMessage?.id);
@@ -680,13 +529,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         || refreshedConversations.find(c => c.id === activeContactId)
         || null;
 
-      const sentContactId = res.contactId || activeContactId;
-      if (selectedContactRef.current?.id === activeContactId && sentContactId) {
-        if (nextContact) setSelectedContact(nextContact);
-        else if (res.contactId && activeContactId.startsWith('temp-')) {
-          setSelectedContact({ ...activeContact, id: res.contactId, last_message: trimmedReply, last_timestamp: new Date().toISOString() });
-        }
-        await refreshMessages(sentContactId, { forceScroll: true });
+      if (selectedContactRef.current?.id === activeContactId && nextContact) {
+        setSelectedContact(nextContact);
+        await refreshMessages(nextContact.id, { forceScroll: true });
       }
 
       scrollMessagesToBottom('smooth');
@@ -694,7 +539,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
       toast.error(err.message || 'Failed to send');
     } finally {
       setSending(false);
-      setSendProgress(null);
     }
   };
 
@@ -1349,16 +1193,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
           {/* Conversation list */}
           <div className="flex-1 overflow-y-auto">
-            {isWAConnected && syncState && (syncState.phase !== 'ready' || syncState.unresolvedLids > 0) && (
-              <div className="px-3 pt-3">
-                <SyncBanner
-                  syncState={syncState}
-                  isConnected={isWAConnected}
-                  onResync={() => { api.triggerSync().catch(() => {}); }}
-                  compact
-                />
-              </div>
-            )}
             {loading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -1368,64 +1202,13 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
             ) : (
               filtered.map(contact => {
                 const isActive = selectedContact?.id === contact.id;
-                const swipeOffset = swipeOffsetByContact[contact.id] || 0;
-                  // Only reveal the archive background once the user has clearly
-                  // committed to a horizontal swipe (>24px). Prevents a flash on
-                  // taps with tiny finger drift.
-                  const showSwipeBg = Math.abs(swipeOffset) > 24;
                 return (
-                  <div
-                    key={contact.id}
-                    className="relative overflow-hidden"
-                    onTouchStart={(e) => {
-                      chatSwipeRef.current = { contactId: contact.id, startX: e.touches[0].clientX, startY: e.touches[0].clientY, axis: null };
-                    }}
-                    onTouchMove={(e) => {
-                      const s = chatSwipeRef.current;
-                      if (!s || s.contactId !== contact.id) return;
-                      const dx = e.touches[0].clientX - s.startX;
-                      const dy = e.touches[0].clientY - s.startY;
-                      if (s.axis === null) {
-                          // Require a more deliberate movement before locking
-                          // axis — and require dx to clearly dominate dy so a
-                          // diagonal tap-drift never becomes a swipe.
-                          if (Math.abs(dx) < 18 && Math.abs(dy) < 18) return;
-                          s.axis = Math.abs(dx) > Math.abs(dy) * 1.5 ? 'h' : 'v';
-                      }
-                      if (s.axis !== 'h') return;
-                        // Subtract the dead zone so the row doesn't jump 18px
-                        // the instant axis locks.
-                        const adjusted = dx > 0 ? Math.max(0, dx - 18) : Math.min(0, dx + 18);
-                        // Only allow swipe-left (negative dx) for active chats; swipe-right for archived
-                        const clamped = contact.is_archived ? Math.max(0, Math.min(120, adjusted)) : Math.max(-120, Math.min(0, adjusted));
-                      setSwipeOffsetByContact(prev => ({ ...prev, [contact.id]: clamped }));
-                    }}
-                    onTouchEnd={() => {
-                      const s = chatSwipeRef.current;
-                      chatSwipeRef.current = null;
-                      const off = swipeOffsetByContact[contact.id] || 0;
-                      setSwipeOffsetByContact(prev => ({ ...prev, [contact.id]: 0 }));
-                        // Require a substantially longer pull to confirm archive.
-                        if (s?.axis === 'h' && Math.abs(off) > 95) {
-                        handleArchiveChat(contact.id, !contact.is_archived);
-                      }
-                    }}
-                  >
-                    {/* Swipe action background */}
-                      <div className={`absolute inset-y-0 ${contact.is_archived ? 'left-0' : 'right-0'} w-[120px] flex items-center justify-center bg-primary text-primary-foreground transition-opacity duration-150 ${showSwipeBg ? 'opacity-100' : 'opacity-0'}`}>
-                      {contact.is_archived ? <ArchiveRestore className="w-5 h-5" /> : <Archive className="w-5 h-5" />}
-                    </div>
                   <button
-                      onClick={(e) => {
-                        // Guard: if a horizontal swipe just happened, the row
-                        // still snaps back via touchend — don't also open the chat.
-                        if (Math.abs(swipeOffset) > 4) { e.preventDefault(); return; }
-                        setSelectedContact(contact);
-                      }}
-                    style={{ transform: `translateX(${swipeOffset}px)`, transition: chatSwipeRef.current?.contactId === contact.id ? 'none' : 'transform 0.2s ease' }}
-                    className={`relative w-full flex items-center gap-3 px-3 py-3 text-left transition-colors ${
+                    key={contact.id}
+                    onClick={() => { setSelectedContact(contact); if (showArchived) setShowArchived(false); }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 text-left transition-colors ${
                       isActive ? 'bg-accent' : 'hover:bg-secondary/60'
-                    } bg-background`}
+                    }`}
                   >
                     <Avatar contact={contact} size="md" />
                     <div className="min-w-0 flex-1">
@@ -1440,16 +1223,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        {aiTypingContactIds.has(contact.id) ? (
-                          <p className="text-[13px] truncate flex-1 italic text-primary">typing…</p>
-                        ) : (
-                          <p className={`text-[13px] truncate flex-1 ${(contact.unread_count ?? 0) > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
-                            {getConversationPreview(contact)}
-                          </p>
-                        )}
-                        {pinnedCountsByContact[contact.id] > 0 && (
-                          <Pin className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-                        )}
+                        <p className={`text-[13px] truncate flex-1 ${(contact.unread_count ?? 0) > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                          {getConversationPreview(contact)}
+                        </p>
                         {(contact.unread_count ?? 0) > 0 && (
                           <span className="flex-shrink-0 min-w-[20px] h-5 rounded-full bg-primary text-primary-foreground text-[11px] font-bold flex items-center justify-center px-1.5">
                             {contact.unread_count}
@@ -1458,7 +1234,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       </div>
                     </div>
                   </button>
-                  </div>
                 );
               })
             )}
@@ -1524,20 +1299,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                   <Avatar contact={selectedContact} size="lg" />
                   <div className="min-w-0 flex-1 text-left">
                     <p className="text-[15px] font-semibold text-foreground truncate">{getContactDisplayName(selectedContact)}</p>
-                    {aiTypingContactIds.has(selectedContact.id) ? (
-                      <p className="text-xs text-primary truncate flex items-center gap-1">
-                        <span>typing</span>
-                        <span className="inline-flex gap-0.5">
-                          <span className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
-                          <span className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '120ms' }} />
-                          <span className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '240ms' }} />
-                        </span>
-                      </p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground truncate">
-                        {contactPromptId ? prompts.find(p => p.id === contactPromptId)?.name || 'Custom persona' : 'tap for info'}
-                      </p>
-                    )}
+                    <p className="text-xs text-muted-foreground truncate">
+                      {contactPromptId ? prompts.find(p => p.id === contactPromptId)?.name || 'Custom persona' : 'tap for info'}
+                    </p>
                   </div>
                 </button>
                 {/* Persona picker */}
@@ -1748,9 +1512,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                       </div>
                     </div>
 
-                    {/* Relationship Insight viewer */}
-                    <RelationshipInsight contactId={selectedContact.id} />
-
                     {/* Reply Language */}
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
@@ -1916,31 +1677,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
               {/* Messages area */}
               <div className="relative flex-1 min-h-0">
-                {/* Pinned messages bar */}
-                {pinnedMsgIds.size > 0 && (() => {
-                  const firstPinned = messages.find(m => pinnedMsgIds.has(m.id));
-                  if (!firstPinned) return null;
-                  const preview = firstPinned.content || (firstPinned.type === 'image' ? '📷 Photo' : firstPinned.type === 'video' ? '🎥 Video' : firstPinned.type === 'voice' ? '🎤 Voice' : firstPinned.type);
-                  return (
-                    <div className="absolute top-0 left-0 right-0 z-20 px-3 py-1.5 bg-card/95 backdrop-blur-sm border-b border-border flex items-center gap-2">
-                      <Pin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                      <button
-                        onClick={() => jumpToMessage(firstPinned.id)}
-                        className="flex-1 min-w-0 text-left"
-                      >
-                        <p className="text-[11px] font-medium text-primary">Pinned {pinnedMsgIds.size > 1 ? `(${pinnedMsgIds.size})` : ''}</p>
-                        <p className="text-[12px] text-foreground truncate">{preview}</p>
-                      </button>
-                      <button
-                        onClick={() => togglePinMessage(firstPinned.id)}
-                        className="p-1 text-muted-foreground hover:text-destructive transition-colors"
-                        title="Unpin"
-                      >
-                        <PinOff className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  );
-                })()}
                 <div
                   ref={messagesViewportRef}
                   onScroll={syncAutoScrollState}
@@ -1992,9 +1728,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
 
                   {groupedMessages.map((group) => (
                     <div key={group.date}>
-                      {/* Date separator (sticky while scrolling within this group) */}
-                      <div className="sticky top-1 z-10 flex justify-center my-3 pointer-events-none">
-                        <span className="px-3 py-1 rounded-lg bg-card/95 text-[11px] text-muted-foreground shadow-sm backdrop-blur-sm">
+                      {/* Date separator */}
+                      <div className="flex justify-center my-3">
+                        <span className="px-3 py-1 rounded-lg bg-card/90 text-[11px] text-muted-foreground shadow-sm">
                           {group.date}
                         </span>
                       </div>
@@ -2005,19 +1741,9 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                           const isActive = msg._idx === activeChatSearchIdx;
                           const isSelected = selectedMsgIds.has(msg.id);
                           const inSelectionMode = selectedMsgIds.size > 0;
-                          const showUnreadDivider = firstUnreadId === msg.id;
                           return (
-                          <Fragment key={msg.id}>
-                          {showUnreadDivider && (
-                            <div className="flex items-center gap-2 my-2 px-2">
-                              <div className="flex-1 h-px bg-primary/40" />
-                              <span className="text-[10px] font-medium text-primary uppercase tracking-wider whitespace-nowrap">
-                                {initialUnreadCountRef.current} new message{initialUnreadCountRef.current === 1 ? '' : 's'}
-                              </span>
-                              <div className="flex-1 h-px bg-primary/40" />
-                            </div>
-                          )}
                           <div
+                            key={msg.id}
                             data-msg-idx={msg._idx}
                             data-msg-id={msg.id}
                             className={`flex ${msg.type === 'call' ? 'justify-center' : msg.direction === 'sent' ? 'justify-end' : 'justify-start'} ${isSelected ? 'bg-primary/10 -mx-2 px-2 py-0.5 rounded-md' : ''}`}
@@ -2179,13 +1905,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                                     >
                                       <Star className={`w-3 h-3 ${msg.is_starred ? 'fill-yellow-500 text-yellow-500' : ''}`} />
                                     </button>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); togglePinMessage(msg.id); }}
-                                      className={`inline-btn p-0.5 hover:text-primary ${pinnedMsgIds.has(msg.id) ? 'text-primary' : 'text-muted-foreground/50 md:text-muted-foreground'}`}
-                                      title={pinnedMsgIds.has(msg.id) ? 'Unpin' : 'Pin'}
-                                    >
-                                      <Pin className={`w-3 h-3 ${pinnedMsgIds.has(msg.id) ? 'fill-primary' : ''}`} />
-                                    </button>
                                     {msg.direction === 'sent' && msg.type === 'text' && (
                                       <button
                                         onClick={(e) => { e.stopPropagation(); setEditingMsgId(msg.id); setEditingText(msg.content || ''); }}
@@ -2228,7 +1947,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                               </div>
                             </div>
                           </div>
-                          </Fragment>
                           );
                         })}
                       </div>
@@ -2317,26 +2035,6 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                     >
                       <X className="w-4 h-4" />
                     </button>
-                  </div>
-                )}
-
-                {sendProgress && (
-                  <div className="space-y-1 px-1">
-                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                      <span>
-                        {sendProgress.phase === 'uploading'
-                          ? `Uploading ${pendingAttachment?.kind === 'audio' ? 'voice note' : 'attachment'}…`
-                          : 'Delivering to WhatsApp…'}
-                      </span>
-                      <span>{sendProgress.phase === 'uploading' ? `${sendProgress.percent}%` : '…'}</span>
-                    </div>
-                    <div className="h-1 w-full rounded-full bg-secondary overflow-hidden">
-                      {sendProgress.phase === 'uploading' ? (
-                        <div className="h-full bg-primary transition-all duration-200" style={{ width: `${sendProgress.percent}%` }} />
-                      ) : (
-                        <div className="h-full w-full bg-primary/60 animate-pulse" />
-                      )}
-                    </div>
                   </div>
                 )}
 
