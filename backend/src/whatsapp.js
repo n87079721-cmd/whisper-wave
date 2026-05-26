@@ -1078,22 +1078,20 @@ async function startConnection(userId, db, options = {}) {
       }),
       takeoverOnConflict: true,
       takeoverTimeoutMs: 0,
-      // Permanent fix for the recurring "Cannot read properties of undefined
-      // (reading 'waitForChatLoading')" crash. WhatsApp Web ships near-daily
-      // internal refactors that break whatsapp-web.js' Store injector; when
-      // that happens, message_create never fires so chats look frozen and
-      // sends silently fail.
-      //
-      // We pin a known-working WA Web build served from the wppconnect
-      // wa-version CDN. The exact version is overridable via the
-      // WA_WEB_VERSION env var so you can bump it without redeploying code
-      // the next time WhatsApp rolls a breaking change — just set the env
-      // var to any filename listed at github.com/wppconnect-team/wa-version
-      // and restart the backend.
+      // Pin the WhatsApp Web build that whatsapp-web.js loads inside Puppeteer.
+      // WhatsApp Web ships near-daily refactors that break wwebjs' Store
+      // injector ("Cannot read properties of undefined (reading
+      // 'waitForChatLoading')") so chats freeze and sends silently fail.
+      // We pull a known-existing HTML from the wppconnect wa-version CDN.
+      // Override with WA_WEB_VERSION env var (any filename from
+      // github.com/wppconnect-team/wa-version/tree/main/html, without .html).
+      // If the remote fetch fails, wwebjs silently falls back to live WA Web —
+      // which is what causes this bug — so we ALSO verify the URL is reachable
+      // at startup and log loudly if it isn't.
       webVersionCache: {
         type: 'remote',
         remotePath: `https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/${
-          process.env.WA_WEB_VERSION || '2.3000.1023223821'
+          process.env.WA_WEB_VERSION || '2.3000.1040125391-alpha'
         }.html`,
       },
       puppeteer: {
