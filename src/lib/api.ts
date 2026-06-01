@@ -97,11 +97,10 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
   // Handle auth errors
   if (res.status === 401) {
-    // Token expired or invalid — clear auth
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem('wa_auth_user');
-    window.location.reload();
-    throw new Error('Session expired. Please log in again.');
+    // Only wipe the session if the token is truly invalid — verify via /auth/me
+    // first so a single transient 401 from another endpoint doesn't log the user out.
+    await maybeInvalidateSession();
+    throw new Error('Request unauthorized. If this keeps happening, please log in again.');
   }
 
   const isJson = ct.includes('application/json');
@@ -134,10 +133,8 @@ async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
     throw new Error('Backend unreachable — got HTML instead of JSON. Check your Backend URL in Settings.');
   }
   if (res.status === 401) {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem('wa_auth_user');
-    window.location.reload();
-    throw new Error('Session expired. Please log in again.');
+    await maybeInvalidateSession();
+    throw new Error('Request unauthorized. If this keeps happening, please log in again.');
   }
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
