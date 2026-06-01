@@ -30,8 +30,16 @@ function deduplicateContacts(contacts: Contact[]): MergedContact[] {
 
   const result: MergedContact[] = [];
   for (const group of byName.values()) {
-    // Sort by message_count desc — primary is the most active
-    group.sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
+    // Primary preference:
+    // 1) Has a real-looking phone JID (@s.whatsapp.net) over LID-only entries
+    // 2) Then by message_count desc
+    const isRealPhoneJid = (c: Contact) => (c.jid || '').endsWith('@s.whatsapp.net');
+    group.sort((a, b) => {
+      const ra = isRealPhoneJid(a) ? 1 : 0;
+      const rb = isRealPhoneJid(b) ? 1 : 0;
+      if (ra !== rb) return rb - ra;
+      return (b.message_count || 0) - (a.message_count || 0);
+    });
     const [primary, ...alternates] = group;
     const totalMessages = group.reduce((sum, c) => sum + (c.message_count || 0), 0);
     result.push({ primary, alternates, totalMessages });

@@ -375,7 +375,29 @@ export function createApiRouter(db) {
     if (!contact) return null;
 
     const canonicalJid = contact.jid.endsWith('@lid') ? getCanonicalPhoneJid(contact.phone) : contact.jid;
-    if (!canonicalJid || canonicalJid === contact.jid) return contact;
+    // If the LID contact's stored "phone" is actually a synthetic LID serial
+    // (i.e. it can't be normalized to a real phone JID), fall back to merging
+    // by display name into a sibling contact that has a real @s.whatsapp.net JID.
+    if (!canonicalJid || canonicalJid === contact.jid) {
+      if (contact.jid.endsWith('@lid') && contact.name && !contact.name.includes('@')) {
+        const sibling = db.prepare(`
+          SELECT id, jid, name, phone
+          FROM contacts
+          WHERE user_id = ?
+            AND id != ?
+            AND name = ?
+            AND jid LIKE '%@s.whatsapp.net'
+            AND is_group = 0
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `).get(userId, contact.id, contact.name);
+        if (sibling) {
+          mergeContactRows(userId, contact.id, sibling.id, sibling.jid);
+          return sibling;
+        }
+      }
+      return contact;
+    }
 
     const canonicalPhoneDigits = normalizePhoneDigits(contact.phone);
     const canonicalPhone = canonicalPhoneDigits ? `+${canonicalPhoneDigits}` : null;
