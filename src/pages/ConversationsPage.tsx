@@ -356,6 +356,10 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
         });
       });
     });
+    // Safety net: never leave the chat hidden longer than 700ms,
+    // even if message fetch hangs or images stall.
+    const safety = window.setTimeout(() => setChatReady(true), 700);
+    return () => window.clearTimeout(safety);
   }, [selectedContact?.id, refreshMessages, scrollMessagesToBottom]);
 
   // While chat is loading, keep pinned to bottom as images/media resolve their height
