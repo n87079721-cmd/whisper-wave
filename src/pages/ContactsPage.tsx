@@ -33,10 +33,7 @@ function deduplicateContacts(contacts: Contact[]): MergedContact[] {
     // Primary preference:
     // 1) Has a real-looking phone JID (@s.whatsapp.net) over LID-only entries
     // 2) Then by message_count desc
-    const isRealPhoneJid = (c: Contact) => {
-      const jid = (c as unknown as { jid?: string }).jid || '';
-      return jid.endsWith('@s.whatsapp.net');
-    };
+    const isRealPhoneJid = (c: Contact) => (c.jid || '').endsWith('@s.whatsapp.net');
     group.sort((a, b) => {
       const ra = isRealPhoneJid(a) ? 1 : 0;
       const rb = isRealPhoneJid(b) ? 1 : 0;
