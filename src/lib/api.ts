@@ -11,6 +11,34 @@ function authHeaders(): Record<string, string> {
   return {};
 }
 
+// Verify the token with /auth/me before nuking the session. Only wipe local
+// auth + reload if the server confirms the token is invalid. This prevents a
+// single transient 401 (network blip, race during backend restart, a buggy
+// route) from logging the user out.
+let invalidateInFlight: Promise<void> | null = null;
+async function maybeInvalidateSession(): Promise<void> {
+  if (invalidateInFlight) return invalidateInFlight;
+  invalidateInFlight = (async () => {
+    try {
+      const token = getAuthToken();
+      if (!token) return;
+      const res = await fetch(toUrl('/api/auth/me'), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem('wa_auth_user');
+        window.location.reload();
+      }
+    } catch {
+      // Network failure — do NOT wipe the session.
+    } finally {
+      setTimeout(() => { invalidateInFlight = null; }, 5000);
+    }
+  })();
+  return invalidateInFlight;
+}
+
 function getApiUrl(): string {
   // 1. localStorage (runtime config from Settings)
   const stored = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
