@@ -687,6 +687,8 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
 }
 
 export function initWhatsApp(userId, db) {
+  const inst = getInstance(userId);
+  inst.db = db;
   startConnection(userId, db);
   return {
     getState: () => getWhatsAppState(userId),
@@ -706,6 +708,7 @@ export function initWhatsApp(userId, db) {
 
 export function getOrInitWhatsApp(userId, db) {
   const inst = getInstance(userId);
+  inst.db = db;
 
   const savedSessionExists = hasSavedSession(userId);
   const reconnectIsStale = isReconnectStale(userId, db);
