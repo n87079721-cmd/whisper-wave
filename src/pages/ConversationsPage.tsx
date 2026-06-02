@@ -1209,7 +1209,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 return (
                   <button
                     key={contact.id}
-                    onClick={() => { setSelectedContact(contact); if (showArchived) setShowArchived(false); }}
+                    onClick={() => { setSelectedContact(contact); }}
                     className={`w-full flex items-center gap-3 px-3 py-3 text-left transition-colors ${
                       isActive ? 'bg-accent' : 'hover:bg-secondary/60'
                     }`}
@@ -1684,7 +1684,7 @@ const ConversationsPage = ({ initialContact, onContactOpened }: ConversationsPag
                 <div
                   ref={messagesViewportRef}
                   onScroll={syncAutoScrollState}
-                  className={`absolute inset-0 overflow-y-auto overscroll-contain p-3 md:p-4 bg-chat-bg transition-opacity duration-150 ${chatReady ? 'opacity-100' : 'opacity-0'}`}
+                  className={`absolute inset-0 overscroll-contain p-3 md:p-4 bg-chat-bg transition-opacity duration-150 ${chatReady ? 'opacity-100 overflow-y-auto' : 'opacity-0 overflow-hidden'}`}
                 >
                   {/* Load older messages button */}
                   {hasMoreMessages && (
