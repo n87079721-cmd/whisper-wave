@@ -1,23 +1,34 @@
-## Plan
+## Plan — fix sync, navigation, loading, and mobile spacing
 
-1. **Make phone pairing start a proper phone-code session**
-   - Update the backend connection starter so it can initialize WhatsApp specifically for phone pairing, not only QR pairing.
-   - Pass the entered phone number into the WhatsApp client startup options, so the library exposes the pairing-code callback at the right time.
+### 1. Chats deleted on WhatsApp should disappear from the site
+- During each `syncChats` pass on the backend, compare the chats returned by WhatsApp Web to the contacts already stored locally.
+- For any local contact whose chat no longer exists in WhatsApp:
+  - Remove its messages and stored media for that user.
+  - Remove the contact row (and its archive/unread state).
+- Also handle `chat_archive` / chat-removal events from `whatsapp-web.js` so deletes propagate in real time, not only on next sync.
+- Emit a `contacts_sync` event after a removal so the frontend list refreshes immediately.
 
-2. **Make the pairing endpoint recover from the common stuck state**
-   - If there is no active client, or the client is still reconnecting/restoring, start a fresh pairing-ready connection before requesting the code.
-   - Keep the user’s existing data/history safe; this will only reset the live browser connection when needed.
+### 2. Returning from a chat in Archive should stay in Archive
+- In `ConversationsPage.tsx`, when the user taps an archived chat, do not flip `showArchived` to `false` — keep the archive view active so the back arrow returns to the archived list, matching WhatsApp Web behavior.
 
-3. **Fix the dashboard button flow**
-   - When the user taps **Get Code**, call the new phone-pairing flow directly instead of first starting a normal QR reconnect and then asking for a code.
-   - Keep showing the generated code immediately and keep QR as fallback if phone pairing fails.
+### 3. Chat loading no longer "bounces" up and down
+- Keep the message viewport scroll-locked to the bottom during the initial load by using `overflow-hidden` (not just opacity) until layout is stable.
+- Reveal only after: messages are rendered, fonts/images have settled (or the 700ms safety net fires), and a final scroll-to-bottom is applied. No more visible drift while images and media size in.
 
-4. **Improve feedback**
-   - Return clearer backend errors for invalid phone numbers, already-connected sessions, or WhatsApp Web refusing a pairing code.
-   - Avoid leaving the UI stuck on “Generating...” when the backend cannot produce a code.
+### 4. Read / unread behaves correctly
+- When a chat is opened, call WhatsApp Web's "send seen" for that chat so the backend stops reporting it as unread on the next sync, then zero the local counter.
+- In `syncChats`, only overwrite `unread_count` upward (never reset to a stale higher value after the user just read it).
+- Listen for live read-state changes via `message_ack` / chat updates and push them into the DB and through SSE so the badge updates immediately.
 
-## Technical notes
+### 5. Mobile: Voice Studio buttons hidden under the bottom nav
+- Increase the bottom padding of scrollable pages on mobile so the Preview Voice Note, Generate, Send, and recipient picker are not covered by the fixed bottom nav, even with iOS safe-area insets.
+- Verify on the current mobile viewport (Voice Studio, Conversations composer, Settings) that the last action button has clear space above the nav without rotating the device.
 
-- Main files: `backend/src/whatsapp.js`, `backend/src/api.js`, `src/pages/DashboardPage.tsx`.
-- The likely root issue is that the current frontend starts a normal QR-mode reconnect before requesting the phone code. The backend then calls `requestPairingCode()` on a client that was not initialized for phone-number pairing, so the code callback may never be available or may fail.
-- I’ll preserve existing session/storage behavior and the current QR login path.
+### Quick clarifying question
+- You mentioned "if I use settings, only my WhatsApp chat is supposed to be there." Could you point me at the screen you mean? I want to make sure I touch the right list (Settings doesn't currently show a chat list, so it might be the Send Message page, the Voice Studio recipient picker, or the contacts dropdown).
+
+### Files likely touched
+- `backend/src/whatsapp.js` — chat removal, read receipts, unread sync rules.
+- `backend/src/api.js` — surface chat-removed events.
+- `src/pages/ConversationsPage.tsx` — archive back-navigation, chat-loading reveal.
+- `src/pages/VoiceStudioPage.tsx` and/or `src/pages/Index.tsx` — mobile bottom padding.
