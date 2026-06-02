@@ -620,11 +620,34 @@ function emit(userId, event, data) {
 
 export async function requestPairingWithPhone(userId, phoneNumber) {
   const inst = getInstance(userId);
-  if (!inst.client) throw new Error('WhatsApp client not initialised');
-  if (inst.connectionStatus === 'connected') throw new Error('Already connected');
   const cleaned = phoneNumber.replace(/[^0-9]/g, '');
-  if (cleaned.length < 8) throw new Error('Invalid phone number');
+  if (cleaned.length < 8) throw new Error('Invalid phone number — include country code, e.g. +1 705 202 4615');
+  if (inst.connectionStatus === 'connected') throw new Error('Already connected — disconnect first to re-pair');
   inst.pendingPairingPhone = cleaned;
+
+  // Ensure a live browser session exists and has reached the QR screen.
+  // requestPairingCode() only works once whatsapp-web.js has loaded the
+  // WhatsApp Web QR page and exposed the pairing callback. If we never
+  // got there, start (or restart) the connection and wait.
+  const ensureQrReady = async () => {
+    const db = inst.db;
+    if (!inst.client || inst.connectionStatus === 'disconnected') {
+      if (db) startConnection(userId, db, { force: true }).catch(() => {});
+    }
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline) {
+      if (inst.connectionStatus === 'qr_waiting' && inst.client?.pupPage) return;
+      if (inst.connectionStatus === 'connected') throw new Error('Already connected — disconnect first to re-pair');
+      await new Promise(r => setTimeout(r, 500));
+    }
+    throw new Error('WhatsApp browser session did not reach the pairing screen in time. Try again in a moment.');
+  };
+
+  try {
+    await ensureQrReady();
+  } catch (waitErr) {
+    throw new Error(waitErr?.message || 'Failed to prepare pairing session');
+  }
 
   // Ensure the browser-side onCodeReceivedEvent function exists.
   // When the client was initialized in QR mode (no pairWithPhoneNumber option),
@@ -664,6 +687,8 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
 }
 
 export function initWhatsApp(userId, db) {
+  const inst = getInstance(userId);
+  inst.db = db;
   startConnection(userId, db);
   return {
     getState: () => getWhatsAppState(userId),
@@ -683,6 +708,7 @@ export function initWhatsApp(userId, db) {
 
 export function getOrInitWhatsApp(userId, db) {
   const inst = getInstance(userId);
+  inst.db = db;
 
   const savedSessionExists = hasSavedSession(userId);
   const reconnectIsStale = isReconnectStale(userId, db);
@@ -904,6 +930,7 @@ export function autoReconnectAll(db) {
 async function startConnection(userId, db, options = {}) {
   const inst = getInstance(userId);
   const force = options.force === true;
+  if (db) inst.db = db;
 
   // If stuck connecting for >90s, force-reset the lock (reduced from 2min)
   if (inst.isConnecting && !force) {

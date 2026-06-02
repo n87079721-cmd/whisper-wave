@@ -57,7 +57,7 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
     setPairingCode(null);
     setPairingError(null);
     try {
-      if (status === 'disconnected') { await api.reconnect(); await new Promise(r => setTimeout(r, 2000)); }
+      // Backend handles starting / waiting for the browser session itself.
       const result = await api.pairPhone(phoneNumber.trim());
       const nextCode = String(result?.code || '').trim();
       if (nextCode) {
