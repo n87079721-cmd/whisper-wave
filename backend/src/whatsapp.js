@@ -927,6 +927,7 @@ export function autoReconnectAll(db) {
 async function startConnection(userId, db, options = {}) {
   const inst = getInstance(userId);
   const force = options.force === true;
+  if (db) inst.db = db;
 
   // If stuck connecting for >90s, force-reset the lock (reduced from 2min)
   if (inst.isConnecting && !force) {
