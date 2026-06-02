@@ -1869,6 +1869,10 @@ async function syncChats(userId, db, { force = false } = {}) {
     let messageCount = 0;
     let skippedChats = 0;
 
+    // Track which JIDs WhatsApp still knows about so we can prune
+    // local contacts/chats that were deleted on the phone.
+    const liveJids = new Set();
+
     // Sort chats by most recent activity first
     const sortedChats = chats.sort((a, b) => {
       const aTime = a.timestamp || 0;
@@ -1889,6 +1893,7 @@ async function syncChats(userId, db, { force = false } = {}) {
         try {
           const jid = toJid(chat.id._serialized);
           if (jid === 'status@broadcast') continue;
+          liveJids.add(jid);
           const phone = '+' + phoneFromJid(jid);
           const isGroup = chat.isGroup;
           const candidate = getNameCandidate({ name: chat.name, pushName: chat.name });
@@ -1902,14 +1907,18 @@ async function syncChats(userId, db, { force = false } = {}) {
             try {
               db.prepare("UPDATE contacts SET is_archived = 1 WHERE id = ? AND user_id = ?").run(contactId, userId);
             } catch {}
-          }
-
-          // Sync unread count
-          if (chat.unreadCount > 0) {
+          } else {
             try {
-              db.prepare("UPDATE contacts SET unread_count = ? WHERE id = ? AND user_id = ?").run(chat.unreadCount, contactId, userId);
+              db.prepare("UPDATE contacts SET is_archived = 0 WHERE id = ? AND user_id = ?").run(contactId, userId);
             } catch {}
           }
+
+          // Sync unread count — always mirror WhatsApp's value (including 0)
+          // so reading the chat on the phone clears the badge on the site too.
+          try {
+            const waUnread = Math.max(0, Number(chat.unreadCount) || 0);
+            db.prepare("UPDATE contacts SET unread_count = ? WHERE id = ? AND user_id = ?").run(waUnread, contactId, userId);
+          } catch {}
 
           // Check if we already have messages for this chat — skip if we do.
           // When `force` is set (manual Recovery Sync), always fetch a fresh slice
@@ -1988,6 +1997,32 @@ async function syncChats(userId, db, { force = false } = {}) {
     }
 
     console.log(`📇 [${userId}] Synced ${contactChanges} chats, ${messageCount} messages (${skippedChats} skipped - already synced)`);
+
+    // Prune local contacts that no longer exist on WhatsApp (deleted on phone).
+    // Only prune if we actually finished iterating all chats while still connected,
+    // so a partial sync never wipes data.
+    try {
+      if (inst.connectionStatus === 'connected' && liveJids.size > 0) {
+        const localContacts = db.prepare('SELECT id, jid FROM contacts WHERE user_id = ?').all(userId);
+        let pruned = 0;
+        for (const row of localContacts) {
+          if (!row.jid) continue;
+          if (liveJids.has(row.jid)) continue;
+          // Keep "temp-" / draft contacts and any non-WhatsApp internal rows
+          if (typeof row.jid !== 'string' || !row.jid.includes('@')) continue;
+          db.prepare('DELETE FROM messages WHERE contact_id = ? AND user_id = ?').run(row.id, userId);
+          db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(row.id, userId);
+          pruned++;
+        }
+        if (pruned > 0) {
+          console.log(`🧹 [${userId}] Pruned ${pruned} chat(s) deleted on WhatsApp`);
+          emit(userId, 'contacts_updated', { reason: 'chats_pruned', pruned });
+        }
+      }
+    } catch (err) {
+      console.error(`🧹 [${userId}] Chat prune failed:`, err?.message);
+    }
+
     const totalMessages = db.prepare('SELECT COUNT(*) as c FROM messages WHERE user_id = ?').get(userId)?.c || 0;
     const finalPhase = (contactChanges > 0 || inst.syncState.totalDbContacts > 0) && (totalMessages > 0 || skippedChats > 0)
       ? 'ready'
