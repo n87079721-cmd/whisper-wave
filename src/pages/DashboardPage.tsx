@@ -64,8 +64,7 @@ const DashboardPage = ({ onNavigateSettings, onNavigateConversations }: Dashboar
         setPairingCode(nextCode);
         toast.success('Pairing code generated!');
       } else {
-        await refresh();
-        toast.success('Pairing request sent — waiting for code...');
+        throw new Error('WhatsApp did not return a pairing code. Please try again or use the QR code.');
       }
     } catch (err: any) {
       const message = err?.message || 'Phone pairing failed';

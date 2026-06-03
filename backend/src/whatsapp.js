@@ -668,10 +668,54 @@ export async function requestPairingWithPhone(userId, phoneNumber) {
   }
 
   try {
+    // Pre-arm the page-side hook BEFORE calling requestPairingCode so the
+    // library's internal callback can store the code where we can read it
+    // even if the returned promise resolves with an empty/undefined value
+    // (a known issue on some Chromium/WA Web builds).
+    try {
+      const page = inst.client?.pupPage;
+      if (page) {
+        await page.evaluate(() => {
+          window._pairingCode = null;
+          const prev = typeof window.onCodeReceivedEvent === 'function' ? window.onCodeReceivedEvent : null;
+          window.onCodeReceivedEvent = (code) => {
+            window._pairingCode = code;
+            try { if (prev) prev(code); } catch {}
+          };
+        });
+      }
+    } catch (setupErr) {
+      console.warn(`[${userId}] Failed to expose onCodeReceivedEvent:`, setupErr?.message);
+    }
+
     const code = await inst.client.requestPairingCode(cleaned);
-    inst.pairingCode = code;
-    emit(userId, 'pairing_code', { code });
-    return code;
+    let finalCode = (typeof code === 'string' ? code : '').trim();
+
+    // Some Chromium/WA Web builds resolve with empty/undefined even though
+    // the code was delivered to the page-side hook. Poll for it briefly.
+    if (!finalCode) {
+      const page = inst.client?.pupPage;
+      const pollDeadline = Date.now() + 12_000;
+      while (page && Date.now() < pollDeadline) {
+        try {
+          const pageCode = await page.evaluate(() => window._pairingCode || null);
+          if (pageCode && String(pageCode).trim()) {
+            finalCode = String(pageCode).trim();
+            break;
+          }
+        } catch {}
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+
+    if (!finalCode) {
+      inst.pairingCode = null;
+      throw new Error('WhatsApp did not return a pairing code. Please use the QR code, or disconnect and try phone linking again.');
+    }
+
+    inst.pairingCode = finalCode;
+    emit(userId, 'pairing_code', { code: finalCode });
+    return finalCode;
   } catch (err) {
     inst.pairingCode = null;
     const rawMessage = String(err?.message || err || 'Unknown error').trim();

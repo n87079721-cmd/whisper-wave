@@ -226,7 +226,7 @@ const VoiceStudioPage = () => {
 
   return (
     <>
-    <div className="space-y-4 sm:space-y-6 max-w-2xl">
+    <div className="space-y-4 sm:space-y-6 max-w-2xl pb-40 md:pb-6">
       <div>
         <h1 className="text-lg sm:text-2xl font-bold text-foreground">Voice Studio</h1>
         <p className="text-xs sm:text-sm text-muted-foreground mt-1">Generate realistic WhatsApp voice notes with ElevenLabs</p>
@@ -683,7 +683,7 @@ const VoiceStudioPage = () => {
                   <ChevronDown className="w-4 h-4 text-muted-foreground" />
                 </button>
                 {showContacts && (
-                  <div className="absolute z-10 mt-1 w-full bg-popover border border-border rounded-lg shadow-xl max-h-52 overflow-hidden flex flex-col">
+                  <div className="absolute z-20 bottom-full mb-1 left-0 right-0 w-full bg-popover border border-border rounded-lg shadow-xl max-h-60 overflow-hidden flex flex-col">
                     <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
                       <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                       <input
@@ -732,7 +732,7 @@ const VoiceStudioPage = () => {
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <button
                 onClick={handleSendVoice}
                 disabled={!selectedContact || sending}
@@ -743,7 +743,7 @@ const VoiceStudioPage = () => {
               </button>
               <button
                 onClick={() => setAudioUrl(null)}
-                className="px-4 py-2.5 rounded-lg bg-muted text-muted-foreground text-sm hover:bg-muted/80 transition-colors"
+                className="px-4 py-2.5 rounded-lg bg-muted text-muted-foreground text-sm hover:bg-muted/80 transition-colors sm:w-auto w-full"
               >
                 Discard
               </button>
