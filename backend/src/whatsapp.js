@@ -3730,6 +3730,13 @@ async function sendMediaMessage(userId, jid, payload) {
 }
 
 async function sendVoiceNote(userId, jid, audioBuffer) {
+  if (!audioBuffer || audioBuffer.length < 256) {
+    throw new Error('Voice note audio is empty or too short — try recording again.');
+  }
+  const inst = getInstance(userId);
+  if (!inst.client || inst.connectionStatus !== 'connected') {
+    throw new Error('WhatsApp is not connected yet — wait until the session is fully ready, then try again.');
+  }
   try {
     const result = await sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
       const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
