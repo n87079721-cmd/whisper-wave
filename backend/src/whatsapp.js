@@ -2834,7 +2834,7 @@ function setManualReplyMute(userId, jid, db, overrideMs = null) {
     expiresAt = Date.now() + overrideMs;
     minutes = Math.round(overrideMs / 60_000);
   } else {
-    minutes = Math.max(0, Math.min(120, parseInt(getConfigValue(db, userId, 'ai_manual_mute_minutes', '5'), 10) || 0));
+    minutes = Math.max(0, Math.min(120, parseInt(getConfigValue(db, userId, 'ai_manual_mute_minutes', '0'), 10) || 0));
     if (minutes <= 0) return; // feature disabled
     expiresAt = Date.now() + minutes * 60_000;
   }
