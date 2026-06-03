@@ -27,7 +27,7 @@ const AiReplyTuning = () => {
   const [responseSpeed, setResponseSpeed] = useState('normal');
   const [questionStreakThreshold, setQuestionStreakThreshold] = useState(3);
   const [questionCooldownLength, setQuestionCooldownLength] = useState(2);
-  const [manualMuteMinutes, setManualMuteMinutes] = useState(0);
+  const [manualMuteMinutes, setManualMuteMinutes] = useState(5);
 
   useEffect(() => {
     Promise.allSettled([
@@ -36,7 +36,7 @@ const AiReplyTuning = () => {
       api.getConfig('ai_response_speed').then(d => { if (d.exists) setResponseSpeed(d.value || 'normal'); }),
       api.getConfig('ai_question_streak_threshold').then(d => { if (d.exists) setQuestionStreakThreshold(parseInt(d.value || '3', 10)); }),
       api.getConfig('ai_question_cooldown_length').then(d => { if (d.exists) setQuestionCooldownLength(parseInt(d.value || '2', 10)); }),
-      api.getConfig('ai_manual_mute_minutes').then(d => { if (d.exists) setManualMuteMinutes(parseInt(d.value || '0', 10)); }),
+      api.getConfig('ai_manual_mute_minutes').then(d => { if (d.exists) setManualMuteMinutes(parseInt(d.value || '5', 10)); }),
     ]).finally(() => setLoaded(true));
   }, []);
 

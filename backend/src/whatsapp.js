@@ -1802,29 +1802,6 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
       `).get(userId, safePhone, isGroup ? 1 : 0)
     : null;
 
-  // Name-based dedup: when the same real contact arrives via @lid (no phone)
-  // and via @s.whatsapp.net (with phone), merge them into a single row keyed
-  // off the @s.whatsapp.net variant. We only match on the real saved name,
-  // never on placeholder labels like "WhatsApp contact • 1234".
-  const candidateName = candidate?.name ? String(candidate.name).trim() : '';
-  const isPlaceholderName = (n) => {
-    const v = String(n || '').trim();
-    if (!v) return true;
-    if (v.includes('@')) return true;
-    if (/^\+?\d{6,}$/.test(v.replace(/\s+/g, ''))) return true;
-    if (v.toLowerCase().startsWith('whatsapp contact')) return true;
-    return false;
-  };
-  const nameMatch = (!phoneMatch && !existing && candidateName && !isPlaceholderName(candidateName))
-    ? db.prepare(`
-        SELECT id, jid, name, phone
-        FROM contacts
-        WHERE user_id = ? AND is_group = ? AND LOWER(TRIM(name)) = LOWER(?)
-        ORDER BY (CASE WHEN jid LIKE '%@s.whatsapp.net' THEN 0 ELSE 1 END), updated_at DESC
-        LIMIT 1
-      `).get(userId, isGroup ? 1 : 0, candidateName)
-    : null;
-
   const resolvedName = candidate?.name || phone || formatUnresolvedContactName(jid, null);
   let target = existing;
 
@@ -1842,10 +1819,6 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
     mergeContactRecords(db, userId, phoneMatch.id, existing.id, jid);
   } else if (!existing && phoneMatch) {
     target = phoneMatch;
-  } else if (!existing && nameMatch) {
-    // Same real person, different JID variant — fold the new arrival into
-    // the canonical row (the @s.whatsapp.net one, by ORDER BY above).
-    target = nameMatch;
   }
 
   if (target) {
@@ -1853,20 +1826,12 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
     const shouldUpdateName = shouldReplaceName(candidate, target.name, comparisonPhone);
     const nextName = shouldUpdateName ? resolvedName : target.name;
 
-    // Preserve a real @s.whatsapp.net JID when the incoming variant is an @lid.
-    // Without this, name-based merging would overwrite the canonical phone JID
-    // with the LID and break later sends.
-    const targetIsCanonical = String(target.jid || '').endsWith('@s.whatsapp.net');
-    const incomingIsLid = String(jid || '').endsWith('@lid');
-    const keepTargetJid = targetIsCanonical && incomingIsLid;
-    const nextJid = keepTargetJid ? target.jid : jid;
-
     db.prepare("UPDATE contacts SET jid = ?, name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = COALESCE(?, datetime('now')) WHERE id = ? AND user_id = ?")
-      .run(nextJid, nextName, safePhone, isGroup ? 1 : 0, activityAt, target.id, userId);
+      .run(jid, nextName, safePhone, isGroup ? 1 : 0, activityAt, target.id, userId);
 
-    if (target.jid !== nextJid) {
+    if (target.jid !== jid) {
       db.prepare('UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?')
-        .run(nextJid, target.id, userId);
+        .run(jid, target.id, userId);
     }
 
     return target.id;
@@ -2869,7 +2834,7 @@ function setManualReplyMute(userId, jid, db, overrideMs = null) {
     expiresAt = Date.now() + overrideMs;
     minutes = Math.round(overrideMs / 60_000);
   } else {
-    minutes = Math.max(0, Math.min(120, parseInt(getConfigValue(db, userId, 'ai_manual_mute_minutes', '0'), 10) || 0));
+    minutes = Math.max(0, Math.min(120, parseInt(getConfigValue(db, userId, 'ai_manual_mute_minutes', '5'), 10) || 0));
     if (minutes <= 0) return; // feature disabled
     expiresAt = Date.now() + minutes * 60_000;
   }
@@ -3120,7 +3085,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const messages = db.prepare(`
     SELECT content, direction, type, media_path FROM messages 
     WHERE contact_id = ? AND user_id = ? AND type IN ('text', 'image', 'voice') AND (content IS NOT NULL OR (type = 'image' AND media_path IS NOT NULL))
-    ORDER BY timestamp DESC LIMIT 150
+    ORDER BY timestamp DESC LIMIT 80
   `).all(contactId, userId).reverse();
 
   if (messages.length === 0) {
@@ -3443,34 +3408,6 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     return;
   }
 
-  // Hard cooldown enforcement: when the cooldown is active the reply MUST be
-  // question-free. If the model still snuck a `?` in (it often does despite
-  // the system instruction), rewrite it line-by-line into a statement. This
-  // is the only way to guarantee the cooldown is respected.
-  if (overQuestionBudget && /\?/.test(replyText)) {
-    const before = replyText;
-    replyText = replyText
-      .split('\n')
-      .map((line) => {
-        if (!line.includes('?')) return line;
-        // Drop pure question sentences; soften interrogative ones into statements.
-        const sentences = line.split(/(?<=[.!?])\s+/).filter((s) => !/\?/.test(s));
-        const rebuilt = sentences.join(' ').trim();
-        return rebuilt || line.replace(/\?+/g, '.').replace(/\s{2,}/g, ' ').trim();
-      })
-      .filter(Boolean)
-      .join('\n')
-      .replace(/\?+/g, '.')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-    if (!replyText) replyText = before.replace(/\?+/g, '.').trim();
-    debugLog(db, userId, 'question_cooldown_enforced', {
-      contact: contactName || phone,
-      before: before.slice(0, 100),
-      after: replyText.slice(0, 100),
-    });
-  }
-
   // Use REPLY length for delay (not incoming message length)
   const delay = calculateDelay(replyText.length, speed);
   // Typing duration scales with reply length: ~1s per 10 chars, min 2s, max 12s
@@ -3730,13 +3667,6 @@ async function sendMediaMessage(userId, jid, payload) {
 }
 
 async function sendVoiceNote(userId, jid, audioBuffer) {
-  if (!audioBuffer || audioBuffer.length < 256) {
-    throw new Error('Voice note audio is empty or too short — try recording again.');
-  }
-  const inst = getInstance(userId);
-  if (!inst.client || inst.connectionStatus !== 'connected') {
-    throw new Error('WhatsApp is not connected yet — wait until the session is fully ready, then try again.');
-  }
   try {
     const result = await sendToResolvedTarget(userId, jid, async ({ client, target, chat }) => {
       const media = new MessageMedia('audio/ogg; codecs=opus', audioBuffer.toString('base64'), 'voice.ogg');
