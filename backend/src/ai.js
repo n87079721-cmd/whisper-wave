@@ -520,9 +520,9 @@ Rules:
 - If a section has nothing new vs existing memory, write "none".
 - Keep each line tight. No extra commentary, no markdown, no headers other than Asked/Knows/Open.`,
         },
-        { role: 'user', content: convoText.slice(-4000) },
+        { role: 'user', content: convoText.slice(-12000) },
       ],
-      max_tokens: 700,
+      max_tokens: 1200,
       temperature: 0.3,
     }),
   });
