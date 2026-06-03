@@ -1036,8 +1036,23 @@ RULES:
       const { contactRow, targetJid } = resolveOutgoingTarget(req.userId, { contactId, jid });
 
       let sendResult;
-      sendResult = await wa.sendTextMessage(targetJid, message, { quotedMessageId });
+      try {
+        sendResult = await wa.sendTextMessage(targetJid, message, { quotedMessageId });
+      } catch (sendErr) {
+        // Surface a clear failure to the client instead of pretending the
+        // message was sent. Frontend toast will show this error.
+        return res.status(502).json({
+          error: sendErr?.message || 'WhatsApp send failed',
+          reason: 'send_failed',
+        });
+      }
       const msgId = getSentMessageId(sendResult);
+      if (!msgId) {
+        return res.status(502).json({
+          error: 'WhatsApp accepted the message but did not return a confirmation. Please try again.',
+          reason: 'no_message_id',
+        });
+      }
 
       // Get quoted message info for DB
       let replyToId = null, replyToContent = null, replyToSender = null;
