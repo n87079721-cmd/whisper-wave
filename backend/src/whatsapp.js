@@ -3408,6 +3408,34 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
     return;
   }
 
+  // Hard cooldown enforcement: when the cooldown is active the reply MUST be
+  // question-free. If the model still snuck a `?` in (it often does despite
+  // the system instruction), rewrite it line-by-line into a statement. This
+  // is the only way to guarantee the cooldown is respected.
+  if (overQuestionBudget && /\?/.test(replyText)) {
+    const before = replyText;
+    replyText = replyText
+      .split('\n')
+      .map((line) => {
+        if (!line.includes('?')) return line;
+        // Drop pure question sentences; soften interrogative ones into statements.
+        const sentences = line.split(/(?<=[.!?])\s+/).filter((s) => !/\?/.test(s));
+        const rebuilt = sentences.join(' ').trim();
+        return rebuilt || line.replace(/\?+/g, '.').replace(/\s{2,}/g, ' ').trim();
+      })
+      .filter(Boolean)
+      .join('\n')
+      .replace(/\?+/g, '.')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    if (!replyText) replyText = before.replace(/\?+/g, '.').trim();
+    debugLog(db, userId, 'question_cooldown_enforced', {
+      contact: contactName || phone,
+      before: before.slice(0, 100),
+      after: replyText.slice(0, 100),
+    });
+  }
+
   // Use REPLY length for delay (not incoming message length)
   const delay = calculateDelay(replyText.length, speed);
   // Typing duration scales with reply length: ~1s per 10 chars, min 2s, max 12s
