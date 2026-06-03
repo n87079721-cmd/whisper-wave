@@ -3085,7 +3085,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const messages = db.prepare(`
     SELECT content, direction, type, media_path FROM messages 
     WHERE contact_id = ? AND user_id = ? AND type IN ('text', 'image', 'voice') AND (content IS NOT NULL OR (type = 'image' AND media_path IS NOT NULL))
-    ORDER BY timestamp DESC LIMIT 80
+    ORDER BY timestamp DESC LIMIT 150
   `).all(contactId, userId).reverse();
 
   if (messages.length === 0) {
