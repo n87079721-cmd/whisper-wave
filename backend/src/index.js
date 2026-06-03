@@ -21,6 +21,20 @@ app.use(express.json({ limit: '25mb' }));
 // Initialize database
 const db = initDatabase();
 
+// One-time backfill: reset legacy default of 5 minutes on the manual-mute knob
+// to 0 so existing accounts behave the same as freshly-created ones. We only
+// touch rows still holding the legacy default; users who explicitly set a
+// value (including 5) by clicking the slider stay untouched.
+try {
+  const beforeRows = db.prepare("SELECT user_id FROM config WHERE key = 'ai_manual_mute_minutes' AND value = '5'").all();
+  if (beforeRows.length) {
+    db.prepare("DELETE FROM config WHERE key = 'ai_manual_mute_minutes' AND value = '5'").run();
+    console.log(`🧹 Cleared legacy ai_manual_mute_minutes='5' on ${beforeRows.length} account(s) — now defaults to 0`);
+  }
+} catch (err) {
+  console.warn('manual-mute backfill skipped:', err?.message);
+}
+
 // API routes (no longer needs wa — per-user instances created on demand)
 app.use('/api', createApiRouter(db));
 
