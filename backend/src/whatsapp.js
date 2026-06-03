@@ -1802,6 +1802,29 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
       `).get(userId, safePhone, isGroup ? 1 : 0)
     : null;
 
+  // Name-based dedup: when the same real contact arrives via @lid (no phone)
+  // and via @s.whatsapp.net (with phone), merge them into a single row keyed
+  // off the @s.whatsapp.net variant. We only match on the real saved name,
+  // never on placeholder labels like "WhatsApp contact • 1234".
+  const candidateName = candidate?.name ? String(candidate.name).trim() : '';
+  const isPlaceholderName = (n) => {
+    const v = String(n || '').trim();
+    if (!v) return true;
+    if (v.includes('@')) return true;
+    if (/^\+?\d{6,}$/.test(v.replace(/\s+/g, ''))) return true;
+    if (v.toLowerCase().startsWith('whatsapp contact')) return true;
+    return false;
+  };
+  const nameMatch = (!phoneMatch && !existing && candidateName && !isPlaceholderName(candidateName))
+    ? db.prepare(`
+        SELECT id, jid, name, phone
+        FROM contacts
+        WHERE user_id = ? AND is_group = ? AND LOWER(TRIM(name)) = LOWER(?)
+        ORDER BY (CASE WHEN jid LIKE '%@s.whatsapp.net' THEN 0 ELSE 1 END), updated_at DESC
+        LIMIT 1
+      `).get(userId, isGroup ? 1 : 0, candidateName)
+    : null;
+
   const resolvedName = candidate?.name || phone || formatUnresolvedContactName(jid, null);
   let target = existing;
 
@@ -1819,6 +1842,10 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
     mergeContactRecords(db, userId, phoneMatch.id, existing.id, jid);
   } else if (!existing && phoneMatch) {
     target = phoneMatch;
+  } else if (!existing && nameMatch) {
+    // Same real person, different JID variant — fold the new arrival into
+    // the canonical row (the @s.whatsapp.net one, by ORDER BY above).
+    target = nameMatch;
   }
 
   if (target) {
