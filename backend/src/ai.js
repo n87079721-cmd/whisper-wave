@@ -568,9 +568,9 @@ Open (current): <unresolved items only, or "none">
 
 Respond with ONLY the compacted memory, nothing else.`,
         },
-        { role: 'user', content: memory.slice(-16000) },
+        { role: 'user', content: memory.slice(-32000) },
       ],
-      max_tokens: 1400,
+      max_tokens: 2400,
       temperature: 0.2,
     }),
   });
