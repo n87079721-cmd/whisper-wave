@@ -285,6 +285,18 @@ async function sendToResolvedTarget(userId, jid, executor) {
     throw new Error('WhatsApp not connected');
   }
 
+  try {
+    const state = typeof inst.client.getState === 'function' ? await inst.client.getState() : 'CONNECTED';
+    if (state !== 'CONNECTED') {
+      inst.connectionStatus = 'reconnecting';
+      emit(userId, 'status', { status: 'reconnecting' });
+      throw new Error(`WhatsApp not ready (${state || 'unknown'})`);
+    }
+  } catch (err) {
+    if (String(err?.message || err).startsWith('WhatsApp not ready')) throw err;
+    throw new Error('WhatsApp connection is not ready. Reconnect and try again.');
+  }
+
   const targets = await resolveSendTargets(inst.client, jid);
 
   // If jid is @lid, also try the phone number from contacts DB
@@ -315,7 +327,9 @@ async function sendToResolvedTarget(userId, jid, executor) {
   for (const target of targets) {
     try {
       const chat = await inst.client.getChatById(target);
-      return await executor({ client: inst.client, target, chat });
+      const result = await executor({ client: inst.client, target, chat });
+      if (!result?.id?._serialized && !result?.id?.id && !result?.key?.id) throw new Error('WhatsApp did not confirm delivery');
+      return result;
     } catch (err) {
       lastError = err;
     }
@@ -324,14 +338,18 @@ async function sendToResolvedTarget(userId, jid, executor) {
       if (typeof inst.client.getContactById === 'function') {
         await inst.client.getContactById(target);
         const chat = await inst.client.getChatById(target);
-        return await executor({ client: inst.client, target, chat });
+        const result = await executor({ client: inst.client, target, chat });
+        if (!result?.id?._serialized && !result?.id?.id && !result?.key?.id) throw new Error('WhatsApp did not confirm delivery');
+        return result;
       }
     } catch (err) {
       lastError = lastError || err;
     }
 
     try {
-      return await executor({ client: inst.client, target, chat: null });
+      const result = await executor({ client: inst.client, target, chat: null });
+      if (!result?.id?._serialized && !result?.id?.id && !result?.key?.id) throw new Error('WhatsApp did not confirm delivery');
+      return result;
     } catch (err) {
       lastError = lastError || err;
     }
@@ -349,12 +367,24 @@ function normalizeContactPhone(value) {
   return digits ? `+${digits}` : null;
 }
 
+function phoneDigits(value) {
+  return String(value || '').replace(/[^0-9]/g, '');
+}
+
+function isLikelySyntheticLidPhone(jid, phone) {
+  if (!String(jid || '').endsWith('@lid')) return false;
+  const jidDigits = phoneDigits(phoneFromJid(jid));
+  const phoneOnly = phoneDigits(phone);
+  return !phoneOnly || phoneOnly === jidDigits;
+}
+
 function getCanonicalPhoneCandidate(jid, phone) {
   if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return null;
+  if (jid.endsWith('@lid') && isLikelySyntheticLidPhone(jid, phone)) return null;
   const normalizedPhone = normalizeContactPhone(phone);
   if (normalizedPhone && !String(phone || '').includes('@')) return normalizedPhone;
   if (jid.endsWith('@s.whatsapp.net')) {
-    const digits = phoneFromJid(jid).replace(/[^0-9]/g, '');
+    const digits = phoneDigits(phoneFromJid(jid));
     return digits ? `+${digits}` : null;
   }
   return null;
