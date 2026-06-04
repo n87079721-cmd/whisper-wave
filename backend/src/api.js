@@ -479,7 +479,7 @@ export function createApiRouter(db) {
         const newId = uuid();
         const phone = normalizedPhone || (targetJid.endsWith('@lid') ? null : '+' + targetJid.replace(/@.*$/, ''));
         db.prepare(`
-          INSERT INTO contacts (id, user_id, jid, name, phone, is_group) VALUES (?, ?, ?, ?, ?, 0)
+          INSERT INTO contacts (id, user_id, jid, name, phone, is_group, has_chat) VALUES (?, ?, ?, ?, ?, 0, 1)
         `).run(newId, userId, targetJid, phone || 'WhatsApp contact', phone);
         contactRow = { id: newId, jid: targetJid, phone };
       }
@@ -908,9 +908,9 @@ RULES:
       SELECT c.*, rm.content as last_message, rm.type as last_type, rm.timestamp as last_timestamp,
              COALESCE(c.is_archived, 0) as is_archived, COALESCE(c.unread_count, 0) as unread_count
       FROM contacts c
-      INNER JOIN ranked_messages rm ON rm.contact_id = c.id AND rm.rn = 1
-      WHERE c.user_id = ? AND c.is_group = 0
-      ORDER BY rm.timestamp DESC
+      LEFT JOIN ranked_messages rm ON rm.contact_id = c.id AND rm.rn = 1
+      WHERE c.user_id = ? AND c.is_group = 0 AND (COALESCE(c.has_chat, 0) = 1 OR rm.id IS NOT NULL)
+      ORDER BY COALESCE(rm.timestamp, c.updated_at) DESC
     `).all(req.userId, req.userId);
     res.json(conversations);
   });
