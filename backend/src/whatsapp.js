@@ -1818,6 +1818,26 @@ function mergeContactRecords(db, userId, sourceContactId, targetContactId, targe
   db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(sourceContactId, userId);
 }
 
+function findMergeSiblingByName(db, userId, contactId, jid, candidateName, isGroup) {
+  const name = sanitizeName(candidateName);
+  if (!name || isGroup || isPhoneLikeName(name, phoneFromJid(jid))) return null;
+  const isLid = String(jid || '').endsWith('@lid');
+  return db.prepare(`
+    SELECT id, jid, name, phone
+    FROM contacts
+    WHERE user_id = ?
+      AND id != COALESCE(?, '')
+      AND is_group = 0
+      AND name = ?
+      AND (
+        (? = 1 AND jid LIKE '%@s.whatsapp.net')
+        OR (? = 0 AND jid LIKE '%@lid')
+      )
+    ORDER BY CASE WHEN jid LIKE '%@s.whatsapp.net' THEN 0 ELSE 1 END, updated_at DESC
+    LIMIT 1
+  `).get(userId, contactId || '', name, isLid ? 1 : 0, isLid ? 1 : 0);
+}
+
 function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, activityAt = null) {
   const safePhone = getCanonicalPhoneCandidate(jid, phone);
   const existing = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
@@ -1831,6 +1851,7 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
         LIMIT 1
       `).get(userId, safePhone, isGroup ? 1 : 0)
     : null;
+  const nameSibling = findMergeSiblingByName(db, userId, existing?.id, jid, candidate?.name, isGroup);
 
   const resolvedName = candidate?.name || phone || formatUnresolvedContactName(jid, null);
   let target = existing;
@@ -1847,8 +1868,16 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
     }
 
     mergeContactRecords(db, userId, phoneMatch.id, existing.id, jid);
+  } else if (existing && nameSibling && nameSibling.id !== existing.id) {
+    const targetKeepsPhoneJid = String(nameSibling.jid || '').endsWith('@s.whatsapp.net');
+    const targetRow = targetKeepsPhoneJid ? nameSibling : existing;
+    const sourceRow = targetKeepsPhoneJid ? existing : nameSibling;
+    mergeContactRecords(db, userId, sourceRow.id, targetRow.id, targetRow.jid);
+    target = targetRow;
   } else if (!existing && phoneMatch) {
     target = phoneMatch;
+  } else if (!existing && nameSibling) {
+    target = nameSibling;
   }
 
   if (target) {
