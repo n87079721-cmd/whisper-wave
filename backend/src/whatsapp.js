@@ -2003,8 +2003,9 @@ async function syncChats(userId, db, { force = false } = {}) {
           const phone = '+' + phoneFromJid(jid);
           const isGroup = chat.isGroup;
           const candidate = getNameCandidate({ name: chat.name, pushName: chat.name });
+          const activityAt = chat.timestamp ? new Date(chat.timestamp * 1000).toISOString() : null;
 
-          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
+          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup, activityAt);
           if (!contactId) continue;
           contactChanges++;
 
@@ -2029,8 +2030,12 @@ async function syncChats(userId, db, { force = false } = {}) {
           // Check if we already have messages for this chat — skip if we do.
           // When `force` is set (manual Recovery Sync), always fetch a fresh slice
           // to catch any messages received while offline.
-          const existingCount = db.prepare('SELECT COUNT(*) as c FROM messages WHERE contact_id = ? AND user_id = ?').get(contactId, userId)?.c || 0;
-          if (!force && existingCount >= MSG_LIMIT_PER_CHAT) {
+          const localState = db.prepare('SELECT COUNT(*) as c, MAX(strftime(\'%s\', timestamp)) as last_ts FROM messages WHERE contact_id = ? AND user_id = ?').get(contactId, userId);
+          const existingCount = localState?.c || 0;
+          const latestLocalTs = Number(localState?.last_ts || 0);
+          const latestWaTs = Number(chat.timestamp || 0);
+          const chatHasNewerWaActivity = latestWaTs > latestLocalTs + 2;
+          if (!force && existingCount >= MSG_LIMIT_PER_CHAT && !chatHasNewerWaActivity) {
             skippedChats++;
             continue;
           }
