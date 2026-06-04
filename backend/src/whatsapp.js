@@ -1838,7 +1838,7 @@ function findMergeSiblingByName(db, userId, contactId, jid, candidateName, isGro
   `).get(userId, contactId || '', name, isLid ? 1 : 0, isLid ? 1 : 0);
 }
 
-function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, activityAt = null) {
+function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, activityAt = null, hasChat = false) {
   const safePhone = getCanonicalPhoneCandidate(jid, phone);
   const existing = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
 
@@ -1888,8 +1888,8 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
       ? target.jid
       : jid;
 
-    db.prepare("UPDATE contacts SET jid = ?, name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = COALESCE(?, datetime('now')) WHERE id = ? AND user_id = ?")
-      .run(nextJid, nextName, safePhone, isGroup ? 1 : 0, activityAt, target.id, userId);
+    db.prepare("UPDATE contacts SET jid = ?, name = ?, phone = COALESCE(?, phone), is_group = ?, has_chat = CASE WHEN ? THEN 1 ELSE COALESCE(has_chat, 0) END, updated_at = COALESCE(?, datetime('now')) WHERE id = ? AND user_id = ?")
+      .run(nextJid, nextName, safePhone, isGroup ? 1 : 0, hasChat ? 1 : 0, activityAt, target.id, userId);
 
     if (target.jid !== nextJid) {
       db.prepare('UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?')
@@ -1901,8 +1901,8 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
 
   const id = uuid();
   db.prepare(`
-    INSERT INTO contacts (id, user_id, jid, name, phone, is_group, updated_at) VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
-  `).run(id, userId, jid, resolvedName, safePhone, isGroup ? 1 : 0, activityAt);
+    INSERT INTO contacts (id, user_id, jid, name, phone, is_group, has_chat, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+  `).run(id, userId, jid, resolvedName, safePhone, isGroup ? 1 : 0, hasChat ? 1 : 0, activityAt);
   return id;
 }
 
