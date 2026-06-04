@@ -24,9 +24,79 @@ export function initDatabase() {
   }
 
   ensureCurrentTables(db);
+  normalizeAndMergeContacts(db);
   ensureIndexes(db);
 
   return db;
+}
+
+function normalizeAndMergeContacts(db) {
+  try {
+    const rows = db.prepare('SELECT id, user_id, jid, name, phone, is_group, updated_at FROM contacts').all();
+    const byId = new Map(rows.map(row => [row.id, { ...row }]));
+    const realName = (name) => {
+      const value = String(name || '').trim();
+      if (!value || value.includes('@')) return '';
+      const lower = value.toLowerCase();
+      if (lower.startsWith('whatsapp contact') || lower === 'unknown contact' || /^\+?\d{7,}$/.test(value.replace(/\s+/g, ''))) return '';
+      return lower;
+    };
+    const digitsOf = (value) => String(value || '').replace(/[^0-9]/g, '');
+    const preferred = (group) => [...group].sort((a, b) => {
+      const ap = String(a.jid || '').endsWith('@s.whatsapp.net') ? 1 : 0;
+      const bp = String(b.jid || '').endsWith('@s.whatsapp.net') ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
+    })[0];
+    const merge = (source, target) => {
+      if (!source || !target || source.id === target.id || !byId.has(source.id) || !byId.has(target.id)) return;
+      const targetJid = target.jid || source.jid;
+      const betterName = realName(target.name) ? target.name : source.name;
+      const targetPhone = digitsOf(target.phone) ? target.phone : source.phone;
+      db.prepare('UPDATE messages SET contact_id = ?, jid = ? WHERE contact_id = ? AND user_id = ?').run(target.id, targetJid, source.id, source.user_id);
+      db.prepare('UPDATE contacts SET name = COALESCE(?, name), phone = COALESCE(?, phone), updated_at = datetime(\'now\') WHERE id = ? AND user_id = ?').run(betterName || null, targetPhone || null, target.id, target.user_id);
+      db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(source.id, source.user_id);
+      byId.delete(source.id);
+      target.name = betterName || target.name;
+      target.phone = targetPhone || target.phone;
+    };
+
+    for (const row of rows) {
+      const digits = digitsOf(row.phone);
+      if (digits && row.phone !== `+${digits}`) {
+        db.prepare('UPDATE contacts SET phone = ? WHERE id = ? AND user_id = ?').run(`+${digits}`, row.id, row.user_id);
+        const cached = byId.get(row.id);
+        if (cached) cached.phone = `+${digits}`;
+      }
+    }
+
+    const groups = new Map();
+    for (const row of byId.values()) {
+      if (row.is_group) continue;
+      const digits = digitsOf(row.phone) || (String(row.jid || '').endsWith('@s.whatsapp.net') ? digitsOf(row.jid) : '');
+      if (digits) {
+        const key = `${row.user_id}:phone:${digits}`;
+        groups.set(key, [...(groups.get(key) || []), row]);
+      }
+      const nameKey = realName(row.name);
+      if (nameKey && (String(row.jid || '').endsWith('@lid') || String(row.jid || '').endsWith('@s.whatsapp.net'))) {
+        const key = `${row.user_id}:name:${nameKey}`;
+        groups.set(key, [...(groups.get(key) || []), row]);
+      }
+    }
+
+    for (const group of groups.values()) {
+      const active = group.filter(row => byId.has(row.id));
+      if (active.length < 2) continue;
+      const hasPhoneJid = active.some(row => String(row.jid || '').endsWith('@s.whatsapp.net'));
+      const hasLid = active.some(row => String(row.jid || '').endsWith('@lid'));
+      if (!hasPhoneJid && !hasLid) continue;
+      const target = preferred(active);
+      for (const source of active) merge(source, target);
+    }
+  } catch (err) {
+    console.warn('Contact dedupe skipped:', err?.message || err);
+  }
 }
 
 function ensureUsersTable(db) {
@@ -213,6 +283,19 @@ function ensureCurrentTables(db) {
     if (!cols.has('reply_language')) {
       db.exec("ALTER TABLE contacts ADD COLUMN reply_language TEXT DEFAULT NULL");
     }
+    if (!cols.has('has_chat')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN has_chat INTEGER DEFAULT 0");
+    }
+    db.exec(`
+      UPDATE contacts
+      SET has_chat = 1
+      WHERE has_chat != 1
+        AND EXISTS (
+          SELECT 1 FROM messages
+          WHERE messages.user_id = contacts.user_id
+            AND messages.contact_id = contacts.id
+        )
+    `);
   } catch {}
 
   try {

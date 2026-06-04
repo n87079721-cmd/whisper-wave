@@ -285,6 +285,18 @@ async function sendToResolvedTarget(userId, jid, executor) {
     throw new Error('WhatsApp not connected');
   }
 
+  try {
+    const state = typeof inst.client.getState === 'function' ? await inst.client.getState() : 'CONNECTED';
+    if (state !== 'CONNECTED') {
+      inst.connectionStatus = 'reconnecting';
+      emit(userId, 'status', { status: 'reconnecting' });
+      throw new Error(`WhatsApp not ready (${state || 'unknown'})`);
+    }
+  } catch (err) {
+    if (String(err?.message || err).startsWith('WhatsApp not ready')) throw err;
+    throw new Error('WhatsApp connection is not ready. Reconnect and try again.');
+  }
+
   const targets = await resolveSendTargets(inst.client, jid);
 
   // If jid is @lid, also try the phone number from contacts DB
@@ -315,7 +327,9 @@ async function sendToResolvedTarget(userId, jid, executor) {
   for (const target of targets) {
     try {
       const chat = await inst.client.getChatById(target);
-      return await executor({ client: inst.client, target, chat });
+      const result = await executor({ client: inst.client, target, chat });
+      if (!result?.id?._serialized && !result?.id?.id && !result?.key?.id) throw new Error('WhatsApp did not confirm delivery');
+      return result;
     } catch (err) {
       lastError = err;
     }
@@ -324,14 +338,18 @@ async function sendToResolvedTarget(userId, jid, executor) {
       if (typeof inst.client.getContactById === 'function') {
         await inst.client.getContactById(target);
         const chat = await inst.client.getChatById(target);
-        return await executor({ client: inst.client, target, chat });
+        const result = await executor({ client: inst.client, target, chat });
+        if (!result?.id?._serialized && !result?.id?.id && !result?.key?.id) throw new Error('WhatsApp did not confirm delivery');
+        return result;
       }
     } catch (err) {
       lastError = lastError || err;
     }
 
     try {
-      return await executor({ client: inst.client, target, chat: null });
+      const result = await executor({ client: inst.client, target, chat: null });
+      if (!result?.id?._serialized && !result?.id?.id && !result?.key?.id) throw new Error('WhatsApp did not confirm delivery');
+      return result;
     } catch (err) {
       lastError = lastError || err;
     }
@@ -349,12 +367,24 @@ function normalizeContactPhone(value) {
   return digits ? `+${digits}` : null;
 }
 
+function phoneDigits(value) {
+  return String(value || '').replace(/[^0-9]/g, '');
+}
+
+function isLikelySyntheticLidPhone(jid, phone) {
+  if (!String(jid || '').endsWith('@lid')) return false;
+  const jidDigits = phoneDigits(phoneFromJid(jid));
+  const phoneOnly = phoneDigits(phone);
+  return !phoneOnly || phoneOnly === jidDigits;
+}
+
 function getCanonicalPhoneCandidate(jid, phone) {
   if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return null;
+  if (jid.endsWith('@lid') && isLikelySyntheticLidPhone(jid, phone)) return null;
   const normalizedPhone = normalizeContactPhone(phone);
   if (normalizedPhone && !String(phone || '').includes('@')) return normalizedPhone;
   if (jid.endsWith('@s.whatsapp.net')) {
-    const digits = phoneFromJid(jid).replace(/[^0-9]/g, '');
+    const digits = phoneDigits(phoneFromJid(jid));
     return digits ? `+${digits}` : null;
   }
   return null;
@@ -1302,7 +1332,7 @@ async function startConnection(userId, db, options = {}) {
           } catch {}
         }
 
-        const contactId = getOrCreateContact(db, userId, resolvedJid, phone, candidate, isGroup);
+        const contactId = getOrCreateContact(db, userId, resolvedJid, phone, candidate, isGroup, null, true);
         if (!contactId) return;
 
         // Determine message type and content
@@ -1788,7 +1818,27 @@ function mergeContactRecords(db, userId, sourceContactId, targetContactId, targe
   db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(sourceContactId, userId);
 }
 
-function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, activityAt = null) {
+function findMergeSiblingByName(db, userId, contactId, jid, candidateName, isGroup) {
+  const name = sanitizeName(candidateName);
+  if (!name || isGroup || isPhoneLikeName(name, phoneFromJid(jid))) return null;
+  const isLid = String(jid || '').endsWith('@lid');
+  return db.prepare(`
+    SELECT id, jid, name, phone
+    FROM contacts
+    WHERE user_id = ?
+      AND id != COALESCE(?, '')
+      AND is_group = 0
+      AND name = ?
+      AND (
+        (? = 1 AND jid LIKE '%@s.whatsapp.net')
+        OR (? = 0 AND jid LIKE '%@lid')
+      )
+    ORDER BY CASE WHEN jid LIKE '%@s.whatsapp.net' THEN 0 ELSE 1 END, updated_at DESC
+    LIMIT 1
+  `).get(userId, contactId || '', name, isLid ? 1 : 0, isLid ? 1 : 0);
+}
+
+function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, activityAt = null, hasChat = false) {
   const safePhone = getCanonicalPhoneCandidate(jid, phone);
   const existing = db.prepare('SELECT id, jid, name, phone FROM contacts WHERE jid = ? AND user_id = ?').get(jid, userId);
 
@@ -1801,6 +1851,7 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
         LIMIT 1
       `).get(userId, safePhone, isGroup ? 1 : 0)
     : null;
+  const nameSibling = findMergeSiblingByName(db, userId, existing?.id, jid, candidate?.name, isGroup);
 
   const resolvedName = candidate?.name || phone || formatUnresolvedContactName(jid, null);
   let target = existing;
@@ -1817,21 +1868,32 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
     }
 
     mergeContactRecords(db, userId, phoneMatch.id, existing.id, jid);
+  } else if (existing && nameSibling && nameSibling.id !== existing.id) {
+    const targetKeepsPhoneJid = String(nameSibling.jid || '').endsWith('@s.whatsapp.net');
+    const targetRow = targetKeepsPhoneJid ? nameSibling : existing;
+    const sourceRow = targetKeepsPhoneJid ? existing : nameSibling;
+    mergeContactRecords(db, userId, sourceRow.id, targetRow.id, targetRow.jid);
+    target = targetRow;
   } else if (!existing && phoneMatch) {
     target = phoneMatch;
+  } else if (!existing && nameSibling) {
+    target = nameSibling;
   }
 
   if (target) {
     const comparisonPhone = safePhone || target.phone || '';
     const shouldUpdateName = shouldReplaceName(candidate, target.name, comparisonPhone);
     const nextName = shouldUpdateName ? resolvedName : target.name;
+    const nextJid = String(target.jid || '').endsWith('@s.whatsapp.net') && String(jid || '').endsWith('@lid')
+      ? target.jid
+      : jid;
 
-    db.prepare("UPDATE contacts SET jid = ?, name = ?, phone = COALESCE(?, phone), is_group = ?, updated_at = COALESCE(?, datetime('now')) WHERE id = ? AND user_id = ?")
-      .run(jid, nextName, safePhone, isGroup ? 1 : 0, activityAt, target.id, userId);
+    db.prepare("UPDATE contacts SET jid = ?, name = ?, phone = COALESCE(?, phone), is_group = ?, has_chat = CASE WHEN ? THEN 1 ELSE COALESCE(has_chat, 0) END, updated_at = COALESCE(?, datetime('now')) WHERE id = ? AND user_id = ?")
+      .run(nextJid, nextName, safePhone, isGroup ? 1 : 0, hasChat ? 1 : 0, activityAt, target.id, userId);
 
-    if (target.jid !== jid) {
+    if (target.jid !== nextJid) {
       db.prepare('UPDATE messages SET jid = ? WHERE contact_id = ? AND user_id = ?')
-        .run(jid, target.id, userId);
+        .run(nextJid, target.id, userId);
     }
 
     return target.id;
@@ -1839,8 +1901,8 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
 
   const id = uuid();
   db.prepare(`
-    INSERT INTO contacts (id, user_id, jid, name, phone, is_group, updated_at) VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
-  `).run(id, userId, jid, resolvedName, safePhone, isGroup ? 1 : 0, activityAt);
+    INSERT INTO contacts (id, user_id, jid, name, phone, is_group, has_chat, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+  `).run(id, userId, jid, resolvedName, safePhone, isGroup ? 1 : 0, hasChat ? 1 : 0, activityAt);
   return id;
 }
 
@@ -1941,8 +2003,9 @@ async function syncChats(userId, db, { force = false } = {}) {
           const phone = '+' + phoneFromJid(jid);
           const isGroup = chat.isGroup;
           const candidate = getNameCandidate({ name: chat.name, pushName: chat.name });
+          const activityAt = chat.timestamp ? new Date(chat.timestamp * 1000).toISOString() : null;
 
-          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
+          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup, activityAt, true);
           if (!contactId) continue;
           contactChanges++;
 
@@ -1967,8 +2030,12 @@ async function syncChats(userId, db, { force = false } = {}) {
           // Check if we already have messages for this chat — skip if we do.
           // When `force` is set (manual Recovery Sync), always fetch a fresh slice
           // to catch any messages received while offline.
-          const existingCount = db.prepare('SELECT COUNT(*) as c FROM messages WHERE contact_id = ? AND user_id = ?').get(contactId, userId)?.c || 0;
-          if (!force && existingCount >= MSG_LIMIT_PER_CHAT) {
+          const localState = db.prepare('SELECT COUNT(*) as c, MAX(strftime(\'%s\', timestamp)) as last_ts FROM messages WHERE contact_id = ? AND user_id = ?').get(contactId, userId);
+          const existingCount = localState?.c || 0;
+          const latestLocalTs = Number(localState?.last_ts || 0);
+          const latestWaTs = Number(chat.timestamp || 0);
+          const chatHasNewerWaActivity = latestWaTs > latestLocalTs + 2;
+          if (!force && existingCount >= MSG_LIMIT_PER_CHAT && !chatHasNewerWaActivity) {
             skippedChats++;
             continue;
           }
@@ -2834,7 +2901,7 @@ function setManualReplyMute(userId, jid, db, overrideMs = null) {
     expiresAt = Date.now() + overrideMs;
     minutes = Math.round(overrideMs / 60_000);
   } else {
-    minutes = Math.max(0, Math.min(120, parseInt(getConfigValue(db, userId, 'ai_manual_mute_minutes', '5'), 10) || 0));
+    minutes = Math.max(0, Math.min(120, parseInt(getConfigValue(db, userId, 'ai_manual_mute_minutes', '0'), 10) || 0));
     if (minutes <= 0) return; // feature disabled
     expiresAt = Date.now() + minutes * 60_000;
   }
@@ -3085,7 +3152,7 @@ async function executeAutoReply(userId, db, { contactId, jid, phone, contactName
   const messages = db.prepare(`
     SELECT content, direction, type, media_path FROM messages 
     WHERE contact_id = ? AND user_id = ? AND type IN ('text', 'image', 'voice') AND (content IS NOT NULL OR (type = 'image' AND media_path IS NOT NULL))
-    ORDER BY timestamp DESC LIMIT 80
+    ORDER BY timestamp DESC LIMIT 160
   `).all(contactId, userId).reverse();
 
   if (messages.length === 0) {
