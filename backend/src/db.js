@@ -283,6 +283,19 @@ function ensureCurrentTables(db) {
     if (!cols.has('reply_language')) {
       db.exec("ALTER TABLE contacts ADD COLUMN reply_language TEXT DEFAULT NULL");
     }
+    if (!cols.has('has_chat')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN has_chat INTEGER DEFAULT 0");
+    }
+    db.exec(`
+      UPDATE contacts
+      SET has_chat = 1
+      WHERE has_chat != 1
+        AND EXISTS (
+          SELECT 1 FROM messages
+          WHERE messages.user_id = contacts.user_id
+            AND messages.contact_id = contacts.id
+        )
+    `);
   } catch {}
 
   try {
