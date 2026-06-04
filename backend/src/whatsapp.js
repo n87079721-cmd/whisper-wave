@@ -1332,7 +1332,7 @@ async function startConnection(userId, db, options = {}) {
           } catch {}
         }
 
-        const contactId = getOrCreateContact(db, userId, resolvedJid, phone, candidate, isGroup);
+        const contactId = getOrCreateContact(db, userId, resolvedJid, phone, candidate, isGroup, null, true);
         if (!contactId) return;
 
         // Determine message type and content
@@ -2005,7 +2005,7 @@ async function syncChats(userId, db, { force = false } = {}) {
           const candidate = getNameCandidate({ name: chat.name, pushName: chat.name });
           const activityAt = chat.timestamp ? new Date(chat.timestamp * 1000).toISOString() : null;
 
-          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup, activityAt);
+          const contactId = getOrCreateContact(db, userId, jid, phone, candidate, isGroup, activityAt, true);
           if (!contactId) continue;
           contactChanges++;
 
