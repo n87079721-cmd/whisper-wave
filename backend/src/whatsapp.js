@@ -1920,24 +1920,7 @@ async function syncContacts(userId, db, options = {}) {
         if (!c.id?._serialized) continue;
         const jid = toJid(c.id._serialized);
         if (jid === 'status@broadcast') continue;
-        // For @lid contacts the JID digits are a synthetic serial, NOT a phone number.
-        // Prefer the resolved phone (c.number / pushname-derived) so contacts can be merged
-        // and displayed as real phone numbers instead of "Contact • 0132" placeholders.
-        let resolvedPhone = null;
-        if (typeof c.number === 'string' && c.number.replace(/\D/g, '').length >= 7) {
-          resolvedPhone = '+' + c.number.replace(/\D/g, '');
-        } else if (jid.endsWith('@s.whatsapp.net')) {
-          resolvedPhone = '+' + phoneFromJid(jid);
-        } else if (jid.endsWith('@lid')) {
-          // Try to look up real phone number via the library
-          try {
-            const lookup = await inst.client.getContactById(jid).catch(() => null);
-            if (lookup?.number && String(lookup.number).replace(/\D/g, '').length >= 7) {
-              resolvedPhone = '+' + String(lookup.number).replace(/\D/g, '');
-            }
-          } catch {}
-        }
-        const phone = resolvedPhone || (jid.endsWith('@s.whatsapp.net') ? '+' + phoneFromJid(jid) : null);
+        const phone = jid.endsWith('@s.whatsapp.net') ? '+' + phoneFromJid(jid) : null;
         const isGroup = c.isGroup || jid.endsWith('@g.us');
         const candidate = getNameCandidate({ name: c.name, pushName: c.pushname, notify: c.shortName, verifiedName: c.verifiedName });
         getOrCreateContact(db, userId, jid, phone, candidate, isGroup);
