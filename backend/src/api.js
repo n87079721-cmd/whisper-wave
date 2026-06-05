@@ -909,7 +909,7 @@ RULES:
              COALESCE(c.is_archived, 0) as is_archived, COALESCE(c.unread_count, 0) as unread_count
       FROM contacts c
       LEFT JOIN ranked_messages rm ON rm.contact_id = c.id AND rm.rn = 1
-      WHERE c.user_id = ? AND c.is_group = 0 AND (COALESCE(c.has_chat, 0) = 1 OR rm.id IS NOT NULL)
+      WHERE c.user_id = ? AND c.is_group = 0 AND rm.id IS NOT NULL
       ORDER BY COALESCE(rm.timestamp, c.updated_at) DESC
     `).all(req.userId, req.userId);
     res.json(conversations);
