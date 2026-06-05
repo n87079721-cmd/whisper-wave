@@ -1851,7 +1851,6 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
         LIMIT 1
       `).get(userId, safePhone, isGroup ? 1 : 0)
     : null;
-  const nameSibling = findMergeSiblingByName(db, userId, existing?.id, jid, candidate?.name, isGroup);
 
   const resolvedName = candidate?.name || phone || formatUnresolvedContactName(jid, null);
   let target = existing;
@@ -1868,16 +1867,8 @@ function getOrCreateContact(db, userId, jid, phone, candidate, isGroup = false, 
     }
 
     mergeContactRecords(db, userId, phoneMatch.id, existing.id, jid);
-  } else if (existing && nameSibling && nameSibling.id !== existing.id) {
-    const targetKeepsPhoneJid = String(nameSibling.jid || '').endsWith('@s.whatsapp.net');
-    const targetRow = targetKeepsPhoneJid ? nameSibling : existing;
-    const sourceRow = targetKeepsPhoneJid ? existing : nameSibling;
-    mergeContactRecords(db, userId, sourceRow.id, targetRow.id, targetRow.jid);
-    target = targetRow;
   } else if (!existing && phoneMatch) {
     target = phoneMatch;
-  } else if (!existing && nameSibling) {
-    target = nameSibling;
   }
 
   if (target) {
