@@ -2217,8 +2217,44 @@ export async function recoverSingleChat(userId, db, contactId) {
   console.log(`📜 [${userId}] On-demand history request for ${contact.jid}`);
 
   try {
-    const chat = await inst.client.getChatById(chatId);
-    const messages = await chat.fetchMessages({ limit: 100 });
+    // Try multiple JID variants — WA Web can fail with internal
+    // "waitForChatLoading" errors when the chat isn't loaded in Store yet
+    // (common for @lid chats or chats that were never opened on this session).
+    const candidates = [chatId];
+    if (chatId.endsWith('@lid')) {
+      candidates.push(chatId.replace('@lid', '@s.whatsapp.net'));
+    } else if (chatId.endsWith('@s.whatsapp.net')) {
+      candidates.push(chatId.replace('@s.whatsapp.net', '@c.us'));
+    }
+
+    let chat = null;
+    let lastErr = null;
+    for (const cid of candidates) {
+      try {
+        chat = await inst.client.getChatById(cid);
+        if (chat) break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (!chat) {
+      const msg = lastErr?.message || 'chat not found';
+      if (/waitForChatLoading|undefined/i.test(msg)) {
+        return { success: false, message: 'WhatsApp has not loaded this chat yet. Open it on your phone once, then try again.' };
+      }
+      return { success: false, message: `Failed to recover chat: ${msg}` };
+    }
+
+    let messages = [];
+    try {
+      messages = await chat.fetchMessages({ limit: 100 });
+    } catch (e) {
+      const msg = e?.message || String(e);
+      if (/waitForChatLoading|undefined/i.test(msg)) {
+        return { success: false, message: 'WhatsApp is still loading this chat. Open it on your phone once, then try again.' };
+      }
+      throw e;
+    }
 
     let count = 0;
     for (const msg of messages) {
